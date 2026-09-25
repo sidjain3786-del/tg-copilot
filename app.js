@@ -411,94 +411,97 @@ function renderLogImagePreview(){
 function renderLogTab(){
   const strategyOptions = allStrategies().map(p => `<option value="${esc(p.id)}" ${STATE.selectedPlaybookId===p.id?'selected':''}>${esc(p.name)}</option>`).join('');
   return `
-  <div class="card" style="max-width:42rem; margin:0 auto;">
-    <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--slate-100); padding-bottom:.75rem; margin-bottom:1rem;">
-      <h2 class="section-title">➕ Log Trade &amp; Chart Screenshot</h2>
+  <div class="card log-trade-card">
+    <div class="log-head">
+      <div>
+        <span class="uppercase-label" style="color:var(--indigo); margin-bottom:.15rem;">FAST JOURNAL</span>
+        <h2 class="section-title">➕ Log Trade</h2>
+        <p class="card-sub">Bas jo important hai woh bharo. Baaki optional hai.</p>
+      </div>
       <span class="xp-badge" id="log-xp-badge">+100 XP</span>
     </div>
+
     <form id="log-form">
-      <div class="field">
-        <label>Trade Type</label>
-        <div class="toggle-group">
-          <button type="button" class="toggle-btn ${STATE.logFormIsSetup?'active-green':''}" data-action="set-log-setup" data-value="true">🎯 Setup Rule Trade</button>
-          <button type="button" class="toggle-btn ${!STATE.logFormIsSetup?'active-red':''}" data-action="set-log-setup" data-value="false">🎲 Bina Setup (Tukke Baazi)</button>
+      <div class="log-step">
+        <div class="log-step-title"><span>1</span><strong>Trade basics</strong></div>
+        <div class="field grid-3 log-basic-grid">
+          <div><label>Symbol</label><input type="text" id="log-symbol" value="BTC/USDT" placeholder="XAUUSD, NIFTY..."></div>
+          <div><label>Direction</label><select id="log-type"><option value="LONG">LONG</option><option value="SHORT">SHORT</option></select></div>
+          <div><label>Quantity</label><input type="number" step="any" id="log-qty" placeholder="1"></div>
+        </div>
+        <div class="field grid-3 log-price-grid">
+          <div><label>Entry</label><input type="number" step="any" id="log-entry" placeholder="Actual entry"></div>
+          <div><label>Exit</label><input type="number" step="any" id="log-exit" placeholder="Actual exit"></div>
+          <div><label>SL <span class="optional-label">optional</span></label><input type="number" step="any" id="log-sl" placeholder="Stop loss"></div>
         </div>
       </div>
 
-      ${STATE.logFormIsSetup ? `<div class="field strategy-select-field" style="background:var(--indigo-light); border:1px solid #c7d2fe; border-radius:1rem; padding:.85rem;">
-        <label style="display:flex; justify-content:space-between; color:var(--indigo);"><span>🎯 Select Strategy</span><span style="font-size:.6rem; text-transform:none;">Playbook + My Strategies</span></label>
-        <select id="log-strategy-select" ${allStrategies().length ? '' : 'disabled'}>${allStrategies().length ? strategyOptions : '<option>No custom strategies yet</option>'}</select>
-        <p class="card-sub" style="margin:.4rem 0 0;">Ye strategy aapke Trade History mein save hogi.</p>
-      </div>` : ''}
-
-      <div class="field" style="background:var(--slate-50); border:1px solid var(--slate-200); border-radius:1rem; padding:.85rem;">
-        <label style="display:flex; justify-content:space-between;"><span>📸 Trade Screenshots</span><span style="color:var(--indigo);">Before + After</span></label>
-        <div class="grid-3" style="grid-template-columns:1fr 1fr;">
-          <label class="upload-box"><span>🟦</span><span style="font-size:.7rem; font-weight:700;">Before Entry</span><input type="file" id="log-before-image-file" accept="image/*" style="display:none;"></label>
-          <label class="upload-box"><span>🟩</span><span style="font-size:.7rem; font-weight:700;">After Exit</span><input type="file" id="log-after-image-file" accept="image/*" style="display:none;"></label>
+      <div class="log-step">
+        <div class="log-step-title"><span>2</span><strong>Was this a setup?</strong></div>
+        <div class="toggle-group log-setup-toggle">
+          <button type="button" class="toggle-btn ${STATE.logFormIsSetup?'active-green':''}" data-action="set-log-setup" data-value="true">🎯 Yes, setup trade</button>
+          <button type="button" class="toggle-btn ${!STATE.logFormIsSetup?'active-red':''}" data-action="set-log-setup" data-value="false">⚡ Quick trade</button>
         </div>
-        <div class="grid-3" style="grid-template-columns:1fr 1fr; margin-top:.5rem;">
-          <input type="url" id="log-before-image-url" placeholder="Before image URL...">
-          <input type="url" id="log-after-image-url" placeholder="After image URL...">
-        </div>
-        <div id="log-image-preview"></div>
+        ${STATE.logFormIsSetup ? `<div class="field strategy-select-field log-strategy-mini">
+          <label>🎯 Strategy</label>
+          <select id="log-strategy-select" ${allStrategies().length ? '' : 'disabled'}>${allStrategies().length ? strategyOptions : '<option>No strategy yet</option>'}</select>
+        </div>` : ''}
       </div>
 
-      <div class="field grid-3" style="grid-template-columns:1fr 1fr; background:var(--slate-50); border:1px solid var(--slate-200); border-radius:1rem; padding:.85rem;">
-        <div>
-          <label>Device</label>
-          <div class="toggle-group">
-            <button type="button" class="toggle-btn ${STATE.logFormDevice==='Laptop'?'active-indigo':''}" data-action="set-log-device" data-value="Laptop">💻 Laptop</button>
-            <button type="button" class="toggle-btn ${STATE.logFormDevice==='Mobile'?'active-red':''}" data-action="set-log-device" data-value="Mobile">📱 Mobile</button>
+      <details class="log-advanced">
+        <summary>🎯 Planned Trade <span>Optional — fill only if you had a pre-trade plan</span></summary>
+        <div class="log-advanced-body">
+          <div class="field grid-3">
+            <div><label>Planned Entry</label><input type="number" step="any" id="log-planned-entry" placeholder="Optional"></div>
+            <div><label>Planned SL</label><input type="number" step="any" id="log-planned-sl" placeholder="Optional"></div>
+            <div><label>Planned Target</label><input type="number" step="any" id="log-planned-tp" placeholder="Optional"></div>
+          </div>
+          <p class="card-sub">Blank chhodoge to actual Entry/SL ko planned maana jayega.</p>
+        </div>
+      </details>
+
+      <details class="log-advanced">
+        <summary>📸 Screenshots <span>Optional — before &amp; after chart</span></summary>
+        <div class="log-advanced-body">
+          <div class="grid-3 log-shot-grid" style="grid-template-columns:1fr 1fr;">
+            <label class="upload-box"><span>🟦</span><span>Before Entry</span><input type="file" id="log-before-image-file" accept="image/*" style="display:none;"></label>
+            <label class="upload-box"><span>🟩</span><span>After Exit</span><input type="file" id="log-after-image-file" accept="image/*" style="display:none;"></label>
+          </div>
+          <div class="grid-3" style="grid-template-columns:1fr 1fr; margin-top:.5rem;">
+            <input type="url" id="log-before-image-url" placeholder="Before image URL..."><input type="url" id="log-after-image-url" placeholder="After image URL...">
+          </div>
+          <div id="log-image-preview"></div>
+        </div>
+      </details>
+
+      <details class="log-advanced">
+        <summary>📝 Review <span>Mistake, quality &amp; notes</span></summary>
+        <div class="log-advanced-body">
+          <div class="field grid-3" style="grid-template-columns:1fr 1fr;">
+            <div><label>Mistake Tag</label><select id="log-mistake">${MISTAKE_OPTIONS.map(x=>`<option value="${x[0]}">${x[1]}</option>`).join('')}</select></div>
+            <div><label>Trade Quality</label><select id="log-quality"><option value="5">★★★★★ Excellent</option><option value="4">★★★★ Good</option><option value="3" selected>★★★ Average</option><option value="2">★★ Poor</option><option value="1">★ Rule Break</option></select></div>
+          </div>
+          <div class="field"><label>Notes</label><textarea id="log-notes" rows="2" placeholder="Kya sahi hua? Kya improve karna hai?"></textarea></div>
+        </div>
+      </details>
+
+      <details class="log-advanced">
+        <summary>⚙️ More details <span>Device &amp; location</span></summary>
+        <div class="log-advanced-body">
+          <div class="field grid-3" style="grid-template-columns:1fr 1fr; margin-bottom:0;">
+            <div><label>Device</label><div class="toggle-group"><button type="button" class="toggle-btn ${STATE.logFormDevice==='Laptop'?'active-indigo':''}" data-action="set-log-device" data-value="Laptop">💻 Laptop</button><button type="button" class="toggle-btn ${STATE.logFormDevice==='Mobile'?'active-red':''}" data-action="set-log-device" data-value="Mobile">📱 Mobile</button></div></div>
+            <div><label>Location</label><select id="log-location-select"><option value="Desk" ${STATE.logFormLocation==='Desk'?'selected':''}>🖥️ Trading Desk</option><option value="Couch / Bed" ${STATE.logFormLocation==='Couch / Bed'?'selected':''}>🛋️ Couch / Bed</option><option value="Random / On the Go" ${STATE.logFormLocation==='Random / On the Go'?'selected':''}>🚗 On the Go</option></select></div>
           </div>
         </div>
-        <div>
-          <label>Location</label>
-          <select id="log-location-select">
-            <option value="Desk" ${STATE.logFormLocation==='Desk'?'selected':''}>🖥️ Trading Desk</option>
-            <option value="Couch / Bed" ${STATE.logFormLocation==='Couch / Bed'?'selected':''}>🛋️ Couch / Bed</option>
-            <option value="Random / On the Go" ${STATE.logFormLocation==='Random / On the Go'?'selected':''}>🚗 Random / On the Go</option>
-          </select>
-        </div>
-      </div>
+      </details>
 
-      <div class="field grid-3" style="grid-template-columns:1fr 1fr;">
-        <div><label>Symbol</label><input type="text" id="log-symbol" value="BTC/USDT"></div>
-        <div><label>Direction</label><select id="log-type"><option value="LONG">LONG</option><option value="SHORT">SHORT</option></select></div>
+      <div class="log-save-row">
+        <span class="log-save-hint">⚡ 20 sec journal</span>
+        <button type="submit" class="btn-primary">Save Trade</button>
       </div>
-
-      <div class="field grid-3" style="grid-template-columns:repeat(3,1fr);">
-        <div><label>Entry ($)</label><input type="number" step="any" id="log-entry"></div>
-        <div><label>Exit ($)</label><input type="number" step="any" id="log-exit"></div>
-        <div><label>Quantity</label><input type="number" step="any" id="log-qty"></div>
-      </div>
-      <div class="field grid-3" style="grid-template-columns:1fr 1fr;">
-        <div><label>Stop Loss ($)</label><input type="number" step="any" id="log-sl"></div>
-        <div><label>Take Profit ($)</label><input type="number" step="any" id="log-tp"></div>
-      </div>
-
-      <div class="field" style="background:var(--indigo-light); border:1px solid #c7d2fe; border-radius:1rem; padding:.85rem;">
-        <label style="color:var(--indigo);">🎯 Planned Trade</label>
-        <div class="grid-3" style="grid-template-columns:repeat(3,1fr);">
-          <div><label>Planned Entry</label><input type="number" step="any" id="log-planned-entry"></div>
-          <div><label>Planned SL</label><input type="number" step="any" id="log-planned-sl"></div>
-          <div><label>Planned Target</label><input type="number" step="any" id="log-planned-tp"></div>
-        </div>
-        <p class="card-sub" style="margin:.45rem 0 0;">Agar blank chhoda to actual values ko planned maana jayega.</p>
-      </div>
-
-      <div class="field grid-3" style="grid-template-columns:1fr 1fr;">
-        <div><label>🧠 Mistake Tag</label><select id="log-mistake">${MISTAKE_OPTIONS.map(x=>`<option value="${x[0]}">${x[1]}</option>`).join('')}</select></div>
-        <div><label>Trade Quality</label><select id="log-quality"><option value="5">★★★★★ Excellent Process</option><option value="4">★★★★ Good Process</option><option value="3" selected>★★★ Average</option><option value="2">★★ Poor Process</option><option value="1">★ Rule Break</option></select></div>
-      </div>
-
-      <div class="field"><label>Notes &amp; Review</label><textarea id="log-notes" rows="2" placeholder="Trade ke baad kya seekha? Kya plan follow hua? Kya improve karna hai?"></textarea></div>
-
-      <button type="submit" class="btn-primary btn-block">Save Trade Log</button>
     </form>
   </div>`;
 }
-
 /* ---------------- Notes tab ---------------- */
 function renderNoteImagePreview(){
   const box = $('#note-image-preview');
