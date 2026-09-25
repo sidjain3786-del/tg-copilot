@@ -293,121 +293,86 @@ function renderTabNav(){
 
 /* ---------------- Co-Pilot tab ---------------- */
 function renderCopilotTab(){
-  const score = computeBattery();
-  const tl = computeTrafficLight(score);
-  const strategy = findStrategy(STATE.selectedPlaybookId);
-  const learnings = STATE.notes.filter(n=>n.learning);
-
-  const barColor = score>=70 ? '#059669' : score>=40 ? '#d97706' : '#e11d48';
-  const bannerColors = { green:['#ecfdf5','#a7f3d0','#065f46'], yellow:['#fffbeb','#fde68a','#78350f'], red:['#fff1f2','#fecdd3','#881337'] }[tl.cls];
+  const trades = [...STATE.trades].sort((a,b)=>new Date(a.createdAt||a.date||0)-new Date(b.createdAt||b.date||0));
+  const total = trades.length;
+  const wins = trades.filter(t => Number(t.pnl||0) > 0).length;
+  const losses = trades.filter(t => Number(t.pnl||0) < 0).length;
+  const pnl = trades.reduce((a,t)=>a+(Number(t.pnl)||0),0);
+  const avgR = total ? trades.reduce((a,t)=>a+(Number(t.rr)||0),0)/total : 0;
+  const followed = trades.filter(t=>t.followedPlan).length;
+  const ruleRate = total ? Math.round(followed/total*100) : 0;
+  const avgQuality = total ? trades.reduce((a,t)=>a+(Number(t.quality)||0),0)/total : 0;
+  const best = total ? Math.max(...trades.map(t=>Number(t.pnl)||0)) : 0;
+  const worst = total ? Math.min(...trades.map(t=>Number(t.pnl)||0)) : 0;
+  const recent = [...trades].reverse().slice(0,6);
+  const perf = strategyPerformance().slice(0,6);
+  const mistakes = {};
+  trades.forEach(t => { const k=t.mistake||'none'; mistakes[k]=(mistakes[k]||0)+1; });
+  const topMistakes = Object.entries(mistakes).filter(([k])=>k!=='none').sort((a,b)=>b[1]-a[1]).slice(0,4);
+  let running=0;
+  const curve = trades.map(t=>{ running += Number(t.pnl)||0; return running; });
+  const curveMin = curve.length ? Math.min(0,...curve) : 0;
+  const curveMax = curve.length ? Math.max(0,...curve) : 1;
+  const curveRange = Math.max(1, curveMax-curveMin);
+  const curveSvg = curve.length >= 1 ? (()=>{
+    const w=700,h=190,pad=18;
+    const pts=curve.map((v,i)=>{
+      const x=pad+(curve.length===1?(w-2*pad)/2:i*(w-2*pad)/Math.max(1,curve.length-1));
+      const y=h-pad-((v-curveMin)/curveRange)*(h-2*pad);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+    const zeroY=h-pad-((0-curveMin)/curveRange)*(h-2*pad);
+    return `<svg class="equity-chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Equity curve"><line x1="${pad}" y1="${zeroY.toFixed(1)}" x2="${w-pad}" y2="${zeroY.toFixed(1)}" class="equity-zero"></line><polyline points="${pts}" class="equity-line" fill="none"></polyline></svg>`;
+  })() : '<div class="dashboard-empty-chart">Save a few trades to see your equity curve.</div>';
 
   return `
-  <div class="card">
-    <div class="battery-row">
-      <div>
-        <h2 class="section-title">🔋 Dimaag Ka Battery Gauge</h2>
-        <p class="card-sub">Check mental readiness before opening live market charts.</p>
-      </div>
-      <div class="battery-readout">
-        <div class="battery-bar-track"><div class="battery-bar-fill" id="battery-bar" style="width:${score}%; background:${barColor}"></div></div>
-        <span class="mono" id="battery-percent" style="font-size:1.2rem; font-weight:800; color:${barColor}">${score}%</span>
-      </div>
+  <section class="dashboard-hero card">
+    <div>
+      <span class="uppercase-label" style="color:var(--indigo);">TRADING JOURNAL DASHBOARD</span>
+      <h2 class="section-title" style="font-size:1.35rem;margin:.2rem 0 .35rem;">Your trading, in numbers.</h2>
+      <p class="card-sub">Yahan sirf woh data hai jo tumhari trading improve karne mein directly help karega.</p>
+    </div>
+    <button class="btn-primary" data-action="set-tab" data-tab="log">＋ Log New Trade</button>
+  </section>
+
+  <div class="dashboard-kpis">
+    <div class="card dashboard-kpi"><span class="uppercase-label">Total Trades</span><strong>${total}</strong><small>${wins} wins · ${losses} losses</small></div>
+    <div class="card dashboard-kpi"><span class="uppercase-label">Net P&amp;L</span><strong class="${pnl>=0?'positive':'negative'}">${money(pnl)}</strong><small>All recorded trades</small></div>
+    <div class="card dashboard-kpi"><span class="uppercase-label">Win Rate</span><strong>${total?Math.round(wins/total*100):0}%</strong><small>${wins} profitable trades</small></div>
+    <div class="card dashboard-kpi"><span class="uppercase-label">Average R</span><strong>${avgR.toFixed(2)}R</strong><small>Per trade</small></div>
+    <div class="card dashboard-kpi"><span class="uppercase-label">Rule Following</span><strong>${ruleRate}%</strong><small>${followed}/${total||0} trades followed plan</small></div>
+    <div class="card dashboard-kpi"><span class="uppercase-label">Avg Quality</span><strong>${avgQuality.toFixed(1)}/5</strong><small>Self-rated execution</small></div>
+  </div>
+
+  <div class="grid-2 dashboard-main-grid">
+    <div class="card">
+      <div class="dashboard-section-head"><div><span class="uppercase-label">PERFORMANCE</span><h3 class="section-title">Equity Curve</h3></div><span class="dashboard-stat-note">Best ${money(best)} · Worst ${money(worst)}</span></div>
+      ${curveSvg}
+      <div class="equity-footer"><span>Start $0</span><strong class="${pnl>=0?'positive':'negative'}">Current ${money(pnl)}</strong></div>
     </div>
 
-    <div class="grid-3" style="margin-top:1.25rem;">
-      <div style="background:var(--slate-50); border:1px solid var(--slate-200); border-radius:1rem; padding:1rem; grid-column: span 1;">
-        <span class="uppercase-label">Quick Readiness Sliders</span>
-        <div class="slider-block">
-          <label><span>Energy Level</span><span class="mono" id="energy-val">${STATE.energyLevel}%</span></label>
-          <input type="range" min="10" max="100" value="${STATE.energyLevel}" id="energy-slider">
-        </div>
-        <div class="slider-block" style="margin-top:.6rem;">
-          <label><span>Environment Chaos / Noise</span><span class="mono" id="noise-val">${STATE.noiseLevel}%</span></label>
-          <input type="range" min="0" max="100" value="${STATE.noiseLevel}" id="noise-slider">
-        </div>
-      </div>
-      <div style="grid-column: span 2;">
-        <span class="uppercase-label">Abhi Kaisa Feel Ho Raha Hai?</span>
-        <div class="mindset-grid">
-          ${MINDSET_ARCHETYPES.map(m => `
-            <div class="mindset-card ${STATE.selectedMindsetId===m.id?'selected':''}" data-action="select-mindset" data-id="${m.id}">
-              <div style="display:flex; justify-content:space-between;"><span class="mindset-emoji">${m.emoji}</span><span class="mono" style="font-size:.6rem; font-weight:700;">${m.battery}%</span></div>
-              <p class="mindset-name">${m.name}</p>
-              <p class="mindset-desc">${m.desc}</p>
-            </div>`).join('')}
-        </div>
-      </div>
-    </div>
-
-    <div class="traffic-banner" id="traffic-banner" style="background:${bannerColors[0]}; border-color:${bannerColors[1]}; color:${bannerColors[2]}">
-      <div><strong id="traffic-title">${tl.title}</strong> <span style="font-size:.72rem;" id="traffic-msg">— ${tl.msg}</span></div>
-      <button data-action="record-state" class="btn-primary" style="background:var(--slate-900); font-size:.6rem; padding:.45rem .8rem;">Record State</button>
+    <div class="card">
+      <div class="dashboard-section-head"><div><span class="uppercase-label">STRATEGIES</span><h3 class="section-title">Strategy Performance</h3></div><button class="btn-secondary btn-small" data-action="set-tab" data-tab="history">View History</button></div>
+      ${perf.length ? `<div class="dashboard-table">${perf.map(g=>`<div class="dashboard-table-row"><div><strong>${esc(g.name)}</strong><small>${g.trades} trades · ${g.discipline}% rules</small></div><span>${g.winRate}% WR</span><strong class="${g.pnl>=0?'positive':'negative'}">${money(g.pnl)}</strong></div>`).join('')}</div>` : '<div class="dashboard-empty">Abhi strategy-wise data nahi hai. Notes → ADD STRATEGY se strategy banao, phir trade log mein select karo.</div>'}
     </div>
   </div>
 
-  ${learnings.length ? `
-  <div class="card">
-    <h3 class="section-title">📚 Apki Learnings — Trade Se Pehle Yaad Rakho</h3>
-    <p class="card-sub" style="margin-bottom:.75rem;">Apne Notes tab se saved seekh, taaki galti kum se kum ho.</p>
-    <div class="grid-3">
-      ${learnings.slice(0,6).map(n => `
-        <div style="background:var(--indigo-light); border:1px solid #c7d2fe; border-radius:1rem; padding:.85rem;">
-          <span style="font-size:.6rem; font-weight:700; color:var(--indigo); text-transform:uppercase;">${esc(n.symbol)}</span>
-          <p style="font-size:.72rem; color:#3730a3; font-weight:600; margin:.25rem 0 0;">${esc(n.learning)}</p>
-        </div>`).join('')}
-    </div>
-  </div>` : ''}
-
-  <div class="grid-2">
-    <div>
-      <div class="card">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; padding-bottom:.75rem; border-bottom:1px solid var(--slate-100); flex-wrap:wrap; gap:.5rem;">
-          <div><span class="uppercase-label" style="margin:0; color:var(--indigo);">Playbook Model</span><h3 style="margin:.1rem 0 0; font-size:.95rem; font-weight:800;">${esc(strategy.name)}</h3></div>
-          <select id="playbook-select" ${allStrategies().length ? '' : 'disabled'} style="background:var(--slate-50); border:1px solid var(--slate-200); border-radius:.75rem; padding:.4rem .7rem; font-size:.7rem; font-weight:700; color:var(--indigo);">
-            ${allStrategies().length ? allStrategies().map(p => `<option value="${esc(p.id)}" ${p.id===STATE.selectedPlaybookId?'selected':''}>${esc(p.name)}</option>`).join('') : '<option>No custom strategies yet</option>'}
-          </select>
-        </div>
-        <span class="uppercase-label">Pre-Flight Mandatory Rules</span>
-        ${strategy.mandatoryRules.length ? strategy.mandatoryRules.map((rule, idx) => `
-          <div class="rule-item ${STATE.checkedRules[idx]?'checked':''}" data-action="toggle-rule" data-idx="${idx}">
-            <div class="rule-check">${STATE.checkedRules[idx]?'✓':''}</div><span>${esc(rule)}</span>
-          </div>`).join('') : `<div class="empty-msg">Apni custom strategy banane ke liye <strong>Notes → ADD STRATEGY</strong> par jaiye. Yahan koi built-in ICT/Order Block/FVG playbook nahi hai.</div>`}
-      </div>
-
-      <div class="card">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; flex-wrap:wrap; gap:.5rem;">
-          <h3 class="section-title">👁️ Past Executions Inspection</h3>
-          <div style="display:flex; gap:.35rem; background:var(--slate-100); padding:.25rem; border-radius:1rem;">
-            <button data-action="set-inspection" data-value="winning" class="tab-btn ${STATE.inspectionTab==='winning'?'active':''}" style="${STATE.inspectionTab==='winning'?'background:var(--emerald);color:#fff;':''}">🟢 Winning</button>
-            <button data-action="set-inspection" data-value="losing" class="tab-btn ${STATE.inspectionTab==='losing'?'active':''}" style="${STATE.inspectionTab==='losing'?'background:var(--rose);color:#fff;':''}">🔴 Losing</button>
-          </div>
-        </div>
-        ${(() => {
-          const past = strategyPastExecutions(strategy.name);
-          const list = STATE.inspectionTab==='winning' ? past.winning : past.losing;
-          if (!list.length) return `<p class="empty-msg">Is strategy ke ${STATE.inspectionTab==='winning'?'winning':'losing'} past executions abhi nahi hain.</p>`;
-          return list.slice(0, 8).map(t => `
-            <div class="example-row">
-              <div style="min-width:0;"><div style="display:flex;gap:.45rem;align-items:center;flex-wrap:wrap;"><span style="font-weight:800; font-size:.75rem;">${esc(t.symbol)}</span><span class="journal-chip">${esc(t.type)}</span><span class="journal-chip">⭐ ${t.quality||3}/5</span></div><p style="font-size:.66rem; color:var(--slate-500); margin:.25rem 0 0;">Entry ${t.entryPrice ?? '—'} • Exit ${t.exitPrice ?? '—'} • ${esc(mistakeLabel(t.mistake||'none'))}</p></div>
-              <span class="mono" style="color:${Number(t.pnl)>=0?'var(--emerald)':'var(--rose)'}; font-weight:800; font-size:.72rem; white-space:nowrap;">${money(Number(t.pnl)||0)} (${t.rr ?? '—'}R)</span>
-            </div>`).join('');
-        })()}
-      </div>
+  <div class="grid-2 dashboard-main-grid">
+    <div class="card">
+      <div class="dashboard-section-head"><div><span class="uppercase-label">EXECUTION QUALITY</span><h3 class="section-title">Mistakes to Work On</h3></div></div>
+      ${topMistakes.length ? `<div class="mistake-bars">${topMistakes.map(([k,n])=>{const pct=Math.round(n/Math.max(1,total)*100); return `<div class="mistake-bar-row"><div><span>${esc(mistakeLabel(k))}</span><strong>${n}</strong></div><div class="mistake-track"><span style="width:${pct}%"></span></div></div>`}).join('')}</div>` : '<div class="dashboard-empty">No repeated mistake pattern yet. Keep logging honestly.</div>'}
+      <div class="dashboard-mini-stats"><div><span>Best Trade</span><strong class="positive">${money(best)}</strong></div><div><span>Worst Trade</span><strong class="negative">${money(worst)}</strong></div></div>
     </div>
 
-    <div>
-      <div class="card">
-        <h3 class="section-title" style="color:var(--rose);">🛑 Personal Traps To Avoid</h3>
-        ${strategy.commonTraps.map(t => `<div class="trap-item">• ${esc(t)}</div>`).join('')}
-      </div>
-      <div class="card">
-        <h3 class="section-title">Setup Win Rate</h3>
-        <div class="grid-3" style="grid-template-columns:1fr 1fr;">
-          <div style="background:var(--slate-50); border:1px solid var(--slate-200); border-radius:1rem; padding:.85rem;"><span class="uppercase-label" style="margin:0;">Win Rate</span><span class="mono" style="font-size:1.3rem; font-weight:800; color:var(--emerald);">${strategy.winRate}%</span></div>
-          <div style="background:var(--slate-50); border:1px solid var(--slate-200); border-radius:1rem; padding:.85rem;"><span class="uppercase-label" style="margin:0;">Avg R:R</span><span class="mono" style="font-size:1.3rem; font-weight:800; color:var(--indigo);">${strategy.avgRR}</span></div>
-        </div>
-      </div>
+    <div class="card">
+      <div class="dashboard-section-head"><div><span class="uppercase-label">RECENT ACTIVITY</span><h3 class="section-title">Latest Trades</h3></div><button class="btn-secondary btn-small" data-action="set-tab" data-tab="history">Open All</button></div>
+      ${recent.length ? `<div class="recent-trades">${recent.map(t=>`<div class="recent-trade-row"><div><strong>${esc(t.symbol||'—')}</strong><small>${esc(t.type||'—')} · ${esc(t.date||'')}</small></div><span class="recent-trade-result ${Number(t.pnl)>=0?'positive':'negative'}">${money(Number(t.pnl)||0)}</span></div>`).join('')}</div>` : '<div class="dashboard-empty">No trades yet. Your first logged trade will appear here.</div>'}
     </div>
+  </div>
+
+  <div class="card dashboard-insight">
+    <div><span class="uppercase-label">JOURNAL INSIGHT</span><h3 class="section-title">What should you improve?</h3></div>
+    <p>${!total ? 'Start by logging your trades. After 10–20 trades, this dashboard will reveal your real patterns.' : ruleRate < 70 ? `Your rule-following is ${ruleRate}%. Review the trades where you broke your plan before taking the next setup.` : avgR < 0 ? 'Your average R is negative. Review your losing trades and compare planned vs actual entries, exits and stop-losses.' : `Your current journal shows ${wins} wins from ${total} trades with ${ruleRate}% rule-following. Keep focusing on repeatable execution rather than individual outcomes.`}</p>
   </div>`;
 }
 
