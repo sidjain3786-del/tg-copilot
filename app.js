@@ -35,9 +35,9 @@ const STATE = {
   energyLevel: 85, noiseLevel: 15,
   selectedMindsetId: MINDSET_ARCHETYPES[0].id,
   logFormIsSetup: true, logFormDevice: 'Laptop', logFormLocation: 'Desk', logFormImage: '', logFormBeforeImage: '', logFormAfterImage: '', logFormImages: [],
-  logEmotion: '', logCustomEmotion: '', logConfidence: 70, editingTradeId: null,
+  logEmotion: '', logCustomEmotion: '', editingTradeId: null,
   noteFormStrategy: '', noteFormImage: '', activeNoteId: null,
-  historyStrategyFilter: 'ALL', historyMistakeFilter: 'ALL', historyView: localStorage.getItem('tc_history_view') || 'grid'
+  historyStrategyFilter: 'ALL', historyMistakeFilter: 'ALL', historyView: localStorage.getItem('tc_history_view') || 'grid', noteCategoryFilter: 'ALL'
 };
 
 /* ---------------- utils ---------------- */
@@ -276,15 +276,15 @@ const TABS = [
   {id:'copilot', label:'⚡ Live Execution Co-Pilot'},
   {id:'log', label:'📝 Log Trade & Chart Screenshot'},
   {id:'notes', label:'🧾 Notes & Learnings'},
-  {id:'reality', label:'📊 Reality Check & Device Impact'},
-  {id:'history', label:'📜 Trade History Log'}
+  {id:'history', label:'📜 Trade History Log'},
+  {id:'review', label:'🔎 Review & Leaks'}
 ];
 function renderTabNav(){
   $('#tab-nav').innerHTML = TABS.map(t =>
     `<button class="tab-btn ${STATE.activeTab===t.id?'active':''}" data-action="set-tab" data-tab="${t.id}">${t.label}</button>`
   ).join('');
-  const mobileIcons = {copilot:'⚡',log:'➕',notes:'🧠',reality:'📊',history:'📜'};
-  const mobileLabels = {copilot:'Co-Pilot',log:'Log Trade',notes:'Notes',reality:'Reality',history:'History'};
+  const mobileIcons = {copilot:'⚡',log:'➕',notes:'🧠',history:'📜',review:'🔎'};
+  const mobileLabels = {copilot:'Co-Pilot',log:'Log Trade',notes:'Notes',history:'History',review:'Review'};
   const mobile = $('#mobile-tab-nav');
   if (mobile) mobile.innerHTML = TABS.map(t =>
     `<button class="mobile-tab-btn ${STATE.activeTab===t.id?'active':''}" data-action="set-tab" data-tab="${t.id}"><span class="mobile-tab-icon">${mobileIcons[t.id]}</span><span>${mobileLabels[t.id]}</span></button>`
@@ -406,7 +406,7 @@ function captureLogDraft(){
     symbol:get('log-symbol'), type:get('log-type') || 'LONG', qty:get('log-qty'), entry:get('log-entry'), exit:get('log-exit'), sl:get('log-sl'),
     strategy:get('log-strategy-select'), plannedEntry:get('log-planned-entry'), plannedSL:get('log-planned-sl'), plannedTP:get('log-planned-tp'),
     imageUrl:get('log-image-url'), mistake:get('log-mistake'), quality:get('log-quality'), exitReason:get('log-exit-reason'), notes:get('log-notes'),
-    location:get('log-location-select'), customEmotion:get('log-custom-emotion'), confidence:get('log-confidence') || String(STATE.logConfidence || 70)
+    location:get('log-location-select'), customEmotion:get('log-custom-emotion')
   };
 }
 function restoreLogDraft(draft){
@@ -415,9 +415,6 @@ function restoreLogDraft(draft){
   set('log-symbol',draft.symbol); set('log-type',draft.type); set('log-qty',draft.qty); set('log-entry',draft.entry); set('log-exit',draft.exit); set('log-sl',draft.sl);
   set('log-strategy-select',draft.strategy); set('log-planned-entry',draft.plannedEntry); set('log-planned-sl',draft.plannedSL); set('log-planned-tp',draft.plannedTP);
   set('log-image-url',draft.imageUrl); set('log-mistake',draft.mistake); set('log-quality',draft.quality); set('log-exit-reason',draft.exitReason); set('log-notes',draft.notes); set('log-location-select',draft.location); set('log-custom-emotion',draft.customEmotion);
-  set('log-confidence',draft.confidence);
-  STATE.logConfidence = Number(draft.confidence)||70;
-  const cv=$('#log-confidence-val'); if(cv) cv.textContent=STATE.logConfidence+'/100';
 }
 function renderLogImagePreview(){
   const box = $('#log-image-preview');
@@ -458,6 +455,21 @@ function renderLogTab(){
           <div><label>Exit <span class="optional-label">optional</span></label><input type="number" step="any" id="log-exit" placeholder="Exit"></div>
           <div><label>SL <span class="optional-label">optional</span></label><input type="number" step="any" id="log-sl" placeholder="Stop loss"></div>
         </div>
+        <div class="field grid-2 fast-journal-top-fields">
+          <div><label>Exit Reason <span class="optional-label">optional</span></label><input type="text" id="log-exit-reason" placeholder="Target, SL, manual, time, news..."></div>
+          <div><label>Quick Note <span class="optional-label">optional</span></label><input type="text" id="log-notes" placeholder="Kya sahi hua? Kya improve karna hai?"></div>
+        </div>
+
+        <div class="fast-journal-emotion">
+          <div class="log-emotion-head"><div><div class="log-emotion-title">🧠 Emotion <span>* Required</span></div><div class="log-emotion-sub">Trade ke waqt actual state choose karo.</div></div>${STATE.logEmotion ? `<span class="emotion-selected-badge">✓ ${esc(STATE.logEmotion)}</span>` : '<span class="emotion-selected-badge empty">Select one</span>'}</div>
+          <div class="emotion-pills">${[['Calm','😌'],['Confident','💪'],['Neutral','😐'],['Anxious','😰'],['FOMO','🔥'],['Revenge / Tilt','😡'],['Overexcited','🚀'],['Tired','😴']].map(([name,emoji]) => `<button type="button" class="emotion-pill ${STATE.logEmotion===name?'selected':''}" data-action="set-log-emotion" data-value="${esc(name)}">${emoji} ${esc(name)}</button>`).join('')}</div>
+          <div class="custom-emotion-row"><label for="log-custom-emotion">Custom emotion <span>optional</span></label><input type="text" id="log-custom-emotion" value="${esc(STATE.logCustomEmotion)}" placeholder="e.g. bored, impatient..." maxlength="40">${STATE.logCustomEmotion ? `<button type="button" class="use-custom-emotion ${STATE.logEmotion===STATE.logCustomEmotion?'active':''}" data-action="use-custom-emotion">Use Custom</button>` : ''}</div>
+        </div>
+
+        <div class="fast-journal-screenshots"><div class="fast-shot-head"><div><strong>📸 Before & After</strong><span>Optional — chart screenshots</span></div></div><div class="before-after-grid">
+          <label class="shot-upload-card ${STATE.logFormBeforeImage?'has-image':''}"><div class="shot-label">BEFORE ENTRY</div>${STATE.logFormBeforeImage ? `<img src="${esc(STATE.logFormBeforeImage)}" alt="Before entry">` : `<div class="shot-placeholder">＋<small>Upload before entry</small></div>`}<input type="file" id="log-before-image-file" accept="image/*" style="display:none;"></label>
+          <label class="shot-upload-card ${STATE.logFormAfterImage?'has-image':''}"><div class="shot-label">AFTER EXIT</div>${STATE.logFormAfterImage ? `<img src="${esc(STATE.logFormAfterImage)}" alt="After exit">` : `<div class="shot-placeholder">＋<small>Upload after exit</small></div>`}<input type="file" id="log-after-image-file" accept="image/*" style="display:none;"></label>
+        </div><div class="image-url-add-row fast-extra-image"><input type="url" id="log-image-url" placeholder="Optional: paste another image URL..."><button type="button" class="btn-secondary" data-action="add-log-image-url">+ Add</button></div><div id="log-image-preview"></div></div>
       </div>
 
       <div class="log-step">
@@ -470,34 +482,6 @@ function renderLogTab(){
           <label>🎯 Strategy</label>
           <select id="log-strategy-select" ${allStrategies().length ? '' : 'disabled'}>${allStrategies().length ? strategyOptions : '<option>No strategy yet</option>'}</select>
         </div>` : ''}
-      </div>
-
-      <div class="log-emotion-required">
-        <div class="log-emotion-head">
-          <div>
-            <div class="log-emotion-title">🧠 How were you feeling? <span>* Required</span></div>
-            <div class="log-emotion-sub">Ek emotion choose karo — trade ke waqt tumhari actual state.</div>
-          </div>
-          ${STATE.logEmotion ? `<span class="emotion-selected-badge">✓ ${esc(STATE.logEmotion)}</span>` : '<span class="emotion-selected-badge empty">Select one</span>'}
-        </div>
-        <div class="emotion-pills">
-          ${[
-            ['Calm','😌'],['Confident','💪'],['Neutral','😐'],['Anxious','😰'],
-            ['FOMO','🔥'],['Revenge / Tilt','😡'],['Overexcited','🚀'],['Tired','😴']
-          ].map(([name,emoji]) => `<button type="button" class="emotion-pill ${STATE.logEmotion===name?'selected':''}" data-action="set-log-emotion" data-value="${esc(name)}">${emoji} ${esc(name)}</button>`).join('')}
-        </div>
-        <div class="emotion-confidence-row">
-          <div class="confidence-box">
-            <div class="confidence-head"><label>Confidence <span>*</span></label><strong id="log-confidence-val">${STATE.logConfidence}/100</strong></div>
-            <input type="range" id="log-confidence" min="1" max="100" value="${STATE.logConfidence}">
-            <div class="confidence-scale"><span>1</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
-          </div>
-          <div class="custom-emotion-row">
-            <label for="log-custom-emotion">Custom emotion <span>optional</span></label>
-            <input type="text" id="log-custom-emotion" value="${esc(STATE.logCustomEmotion)}" placeholder="e.g. bored, impatient, stressed..." maxlength="40">
-            ${STATE.logCustomEmotion ? `<button type="button" class="use-custom-emotion ${STATE.logEmotion===STATE.logCustomEmotion?'active':''}" data-action="use-custom-emotion">Use Custom</button>` : ''}
-          </div>
-        </div>
       </div>
 
       <details class="log-advanced">
@@ -513,22 +497,12 @@ function renderLogTab(){
       </details>
 
       <details class="log-advanced">
-        <summary>📸 Screenshots &amp; Images <span>Optional — add as many as you want</span></summary>
-        <div class="log-advanced-body">
-          <label class="upload-box multi-upload-box"><span>📸</span><span>Add multiple screenshots / images</span><small>PNG, JPG, WebP • multiple files allowed</small><input type="file" id="log-multi-image-file" accept="image/*" multiple style="display:none;"></label>
-          <div class="image-url-add-row"><input type="url" id="log-image-url" placeholder="Paste image URL..."><button type="button" class="btn-secondary" data-action="add-log-image-url">+ Add</button></div>
-          <div id="log-image-preview"></div>
-        </div>
-      </details>
-
-      <details class="log-advanced">
         <summary>📝 Review <span>Mistake, quality &amp; notes</span></summary>
         <div class="log-advanced-body">
           <div class="field grid-3" style="grid-template-columns:1fr 1fr;">
             <div><label>Mistake Tag</label><select id="log-mistake">${MISTAKE_OPTIONS.map(x=>`<option value="${x[0]}">${x[1]}</option>`).join('')}</select></div>
             <div><label>Trade Quality</label><select id="log-quality"><option value="5">★★★★★ Excellent</option><option value="4">★★★★ Good</option><option value="3" selected>★★★ Average</option><option value="2">★★ Poor</option><option value="1">★ Rule Break</option></select></div>
           </div>
-          <div class="field grid-2"><div><label>Exit Reason <span class="optional-label">optional</span></label><input type="text" id="log-exit-reason" placeholder="Target, SL, manual, time, news..."></div><div><label>Quick Note <span class="optional-label">optional</span></label><input type="text" id="log-notes" placeholder="Kya sahi hua? Kya improve karna hai?"></div></div>
         </div>
       </details>
 
@@ -591,10 +565,52 @@ function renderStrategyBuilder(){
     </div>`;
 }
 
+
+function noteCategory(n){ return n.category || (n.ruleText ? 'rule' : n.strategy ? 'strategy' : 'observation'); }
+const NOTE_CATEGORIES = [['ALL','All'],['concept','Concepts'],['strategy','Strategies'],['mistake','Mistakes'],['rule','My Rules'],['observation','Observations'],['review','Reviews']];
+function filteredNotes(){
+  if (STATE.noteCategoryFilter==='ALL') return STATE.notes || [];
+  return (STATE.notes || []).filter(n => noteCategory(n)===STATE.noteCategoryFilter);
+}
+function tradingLeaks(){
+  const trades=STATE.trades||[];
+  const map={};
+  trades.forEach(t=>{ const k=t.mistake||'none'; if(k==='none') return; if(!map[k]) map[k]={key:k,count:0,pnl:0,losses:0}; map[k].count++; map[k].pnl+=Number(t.pnl)||0; if((Number(t.pnl)||0)<0) map[k].losses++; });
+  return Object.values(map).sort((a,b)=>b.count-a.count || a.pnl-b.pnl);
+}
+function reviewInsight(){
+  const trades=STATE.trades||[]; const total=trades.length; if(!total) return {title:'Start with your first 10 trades',text:'Abhi prediction nahi — pehle enough journal data collect karo. Har trade mein emotion, mistake aur quick note honestly fill karo.'};
+  const leaks=tradingLeaks(); const top=leaks[0];
+  const followed=trades.filter(t=>t.isSetupTrade && (t.mistake||'none')==='none').length;
+  const setup=trades.filter(t=>t.isSetupTrade).length;
+  const rate=setup?Math.round(followed/setup*100):0;
+  if(top) return {title:`Your biggest journal leak: ${mistakeLabel(top.key)}`,text:`${top.count} trades tagged this way, ${top.losses} were losses, and their combined P&L is ${money(top.pnl)}. Review these trades before adding a new strategy.`};
+  return {title:`Process score: ${rate}% clean setup trades`,text:'Mistake-free execution is a stronger learning signal than any single winning trade. Keep collecting clean examples and turn repeated learnings into rules.'};
+}
+function renderReviewTab(){
+  const trades=STATE.trades||[], leaks=tradingLeaks(), s=computeStats(), insight=reviewInsight();
+  const setup=trades.filter(t=>t.isSetupTrade), clean=setup.filter(t=>(t.mistake||'none')==='none');
+  const preventable=trades.filter(t=>(Number(t.pnl)||0)<0 && (t.mistake||'none')!=='none');
+  const strategyRows=strategyPerformance().slice(0,6);
+  const week=trades.filter(t=>{const d=new Date(t.date||0); return Date.now()-d.getTime()<=7*86400000;});
+  return `<div class="review-page">
+    <div class="review-hero card"><div><span class="uppercase-label">SELF-COACHING</span><h2 class="section-title">🔎 Review &amp; Trading Leaks</h2><p class="card-sub">P&amp;L batata hai kya hua. Review batata hai kyun hua — aur next trade mein kya change karna hai.</p></div><div class="review-focus"><span>Next Focus</span><strong>${esc(insight.title)}</strong></div></div>
+    <div class="grid-3 review-kpis"><div class="stat-card"><span class="uppercase-label">7-Day Trades</span><p class="stat-value">${week.length}</p><p class="card-sub">Recent activity</p></div><div class="stat-card green"><span class="uppercase-label">Clean Setup Rate</span><p class="stat-value" style="color:var(--emerald);">${setup?Math.round(clean.length/setup*100):0}%</p><p class="card-sub">Setup trades without mistake tag</p></div><div class="stat-card red"><span class="uppercase-label">Preventable Losses</span><p class="stat-value" style="color:var(--rose);">${preventable.length}</p><p class="card-sub">Losses with a recorded mistake</p></div></div>
+    <div class="grid-3 review-main-grid">
+      <section class="card"><div class="dashboard-section-head"><div><span class="uppercase-label">LEAKS</span><h3 class="section-title">Where do you lose discipline?</h3></div></div>${leaks.length?`<div class="leak-list">${leaks.map(x=>`<div class="leak-row"><div><strong>${esc(mistakeLabel(x.key))}</strong><small>${x.count} trades · ${x.losses} losses</small></div><strong class="mono ${x.pnl>=0?'positive':'negative'}">${money(x.pnl)}</strong></div>`).join('')}</div>`:'<div class="dashboard-empty">No mistake pattern yet. Honest tagging will reveal one.</div>'}</section>
+      <section class="card"><div class="dashboard-section-head"><div><span class="uppercase-label">PROCESS</span><h3 class="section-title">Your execution check</h3></div></div><div class="review-check-list"><div><span>Setup trades</span><strong>${setup.length}</strong></div><div><span>Clean setup trades</span><strong>${clean.length}</strong></div><div><span>Rule-following rate</span><strong>${s.ruleRate||0}%</strong></div><div><span>Bad-loss count</span><strong>${preventable.length}</strong></div></div><div class="review-insight"><span>💡 Insight</span><p>${esc(insight.text)}</p></div></section>
+    </div>
+    <section class="card"><div class="dashboard-section-head"><div><span class="uppercase-label">STRATEGY CHECK</span><h3 class="section-title">What should you study?</h3></div></div>${strategyRows.length?`<div class="review-strategy-list">${strategyRows.map(g=>`<div class="review-strategy-row"><div><strong>${esc(g.name)}</strong><small>${g.trades} trades · ${g.winRate}% WR</small></div><span class="mono ${g.pnl>=0?'positive':'negative'}">${money(g.pnl)}</span></div>`).join('')}</div>`:'<div class="dashboard-empty">Create a strategy in Notes and tag it on setup trades.</div>'}</section>
+    <section class="card review-plan-card"><div><span class="uppercase-label">NEXT SESSION</span><h3 class="section-title">3 questions before your next trade</h3></div><div class="review-questions"><div>01 <strong>Is this actually one of my setups?</strong></div><div>02 <strong>What would invalidate this idea?</strong></div><div>03 <strong>If I lose, will I still call this a good process trade?</strong></div></div></section>
+  </div>`;
+}
+
 function renderNotesTab(){
   const strategyObjects = allStrategies();
   const strategyOptions = strategyObjects.map(p => `<option value="${esc(p.name)}" ${STATE.noteFormStrategy===p.name?'selected':''}>${esc(p.name)}</option>`).join('');
-  const notes = STATE.notes || [];
+  const notes = filteredNotes();
+  const allNotes = STATE.notes || [];
+  const ruleNotes = allNotes.filter(n=>n.ruleText || noteCategory(n)==='rule');
   if (!STATE.activeNoteId || !notes.some(n => n.id === STATE.activeNoteId)) STATE.activeNoteId = notes[0]?.id || null;
   const active = notes.find(n => n.id === STATE.activeNoteId) || null;
 
@@ -617,7 +633,7 @@ function renderNotesTab(){
       </div>` : ''}
 
       ${active.analysis ? `<section class="note-reading-section"><div class="note-reading-label">MY ANALYSIS</div><p>${esc(active.analysis)}</p></section>` : ''}
-      ${active.learning ? `<section class="note-reading-learning"><div class="note-reading-label">✦ WHAT I LEARNED</div><p>${esc(active.learning)}</p></section>` : ''}
+      ${active.learning ? `<section class="note-reading-learning"><div class="note-reading-label">✦ WHAT I LEARNED</div><p>${esc(active.learning)}</p>${active.ruleText ? `<div class="note-rule-box"><span>⚡ ACTIONABLE RULE</span><p>${esc(active.ruleText)}</p></div>` : `<button type="button" class="btn-secondary note-rule-btn" data-action="turn-note-into-rule" data-id="${active.id}">⚡ Turn this learning into a rule</button>`}</section>` : ''}
     </article>` : `
     <div class="note-reading-empty">
       <div class="note-reading-empty-icon">📝</div>
@@ -640,6 +656,7 @@ function renderNotesTab(){
       </div>
       <form id="notes-form">
         <div class="field"><label>Title / Symbol / Tag</label><input type="text" id="note-symbol" placeholder="e.g. XAUUSD — London Liquidity Review"></div>
+        <div class="field grid-2"><div><label>Note Type</label><select id="note-category"><option value="concept">Concept</option><option value="strategy">Strategy</option><option value="mistake">Mistake</option><option value="rule">My Rule</option><option value="observation">Market Observation</option><option value="review">Review</option></select></div><div><label>Actionable Rule <span>(optional)</span></label><input type="text" id="note-rule" placeholder="e.g. Confirmation ke bina entry nahi"></div></div>
 
         <div class="field">
           <label>Strategy</label>
@@ -668,6 +685,8 @@ function renderNotesTab(){
       </form>
     </div>
 
+    <div class="notes-category-bar"><div class="notes-category-tabs">${NOTE_CATEGORIES.map(([id,label])=>`<button type="button" class="note-category-btn ${STATE.noteCategoryFilter===id?'active':''}" data-action="note-category" data-category="${id}">${label}</button>`).join('')}</div><span class="notes-filter-count">${notes.length}/${allNotes.length}</span></div>
+    ${ruleNotes.length ? `<div class="my-rules-strip"><div><span class="uppercase-label">MY RULES</span><strong>Rules extracted from your own journal</strong></div><div class="my-rules-mini">${ruleNotes.slice(0,4).map(n=>`<span>⚡ ${esc(n.ruleText || n.learning || n.title || n.symbol)}</span>`).join('')}</div></div>` : ''}
     <div class="notes-reading-header">
       <div>
         <span class="uppercase-label">YOUR JOURNAL</span>
@@ -727,7 +746,7 @@ function renderTradeView(t, mode){
   const pnl=Number(t.pnl)||0, rr=t.rr ?? '—';
   const resultClass=pnl>=0?'positive':'negative';
   const meta=`${esc(t.symbol||'—')} • ${esc(t.type||'—')}`;
-  const chips=`<div class="history-chips"><span class="journal-chip">🧠 ${esc(t.emotion||'—')}</span><span class="journal-chip">🎯 ${Number(t.confidence)||0}/100</span><span class="journal-chip">📝 ${esc(mistakeLabel(t.mistake||'none'))}</span><span class="journal-chip">⭐ ${t.quality||3}/5</span></div>`;
+  const chips=`<div class="history-chips"><span class="journal-chip">🧠 ${esc(t.emotion||'—')}</span><span class="journal-chip">📝 ${esc(mistakeLabel(t.mistake||'none'))}</span><span class="journal-chip">⭐ ${t.quality||3}/5</span></div>`;
   const actions=`<button type="button" class="btn-secondary trade-edit-btn" data-action="edit-trade" data-id="${esc(t.id)}">✏️ Edit</button>`;
   const shots = imgs.length ? `<div class="history-images">${imgs.map((src,i)=>`<div class="history-image"><img src="${esc(src)}" data-action="view-image" data-src="${esc(src)}"><span>${i===0?'Before':i===1?'After':`Image ${i+1}`}</span></div>`).join('')}</div>` : `<div class="history-no-images">🖼 No screenshots</div>`;
   if(mode==='list') return `<div class="history-list-row"><div class="history-list-main"><div class="history-symbol">${meta}</div><span class="history-date">${esc(t.date||t.createdAt||'')}</span></div><div class="history-list-stat">${pv.pe??'—'} → ${t.exitPrice??'—'}</div><div class="history-list-stat">${esc(t.emotion||'—')}</div><div class="history-list-stat ${resultClass} mono">${money(pnl)}</div><div>${actions}</div></div>`;
@@ -737,16 +756,33 @@ function renderTradeView(t, mode){
 }
 function renderHistoryTab(){
   const all = STATE.trades;
-  if (!all.length) return `<p class="empty-msg">Abhi koi trade log nahi hai. "Log Trade" tab se apna pehla trade add karo.</p>`;
+  const s = computeStats();
+  const realityBlock = `
+    <section class="history-reality">
+      <div class="history-heading"><div><span class="uppercase-label">REALITY CHECK</span><h2 class="section-title">Trading Reality</h2><p class="card-sub">Rules-based trades aur random trades ka actual result yahin compare karo.</p></div></div>
+      <div class="grid-3 history-reality-grid">
+        <div class="stat-card green"><span class="reality-label">🎯 Rules Se Kamaya</span><p class="stat-value" style="color:var(--emerald);">${money(s.setupPnL)}</p><p class="card-sub">${s.setupCount} setup trades</p></div>
+        <div class="stat-card red"><span class="reality-label">🎲 Bina Setup</span><p class="stat-value" style="color:var(--rose);">${money(s.tukkaPnL)}</p><p class="card-sub">${s.tukkaCount} random trades</p></div>
+        <div class="stat-card"><span class="reality-label">📊 Net Reality</span><p class="stat-value ${s.setupPnL+s.tukkaPnL>=0?'positive':'negative'}">${money(s.setupPnL+s.tukkaPnL)}</p><p class="card-sub">All logged trades</p></div>
+      </div>
+      <div class="card history-device-card">
+        <div class="dashboard-section-head"><div><span class="uppercase-label">DEVICE IMPACT</span><h3 class="section-title">Where did you trade?</h3></div></div>
+        <div class="history-device-grid">
+          <div class="history-device-item"><div><strong>🖥️ Laptop @ Trading Desk</strong><p class="card-sub">${s.deskCount} trades</p></div><strong class="mono ${s.deskPnL>=0?'positive':'negative'}">${money(s.deskPnL)}</strong></div>
+          <div class="history-device-item"><div><strong>📱 Mobile @ Couch / Random</strong><p class="card-sub">${s.mobileCount} trades</p></div><strong class="mono ${s.mobilePnL>=0?'positive':'negative'}">${money(s.mobilePnL)}</strong></div>
+        </div>
+      </div>
+    </section>`;
+  if (!all.length) return realityBlock + `<p class="empty-msg">Abhi koi trade log nahi hai. "Log Trade" tab se apna pehla trade add karo.</p>`;
   const trades = filteredHistoryTrades();
   const perf = strategyPerformance();
   const strategyNames = [...new Set(all.map(tradeStrategyName))];
   const totalPnl = trades.reduce((a,t)=>a+(Number(t.pnl)||0),0);
   const wins = trades.filter(t=>(Number(t.pnl)||0)>0).length;
   const mode=STATE.historyView;
-  return `
+  return `${realityBlock}
   <div class="card journal-summary-card">
-    <div class="history-heading"><div><h2 class="section-title">📊 Trade History</h2><p class="card-sub">Apne trades ko jis tarah dekhna ho, wahi view choose karo.</p></div><div class="mono history-total ${totalPnl>=0?'positive':'negative'}">${money(totalPnl)}</div></div>
+    <div class="history-heading"><div><h2 class="section-title">📜 Trade History</h2><p class="card-sub">Apne trades ko jis tarah dekhna ho, wahi view choose karo.</p></div><div class="mono history-total ${totalPnl>=0?'positive':'negative'}">${money(totalPnl)}</div></div>
     <div class="grid-3 journal-kpis"><div><span class="uppercase-label">Trades</span><strong>${trades.length}</strong></div><div><span class="uppercase-label">Win Rate</span><strong>${trades.length?Math.round(wins/trades.length*100):0}%</strong></div><div><span class="uppercase-label">Avg Quality</span><strong>${trades.length?(trades.reduce((a,t)=>a+(Number(t.quality)||3),0)/trades.length).toFixed(1):'—'}/5</strong></div></div>
   </div>
   <div class="card history-toolbar"><div class="history-toolbar-title"><strong>View</strong><span>${mode==='grid'?'Compact cards':mode==='list'?'Quick rows':mode==='detailed'?'Full journal':'Screenshot focused'}</span></div><div class="history-view-switcher">${historyViewButton('grid','▦','Grid')}${historyViewButton('list','☰','List')}${historyViewButton('detailed','📖','Detailed')}${historyViewButton('gallery','🖼','Gallery')}</div></div>
@@ -763,8 +799,10 @@ function renderEditTradeModal(id){
     <div class="edit-modal-head"><div><span class="uppercase-label">UPDATE TRADE</span><h2 class="section-title">✏️ Edit ${esc(t.symbol)}</h2><p class="card-sub">Jo field change karna hai karo, phir Update Trade.</p></div><button type="button" class="modal-x" data-action="cancel-edit-trade">×</button></div>
     <div class="field grid-3"><div><label>Symbol</label><input id="edit-symbol" value="${esc(t.symbol)}"></div><div><label>Direction</label><select id="edit-type"><option ${t.type==='LONG'?'selected':''}>LONG</option><option ${t.type==='SHORT'?'selected':''}>SHORT</option></select></div><div><label>Quantity</label><input type="number" step="any" id="edit-qty" value="${t.quantity??''}"></div></div>
     <div class="field grid-3"><div><label>Entry</label><input type="number" step="any" id="edit-entry" value="${t.entryPrice??''}"></div><div><label>Exit</label><input type="number" step="any" id="edit-exit" value="${t.exitPrice??''}"></div><div><label>SL</label><input type="number" step="any" id="edit-sl" value="${t.stopLoss??''}"></div></div>
-    <div class="field grid-2"><div><label>Emotion</label><select id="edit-emotion">${presets.map(x=>`<option ${t.emotion===x?'selected':''}>${x}</option>`).join('')}<option ${!presets.includes(t.emotion)?'selected':''}>${esc(t.emotion||'Custom')}</option></select></div><div><label>Confidence</label><div class="edit-confidence"><input type="range" id="edit-confidence" min="1" max="100" value="${t.confidence||70}"><strong>${t.confidence||70}/100</strong></div></div></div>
-    <div class="field grid-2"><div><label>Exit Reason</label><input id="edit-exit-reason" value="${esc(t.exitReason||'')}" placeholder="Target / SL / manual / time..."></div><div><label>Images</label><div class="edit-images-list" id="edit-images-list">${imgs.map((src,i)=>`<div class="edit-image-item"><img src="${esc(src)}" data-src="${esc(src)}"><button type="button" data-action="remove-edit-image" data-index="${i}">×</button></div>`).join('')}<label class="edit-add-image">+ Add<input type="file" id="edit-multi-image-file" accept="image/*" multiple style="display:none"></label></div></div></div>
+    <div class="field"><label>Emotion</label><select id="edit-emotion">${presets.map(x=>`<option ${t.emotion===x?'selected':''}>${x}</option>`).join('')}<option ${!presets.includes(t.emotion)?'selected':''}>${esc(t.emotion||'Custom')}</option></select></div>
+    <div class="field grid-2"><div><label>Exit Reason</label><input id="edit-exit-reason" value="${esc(t.exitReason||'')}" placeholder="Target / SL / manual / time..."></div><div><label>Mistake</label><select id="edit-mistake">${MISTAKE_OPTIONS.map(x=>`<option value="${x[0]}" ${((t.mistake||'none')===x[0])?'selected':''}>${x[1]}</option>`).join('')}</select></div></div>
+    <div class="field grid-2"><div><label>Quick Note</label><textarea id="edit-notes" rows="3" placeholder="Kya sahi hua? Kya improve karna hai?">${esc(t.notes||'')}</textarea></div><div><label>Trade Quality</label><select id="edit-quality">${[['5','★★★★★ Excellent'],['4','★★★★ Good'],['3','★★★ Average'],['2','★★ Poor'],['1','★ Rule Break']].map(x=>`<option value="${x[0]}" ${String(t.quality||3)===x[0]?'selected':''}>${x[1]}</option>`).join('')}</select></div></div>
+    <div class="field"><label>Images</label><div class="edit-images-list" id="edit-images-list">${imgs.map((src,i)=>`<div class="edit-image-item"><img src="${esc(src)}" data-src="${src}"><button type="button" data-action="remove-edit-image" data-index="${i}">×</button></div>`).join('')}<label class="edit-add-image">+ Add<input type="file" id="edit-multi-image-file" accept="image/*" multiple style="display:none"></label></div></div>
     <div class="edit-modal-actions"><button type="button" class="btn-secondary" data-action="cancel-edit-trade">Cancel</button><button type="button" class="btn-primary" data-action="update-trade" data-id="${esc(id)}">💾 Update Trade</button></div>
   </div></div>`;
 }
@@ -777,16 +815,16 @@ function render(){
   if (STATE.activeTab==='copilot') content.innerHTML = renderCopilotTab();
   else if (STATE.activeTab==='log') { content.innerHTML = renderLogTab(); renderLogImagePreview(); updateLogPreview(); }
   else if (STATE.activeTab==='notes') { content.innerHTML = renderNotesTab(); renderNoteImagePreview(); }
-  else if (STATE.activeTab==='reality') content.innerHTML = renderRealityTab();
   else if (STATE.activeTab==='history') content.innerHTML = renderHistoryTab();
+  else if (STATE.activeTab==='review') content.innerHTML = renderReviewTab();
 }
 function renderTabOnly(){ // re-render just the active tab (after in-tab interactions)
   const content = $('#tab-content');
   if (STATE.activeTab==='copilot') content.innerHTML = renderCopilotTab();
   else if (STATE.activeTab==='log') { content.innerHTML = renderLogTab(); renderLogImagePreview(); updateLogPreview(); }
   else if (STATE.activeTab==='notes') { content.innerHTML = renderNotesTab(); renderNoteImagePreview(); }
-  else if (STATE.activeTab==='reality') content.innerHTML = renderRealityTab();
   else if (STATE.activeTab==='history') content.innerHTML = renderHistoryTab();
+  else if (STATE.activeTab==='review') content.innerHTML = renderReviewTab();
   renderTabNav();
 }
 
@@ -800,6 +838,11 @@ document.addEventListener('click', async (e) => {
   else if (action==='select-mindset') { STATE.selectedMindsetId = btn.dataset.id; renderTabOnly(); }
   else if (action==='toggle-rule') { const i=btn.dataset.idx; STATE.checkedRules[i]=!STATE.checkedRules[i]; renderTabOnly(); }
   else if (action==='set-inspection') { STATE.inspectionTab = btn.dataset.value; renderTabOnly(); }
+  else if (action==='note-category') { STATE.noteCategoryFilter = btn.dataset.category || 'ALL'; STATE.activeNoteId = filteredNotes()[0]?.id || null; renderTabOnly(); }
+  else if (action==='turn-note-into-rule') {
+    const n=STATE.notes.find(x=>x.id===btn.dataset.id);
+    if(n){ const rule=(n.ruleText||n.learning||n.analysis||'').trim(); if(rule){ n.ruleText=rule; n.category='rule'; await saveUserData(); renderTabOnly(); } }
+  }
   else if (action==='history-view') {
     const view = btn.dataset.view;
     if (['grid','list','detailed','gallery'].includes(view)) {
@@ -885,8 +928,6 @@ document.addEventListener('input', (e) => {
   else if (e.target.id==='log-before-image-url') { STATE.logFormBeforeImage = e.target.value; renderLogImagePreview(); updateLogPreview(); }
   else if (e.target.id==='log-after-image-url') { STATE.logFormAfterImage = e.target.value; renderLogImagePreview(); updateLogPreview(); }
   else if (e.target.id==='log-custom-emotion') { STATE.logCustomEmotion = e.target.value; }
-  else if (e.target.id==='log-confidence') { STATE.logConfidence = Number(e.target.value)||1; const v=$('#log-confidence-val'); if(v) v.textContent=STATE.logConfidence+'/100'; }
-  else if (e.target.id==='edit-confidence') { const box=e.target.closest('.edit-confidence'); const v=box?.querySelector('strong'); if(v) v.textContent=Number(e.target.value)+'/100'; }
   else if (e.target.id==='note-image-url') { STATE.noteFormImage = e.target.value; renderNoteImagePreview(); }
 });
 
@@ -920,7 +961,13 @@ document.addEventListener('change', (e) => {
   }
   else if (e.target.id==='log-before-image-file' || e.target.id==='log-after-image-file') {
     const file = e.target.files[0]; if (!file) return;
-    readAndCompressImage(file).then(src => addLogImages([src])).catch(err=>alert(err.message || 'Image upload failed.'));
+    readAndCompressImage(file).then(src => {
+      if (e.target.id==='log-before-image-file') STATE.logFormBeforeImage = src;
+      else STATE.logFormAfterImage = src;
+      const extras=(STATE.logFormImages||[]).slice(2);
+      STATE.logFormImages=[STATE.logFormBeforeImage,STATE.logFormAfterImage,...extras].filter(Boolean);
+      renderLogImagePreview(); updateLogPreview();
+    }).catch(err=>alert(err.message || 'Image upload failed.'));
     e.target.value='';
   }
   else if (e.target.id==='edit-multi-image-file') {
@@ -945,12 +992,11 @@ async function updateExistingTrade(id){
   const qty=parseFloat($('#edit-qty')?.value), entry=parseFloat($('#edit-entry')?.value), exit=parseFloat($('#edit-exit')?.value), sl=parseFloat($('#edit-sl')?.value);
   const type=$('#edit-type')?.value || t.type;
   const emotion=$('#edit-emotion')?.value || t.emotion;
-  const confidence=Number($('#edit-confidence')?.value || t.confidence || 70);
   const images=[...document.querySelectorAll('#edit-images-list img')].map(x=>x.dataset.src).filter(Boolean);
   const pnl=(entry&&exit&&qty)?Math.round((type==='LONG'?(exit-entry)*qty:(entry-exit)*qty)*100)/100:(t.pnl||0);
   const rr=(sl&&entry&&exit&&entry!==sl)?Math.round(((type==='LONG'?exit-entry:entry-exit)/Math.abs(entry-sl))*100)/100:(t.rr||0);
   const snapshot = JSON.parse(JSON.stringify(t));
-  Object.assign(t,{symbol:symbol.toUpperCase(),type,quantity:Number.isFinite(qty)?qty:t.quantity,entryPrice:Number.isFinite(entry)?entry:null,exitPrice:Number.isFinite(exit)?exit:null,stopLoss:Number.isFinite(sl)?sl:null,emotion,confidence,exitReason:$('#edit-exit-reason')?.value.trim()||'',images,beforeImage:images[0]||null,afterImage:images[1]||null,image:images[0]||null,pnl,rr});
+  Object.assign(t,{symbol:symbol.toUpperCase(),type,quantity:Number.isFinite(qty)?qty:t.quantity,entryPrice:Number.isFinite(entry)?entry:null,exitPrice:Number.isFinite(exit)?exit:null,stopLoss:Number.isFinite(sl)?sl:null,emotion,exitReason:$('#edit-exit-reason')?.value.trim()||'',notes:$('#edit-notes')?.value.trim()||'',mistake:$('#edit-mistake')?.value||'none',quality:Number($('#edit-quality')?.value||3),followedPlan:!!t.isSetupTrade && ($('#edit-mistake')?.value||'none')==='none',images,beforeImage:images[0]||null,afterImage:images[1]||null,image:images[0]||null,pnl,rr});
   const saved = await saveUserData();
   if (!saved) { Object.assign(t, snapshot); return; }
   STATE.editingTradeId=null; render();
@@ -978,14 +1024,14 @@ document.addEventListener('submit', async (e) => {
       entryPrice: entry === '' ? null : parseFloat(entry), exitPrice: exit === '' ? null : parseFloat(exit), quantity: parseFloat(qty),
       stopLoss: $('#log-sl').value ? parseFloat($('#log-sl').value) : null, takeProfit: null,
       strategy: strategyName, emotion: finalEmotion, emotionPreset: MINDSET_ARCHETYPES.find(m=>m.name===finalEmotion)?.name || null, device: STATE.logFormDevice, location: STATE.logFormLocation,
-      notes: $('#log-notes')?.value || '', exitReason: $('#log-exit-reason')?.value.trim() || '', image: currentLogImages()[0] || null, beforeImage: currentLogImages()[0] || null, afterImage: currentLogImages()[1] || null, images: currentLogImages(), confidence: Number(STATE.logConfidence)||70,
+      notes: $('#log-notes')?.value || '', exitReason: $('#log-exit-reason')?.value.trim() || '', image: currentLogImages()[0] || null, beforeImage: currentLogImages()[0] || null, afterImage: currentLogImages()[1] || null, images: currentLogImages(),
       plannedEntry, plannedSL, plannedTP, plannedRR, mistake: $('#log-mistake').value, quality: Number($('#log-quality').value), followedPlan: STATE.logFormIsSetup && $('#log-mistake').value==='none',
       date: new Date().toISOString(), pnl: p.pnl, rr: p.rr, xpEarned: p.xp
     };
     STATE.trades.unshift(newTrade);
     const saved = await saveUserData();
     if (!saved) { STATE.trades = STATE.trades.filter(t => t.id !== newTrade.id); return; }
-    STATE.logFormImage = ''; STATE.logFormBeforeImage = ''; STATE.logFormAfterImage = ''; STATE.logFormImages = []; STATE.logEmotion = ''; STATE.logCustomEmotion = ''; STATE.logConfidence = 70;
+    STATE.logFormImage = ''; STATE.logFormBeforeImage = ''; STATE.logFormAfterImage = ''; STATE.logFormImages = []; STATE.logEmotion = ''; STATE.logCustomEmotion = '';
     STATE.activeTab = 'history';
     render();
   }
@@ -994,7 +1040,8 @@ document.addEventListener('submit', async (e) => {
     const analysis = $('#note-analysis').value.trim(), learning = $('#note-learning').value.trim();
     if (!analysis && !learning) { alert('Please add at least an analysis or a learning/summary!'); return; }
     STATE.notes.unshift({
-      id:`n-${Date.now()}`, symbol: $('#note-symbol').value.trim() || 'General', image: STATE.noteFormImage || null,
+      id:`n-${Date.now()}`, title: $('#note-symbol').value.trim() || 'Trading Note', symbol: $('#note-symbol').value.trim() || 'General', image: STATE.noteFormImage || null,
+      category: $('#note-category')?.value || 'observation', ruleText: $('#note-rule')?.value.trim() || '',
       strategy: STATE.noteFormStrategy, entryCriteria: $('#note-entry').value.trim(), exitCriteria: $('#note-exit').value.trim(),
       analysis, learning, date: new Date().toISOString()
     });
