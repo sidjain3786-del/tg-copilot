@@ -137,9 +137,40 @@ async function loadUserData(){
 }
 
 async function saveUserData(){
+  const payload = { trades: STATE.trades, notes: STATE.notes, customStrategies: STATE.customStrategies };
   try {
-    await api('/api/data', 'POST', { trades: STATE.trades, notes: STATE.notes, customStrategies: STATE.customStrategies });
-  } catch (e) { console.error('Save failed:', e); }
+    await api('/api/data', 'POST', payload);
+    return true;
+  } catch (e) {
+    console.error('Save failed:', e);
+    alert(`Trade save nahi hua. ${e.message || 'Please try again.'}`);
+    return false;
+  }
+}
+
+function readAndCompressImage(file){
+  return new Promise((resolve, reject) => {
+    if (!file || !file.type.startsWith('image/')) return reject(new Error('Invalid image file'));
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Image read failed'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('Image decode failed'));
+      img.onload = () => {
+        const max = 1400;
+        const scale = Math.min(1, max / Math.max(img.naturalWidth || img.width, img.naturalHeight || img.height));
+        const w = Math.max(1, Math.round((img.naturalWidth || img.width) * scale));
+        const h = Math.max(1, Math.round((img.naturalHeight || img.height) * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', 0.68));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 async function init(){
@@ -412,7 +443,7 @@ function renderLogImagePreview(){
 }
 function addLogImages(images){
   const arr=currentLogImages();
-  images.filter(Boolean).forEach(src=>{ if(!arr.includes(src)) arr.push(src); });
+  images.filter(Boolean).forEach(src=>{ if(!arr.includes(src) && arr.length < 8) arr.push(src); });
   STATE.logFormImages=arr;
   STATE.logFormBeforeImage=arr[0]||''; STATE.logFormAfterImage=arr[1]||'';
   renderLogImagePreview(); updateLogPreview();
@@ -907,17 +938,21 @@ document.addEventListener('change', (e) => {
   }
   else if (e.target.id==='log-multi-image-file') {
     const files=[...e.target.files]; if(!files.length) return;
-    let remaining=files.length, loaded=[];
-    files.forEach(file=>{ const reader=new FileReader(); reader.onloadend=()=>{ loaded.push(reader.result); if(--remaining===0) addLogImages(loaded); }; reader.readAsDataURL(file); });
+    Promise.all(files.map(readAndCompressImage)).then(loaded=>addLogImages(loaded)).catch(err=>alert(err.message || 'Image upload failed.'));
+    e.target.value='';
   }
   else if (e.target.id==='log-before-image-file' || e.target.id==='log-after-image-file') {
     const file = e.target.files[0]; if (!file) return;
-    const reader = new FileReader(); reader.onloadend = () => addLogImages([reader.result]); reader.readAsDataURL(file);
+    readAndCompressImage(file).then(src => addLogImages([src])).catch(err=>alert(err.message || 'Image upload failed.'));
+    e.target.value='';
   }
   else if (e.target.id==='edit-multi-image-file') {
     const files=[...e.target.files]; if(!files.length) return;
-    let remaining=files.length, loaded=[];
-    files.forEach(file=>{ const reader=new FileReader(); reader.onloadend=()=>{ loaded.push(reader.result); if(--remaining===0){ const box=$('#edit-images-list'); loaded.forEach(src=>{ const wrap=document.createElement('div'); wrap.className='edit-image-item'; wrap.innerHTML=`<img src="${src}" data-src="${src}"><button type="button" data-action="remove-edit-image">×</button>`; box?.insertBefore(wrap, box.querySelector('.edit-add-image')); }); } }; reader.readAsDataURL(file); });
+    Promise.all(files.map(readAndCompressImage)).then(loaded=>{
+      const box=$('#edit-images-list');
+      loaded.forEach(src=>{ const wrap=document.createElement('div'); wrap.className='edit-image-item'; wrap.innerHTML=`<img src="${src}" data-src="${src}"><button type="button" data-action="remove-edit-image">×</button>`; box?.insertBefore(wrap, box.querySelector('.edit-add-image')); });
+    }).catch(err=>alert(err.message || 'Image upload failed.'));
+    e.target.value='';
   }
   else if (e.target.id==='note-image-file') {
     const file = e.target.files[0]; if (!file) return;
@@ -937,8 +972,11 @@ async function updateExistingTrade(id){
   const images=[...document.querySelectorAll('#edit-images-list img')].map(x=>x.dataset.src).filter(Boolean);
   const pnl=(entry&&exit&&qty)?Math.round((type==='LONG'?(exit-entry)*qty:(entry-exit)*qty)*100)/100:(t.pnl||0);
   const rr=(sl&&entry&&exit&&entry!==sl)?Math.round(((type==='LONG'?exit-entry:entry-exit)/Math.abs(entry-sl))*100)/100:(t.rr||0);
+  const snapshot = JSON.parse(JSON.stringify(t));
   Object.assign(t,{symbol:symbol.toUpperCase(),type,quantity:Number.isFinite(qty)?qty:t.quantity,entryPrice:Number.isFinite(entry)?entry:null,exitPrice:Number.isFinite(exit)?exit:null,stopLoss:Number.isFinite(sl)?sl:null,emotion,confidence,exitReason:$('#edit-exit-reason')?.value.trim()||'',images,beforeImage:images[0]||null,afterImage:images[1]||null,image:images[0]||null,pnl,rr});
-  await saveUserData(); STATE.editingTradeId=null; render();
+  const saved = await saveUserData();
+  if (!saved) { Object.assign(t, snapshot); return; }
+  STATE.editingTradeId=null; render();
 }
 
 document.addEventListener('submit', async (e) => {
@@ -955,9 +993,9 @@ document.addEventListener('submit', async (e) => {
     const plannedSL = parseFloat($('#log-planned-sl')?.value) || ($('#log-sl').value ? parseFloat($('#log-sl').value) : null);
     const plannedTP = parseFloat($('#log-planned-tp')?.value) || ($('#log-tp').value ? parseFloat($('#log-tp').value) : null);
     const plannedRR = plannedSL && plannedEntry !== plannedSL && plannedTP ? Math.round((Math.abs(plannedTP-plannedEntry)/Math.abs(plannedEntry-plannedSL))*100)/100 : null;
-    const strategyName = STATE.logFormIsSetup ? findStrategy(STATE.selectedPlaybookId).name : 'Bina Setup (Tukke Baazi)';
+    const strategyName = STATE.logFormIsSetup ? (findStrategy(STATE.selectedPlaybookId).name || 'No Strategy') : 'Bina Setup (Tukke Baazi)';
     const mindset = findMindset(STATE.selectedMindsetId);
-    STATE.trades.unshift({
+    const newTrade = {
       id:`t-${Date.now()}`, symbol: symbol.toUpperCase(), type: $('#log-type').value, isSetupTrade: STATE.logFormIsSetup,
       entryPrice: parseFloat(entry), exitPrice: parseFloat(exit), quantity: parseFloat(qty),
       stopLoss: $('#log-sl').value ? parseFloat($('#log-sl').value) : null, takeProfit: $('#log-tp')?.value ? parseFloat($('#log-tp').value) : null,
@@ -965,9 +1003,11 @@ document.addEventListener('submit', async (e) => {
       notes: $('#log-notes')?.value || '', exitReason: $('#log-exit-reason')?.value.trim() || '', image: currentLogImages()[0] || null, beforeImage: currentLogImages()[0] || null, afterImage: currentLogImages()[1] || null, images: currentLogImages(), confidence: Number(STATE.logConfidence)||70,
       plannedEntry, plannedSL, plannedTP, plannedRR, mistake: $('#log-mistake').value, quality: Number($('#log-quality').value), followedPlan: STATE.logFormIsSetup && $('#log-mistake').value==='none',
       date: new Date().toISOString(), pnl: p.pnl, rr: p.rr, xpEarned: p.xp
-    });
+    };
+    STATE.trades.unshift(newTrade);
+    const saved = await saveUserData();
+    if (!saved) { STATE.trades = STATE.trades.filter(t => t.id !== newTrade.id); return; }
     STATE.logFormImage = ''; STATE.logFormBeforeImage = ''; STATE.logFormAfterImage = ''; STATE.logFormImages = []; STATE.logEmotion = ''; STATE.logCustomEmotion = ''; STATE.logConfidence = 70;
-    await saveUserData();
     STATE.activeTab = 'history';
     render();
   }
