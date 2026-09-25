@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Trader Co-Pilot</title>
+<meta name="theme-color" content="#4f46e5">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -58,6 +61,7 @@
           </div>
           <div class="user-block">
             <span id="user-name" class="user-name"></span>
+            <button id="install-app-btn" class="btn-install" type="button" style="display:none;">⬇️ Install</button>
             <button id="logout-btn" class="btn-logout">Logout</button>
           </div>
         </div>
@@ -67,7 +71,21 @@
     <main class="app-main">
       <nav id="tab-nav" class="tab-nav"></nav>
       <div id="tab-content"></div>
+      <nav id="mobile-tab-nav" class="mobile-tab-nav" aria-label="Mobile navigation"></nav>
     </main>
+  </div>
+
+  <div id="install-modal" class="modal-overlay" style="display:none;">
+    <div class="modal-card install-card">
+      <div class="modal-header"><span>📲 Install Trader Co-Pilot</span><button id="install-modal-close" type="button">✕</button></div>
+      <div class="modal-body install-body">
+        <div class="install-icon">🧠</div>
+        <h2>Trade journal ko app bana lo</h2>
+        <p id="install-message">Home screen par Trader Co-Pilot install karke full-screen app ki tarah use karein.</p>
+        <button id="install-confirm-btn" class="btn-primary btn-block" type="button">⬇️ Install App</button>
+        <p class="install-ios-hint">iPhone/iPad: <strong>Share</strong> → <strong>Add to Home Screen</strong></p>
+      </div>
+    </div>
   </div>
 
   <div id="image-modal" class="modal-overlay" style="display:none;">

@@ -208,6 +208,12 @@ function renderTabNav(){
   $('#tab-nav').innerHTML = TABS.map(t =>
     `<button class="tab-btn ${STATE.activeTab===t.id?'active':''}" data-action="set-tab" data-tab="${t.id}">${t.label}</button>`
   ).join('');
+  const mobileIcons = {copilot:'⚡',log:'➕',notes:'🧠',reality:'📊',history:'📜'};
+  const mobileLabels = {copilot:'Co-Pilot',log:'Log Trade',notes:'Notes',reality:'Reality',history:'History'};
+  const mobile = $('#mobile-tab-nav');
+  if (mobile) mobile.innerHTML = TABS.map(t =>
+    `<button class="mobile-tab-btn ${STATE.activeTab===t.id?'active':''}" data-action="set-tab" data-tab="${t.id}"><span class="mobile-tab-icon">${mobileIcons[t.id]}</span><span>${mobileLabels[t.id]}</span></button>`
+  ).join('');
 }
 
 /* ---------------- Co-Pilot tab ---------------- */
@@ -748,6 +754,57 @@ document.addEventListener('submit', async (e) => {
     renderTabOnly();
   }
 });
+
+/* ---------------- PWA install ---------------- */
+let deferredInstallPrompt = null;
+function isStandalone(){
+  return window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone === true;
+}
+function isIOS(){ return /iphone|ipad|ipod/i.test(navigator.userAgent); }
+function isMobile(){ return /android|iphone|ipad|ipod/i.test(navigator.userAgent) || window.innerWidth <= 700; }
+function updateInstallButton(){
+  const btn = $('#install-app-btn');
+  if (!btn || isStandalone()) { if (btn) btn.style.display='none'; return; }
+  if (deferredInstallPrompt || isMobile()) btn.style.display='inline-flex';
+}
+async function installPWA(){
+  if (deferredInstallPrompt) {
+    deferredInstallPrompt.prompt();
+    const result = await deferredInstallPrompt.userChoice.catch(()=>null);
+    deferredInstallPrompt = null;
+    updateInstallButton();
+    return;
+  }
+  const modal = $('#install-modal');
+  const msg = $('#install-message');
+  const confirm = $('#install-confirm-btn');
+  if (isIOS()) {
+    msg.textContent = 'Safari mein neeche Share button dabayein, phir “Add to Home Screen” select karein.';
+    confirm.style.display='none';
+  } else {
+    msg.textContent = 'Browser menu se “Install Trader Co-Pilot” / “Add to Home Screen” choose karein. Chrome/Edge mein install icon address bar mein bhi aa sakta hai.';
+    confirm.style.display='none';
+  }
+  modal.style.display='flex';
+}
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  updateInstallButton();
+});
+window.addEventListener('appinstalled', () => {
+  deferredInstallPrompt = null;
+  updateInstallButton();
+});
+$('#install-app-btn')?.addEventListener('click', installPWA);
+$('#install-modal-close')?.addEventListener('click', () => $('#install-modal').style.display='none');
+$('#install-modal')?.addEventListener('click', e => { if (e.target.id==='install-modal') e.currentTarget.style.display='none'; });
+$('#install-confirm-btn')?.addEventListener('click', installPWA);
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(err => console.warn('PWA registration failed', err)));
+}
+window.addEventListener('resize', updateInstallButton);
+updateInstallButton();
 
 /* ---------------- boot ---------------- */
 init();

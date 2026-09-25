@@ -147,3 +147,60 @@ body {
 .section-title { font-size: .85rem; font-weight: 700; display: flex; align-items: center; gap: .4rem; margin: 0 0 .25rem; }
 .uppercase-label { font-size: .65rem; font-weight: 700; color: var(--slate-500); text-transform: uppercase; margin-bottom: .3rem; display: block; }
 .empty-msg { font-size: .75rem; color: var(--slate-400); font-style: italic; text-align: center; padding: 2rem 0; grid-column: 1 / -1; }
+
+
+/* ---------- Mobile-first app polish / PWA ---------- */
+html { -webkit-tap-highlight-color: transparent; }
+button, input, select, textarea { touch-action: manipulation; }
+.btn-install { font-size:.68rem; font-weight:800; color:var(--indigo); background:var(--indigo-light); border:1px solid #c7d2fe; padding:.42rem .7rem; border-radius:.75rem; cursor:pointer; }
+.btn-install:hover { background:#e0e7ff; }
+.mobile-tab-nav { display:none; }
+.install-card { max-width:390px; text-align:center; }
+.install-body { padding:1.5rem; }
+.install-icon { width:64px; height:64px; display:grid; place-items:center; margin:0 auto .8rem; border-radius:1.25rem; background:var(--indigo); color:white; font-size:1.8rem; box-shadow:0 14px 30px -12px rgba(79,70,229,.5); }
+.install-body h2 { margin:.2rem 0 .35rem; font-size:1.05rem; }
+.install-body p { color:var(--slate-500); font-size:.75rem; line-height:1.55; }
+.install-ios-hint { margin:.9rem 0 0; padding:.65rem .75rem; background:var(--slate-50); border:1px solid var(--slate-200); border-radius:.8rem; }
+@media (max-width: 700px) {
+  body { background:#f4f6fb; padding-bottom:calc(76px + env(safe-area-inset-bottom, 0px)); }
+  .app-header { position:sticky; top:0; }
+  .header-inner { height:3.7rem; padding:.45rem .75rem; }
+  .header-brand { gap:.5rem; min-width:0; }
+  .brand-icon { padding:.45rem; border-radius:.8rem; font-size:.9rem; }
+  .brand-title { font-size:.78rem; gap:.25rem; }
+  .brand-badge { font-size:.45rem; padding:.12rem .35rem; }
+  .brand-sub { display:none; }
+  .header-stats { gap:.35rem; }
+  .stat-pill { padding:.28rem .45rem; font-size:.58rem; }
+  .stat-pill:first-child { display:none; }
+  .user-block { border-left:0; padding-left:0; gap:.25rem; }
+  .user-name { display:none; }
+  .btn-install { padding:.4rem .55rem; font-size:.6rem; }
+  .btn-logout { padding:.4rem .55rem; font-size:.58rem; }
+  .app-main { padding:.8rem .65rem 1rem; }
+  .tab-nav { display:none; }
+  .card { border-radius:1.1rem; padding:1rem; margin-bottom:.8rem; box-shadow:0 4px 16px -10px rgba(15,23,42,.22); }
+  .card-title { font-size:.95rem; }
+  .card-sub { font-size:.68rem; }
+  .grid-2, .grid-3 { grid-template-columns:1fr !important; gap:.7rem; }
+  .mindset-grid { grid-template-columns:repeat(2,1fr) !important; gap:.55rem; }
+  .mindset-card { min-height:96px; padding:.7rem !important; }
+  .mindset-desc { font-size:.58rem !important; }
+  .toggle-group { display:grid; grid-template-columns:1fr 1fr; width:100%; }
+  .toggle-btn { min-height:42px; padding:.55rem .45rem !important; font-size:.65rem !important; }
+  .field input, .field select, .field textarea { min-height:44px; font-size:.82rem; border-radius:.8rem; }
+  .field textarea { min-height:88px; }
+  .btn-primary { min-height:44px; }
+  .upload-box { min-height:74px; }
+  .mobile-tab-nav { position:fixed; display:grid; grid-template-columns:repeat(5,1fr); left:0; right:0; bottom:0; z-index:50; padding:.35rem .35rem calc(.35rem + env(safe-area-inset-bottom,0px)); background:rgba(255,255,255,.96); backdrop-filter:blur(14px); border-top:1px solid var(--slate-200); box-shadow:0 -8px 24px -18px rgba(15,23,42,.45); }
+  .mobile-tab-btn { border:0; background:transparent; color:var(--slate-500); border-radius:.75rem; padding:.42rem .15rem .3rem; min-width:0; font:700 .55rem/1.15 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; display:flex; flex-direction:column; align-items:center; gap:.18rem; }
+  .mobile-tab-btn .mobile-tab-icon { font-size:1.05rem; line-height:1; }
+  .mobile-tab-btn.active { color:var(--indigo); background:var(--indigo-light); }
+  .section-title { font-size:.92rem !important; }
+  .strategy-select-field { padding:.75rem !important; }
+  .strategy-builder-card { padding:.9rem !important; }
+  .image-preview-row { flex-wrap:wrap; }
+  .modal-card { width:calc(100vw - 1.25rem); max-height:88vh; border-radius:1.2rem; }
+  .modal-header { padding:.75rem .9rem; }
+}
+@media (min-width:701px) { .install-ios-hint { display:none; } }
