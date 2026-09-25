@@ -435,6 +435,25 @@ function currentLogImages(){
   [STATE.logFormBeforeImage, STATE.logFormAfterImage, STATE.logFormImage].filter(Boolean).forEach(x=>{ if(!arr.includes(x)) arr.push(x); });
   return arr;
 }
+function captureLogDraft(){
+  const get = id => $('#'+id)?.value ?? '';
+  return {
+    symbol:get('log-symbol'), type:get('log-type') || 'LONG', qty:get('log-qty'), entry:get('log-entry'), exit:get('log-exit'), sl:get('log-sl'),
+    strategy:get('log-strategy-select'), plannedEntry:get('log-planned-entry'), plannedSL:get('log-planned-sl'), plannedTP:get('log-planned-tp'),
+    imageUrl:get('log-image-url'), mistake:get('log-mistake'), quality:get('log-quality'), exitReason:get('log-exit-reason'), notes:get('log-notes'),
+    location:get('log-location-select'), customEmotion:get('log-custom-emotion'), confidence:get('log-confidence') || String(STATE.logConfidence || 70)
+  };
+}
+function restoreLogDraft(draft){
+  if(!draft) return;
+  const set=(id,val)=>{ const el=$('#'+id); if(el && val!==undefined && val!==null) el.value=val; };
+  set('log-symbol',draft.symbol); set('log-type',draft.type); set('log-qty',draft.qty); set('log-entry',draft.entry); set('log-exit',draft.exit); set('log-sl',draft.sl);
+  set('log-strategy-select',draft.strategy); set('log-planned-entry',draft.plannedEntry); set('log-planned-sl',draft.plannedSL); set('log-planned-tp',draft.plannedTP);
+  set('log-image-url',draft.imageUrl); set('log-mistake',draft.mistake); set('log-quality',draft.quality); set('log-exit-reason',draft.exitReason); set('log-notes',draft.notes); set('log-location-select',draft.location); set('log-custom-emotion',draft.customEmotion);
+  set('log-confidence',draft.confidence);
+  STATE.logConfidence = Number(draft.confidence)||70;
+  const cv=$('#log-confidence-val'); if(cv) cv.textContent=STATE.logConfidence+'/100';
+}
 function renderLogImagePreview(){
   const box = $('#log-image-preview');
   if (!box) return;
@@ -832,10 +851,10 @@ document.addEventListener('click', async (e) => {
   else if (action==='toggle-rule') { const i=btn.dataset.idx; STATE.checkedRules[i]=!STATE.checkedRules[i]; renderTabOnly(); }
   else if (action==='set-inspection') { STATE.inspectionTab = btn.dataset.value; renderTabOnly(); }
   else if (action==='record-state') { alert(`Mindset saved: ${findMindset(STATE.selectedMindsetId).name} (+20 XP)`); }
-  else if (action==='set-log-setup') { STATE.logFormIsSetup = btn.dataset.value==='true'; renderTabOnly(); }
-  else if (action==='set-log-emotion') { STATE.logEmotion = btn.dataset.value; STATE.logCustomEmotion = ''; renderTabOnly(); }
-  else if (action==='use-custom-emotion') { const v = $('#log-custom-emotion')?.value.trim(); if (v) { STATE.logEmotion = v; STATE.logCustomEmotion = v; renderTabOnly(); } }
-  else if (action==='set-log-device') { STATE.logFormDevice = btn.dataset.value; renderTabOnly(); }
+  else if (action==='set-log-setup') { const draft=captureLogDraft(); STATE.logFormIsSetup = btn.dataset.value==='true'; renderTabOnly(); restoreLogDraft(draft); updateLogPreview(); }
+  else if (action==='set-log-emotion') { const draft=captureLogDraft(); STATE.logEmotion = btn.dataset.value; STATE.logCustomEmotion = ''; renderTabOnly(); restoreLogDraft(draft); }
+  else if (action==='use-custom-emotion') { const draft=captureLogDraft(); const v = $('#log-custom-emotion')?.value.trim(); if (v) { STATE.logEmotion = v; STATE.logCustomEmotion = v; renderTabOnly(); restoreLogDraft(draft); } }
+  else if (action==='set-log-device') { const draft=captureLogDraft(); STATE.logFormDevice = btn.dataset.value; renderTabOnly(); restoreLogDraft(draft); }
   else if (action==='remove-log-image') { STATE.logFormImage=''; STATE.logFormBeforeImage=''; STATE.logFormAfterImage=''; STATE.logFormImages=[]; renderLogImagePreview(); updateLogPreview(); }
   else if (action==='remove-log-image-index') { const i=Number(btn.dataset.index); const arr=currentLogImages(); arr.splice(i,1); STATE.logFormImages=arr; STATE.logFormBeforeImage=arr[0]||''; STATE.logFormAfterImage=arr[1]||''; renderLogImagePreview(); updateLogPreview(); }
   else if (action==='add-log-image-url') { const v=$('#log-image-url')?.value.trim(); if(v){ addLogImages([v]); $('#log-image-url').value=''; } }
@@ -991,14 +1010,15 @@ document.addEventListener('submit', async (e) => {
     const p = computeLogPreview();
     const plannedEntry = parseFloat($('#log-planned-entry')?.value) || (entry ? parseFloat(entry) : null);
     const plannedSL = parseFloat($('#log-planned-sl')?.value) || ($('#log-sl').value ? parseFloat($('#log-sl').value) : null);
-    const plannedTP = parseFloat($('#log-planned-tp')?.value) || ($('#log-tp').value ? parseFloat($('#log-tp').value) : null);
+    const plannedTP = parseFloat($('#log-planned-tp')?.value) || null;
     const plannedRR = plannedSL && plannedEntry !== plannedSL && plannedTP ? Math.round((Math.abs(plannedTP-plannedEntry)/Math.abs(plannedEntry-plannedSL))*100)/100 : null;
-    const strategyName = STATE.logFormIsSetup ? (findStrategy(STATE.selectedPlaybookId).name || 'No Strategy') : 'Bina Setup (Tukke Baazi)';
+    const selectedStrategy = findStrategy(STATE.selectedPlaybookId);
+    const strategyName = STATE.logFormIsSetup ? (selectedStrategy.name || 'No Strategy') : 'Bina Setup (Tukke Baazi)';
     const mindset = findMindset(STATE.selectedMindsetId);
     const newTrade = {
       id:`t-${Date.now()}`, symbol: symbol.toUpperCase(), type: $('#log-type').value, isSetupTrade: STATE.logFormIsSetup,
-      entryPrice: parseFloat(entry), exitPrice: parseFloat(exit), quantity: parseFloat(qty),
-      stopLoss: $('#log-sl').value ? parseFloat($('#log-sl').value) : null, takeProfit: $('#log-tp')?.value ? parseFloat($('#log-tp').value) : null,
+      entryPrice: entry === '' ? null : parseFloat(entry), exitPrice: exit === '' ? null : parseFloat(exit), quantity: parseFloat(qty),
+      stopLoss: $('#log-sl').value ? parseFloat($('#log-sl').value) : null, takeProfit: null,
       strategy: strategyName, emotion: finalEmotion, emotionPreset: MINDSET_ARCHETYPES.find(m=>m.name===finalEmotion)?.name || null, device: STATE.logFormDevice, location: STATE.logFormLocation,
       notes: $('#log-notes')?.value || '', exitReason: $('#log-exit-reason')?.value.trim() || '', image: currentLogImages()[0] || null, beforeImage: currentLogImages()[0] || null, afterImage: currentLogImages()[1] || null, images: currentLogImages(), confidence: Number(STATE.logConfidence)||70,
       plannedEntry, plannedSL, plannedTP, plannedRR, mistake: $('#log-mistake').value, quality: Number($('#log-quality').value), followedPlan: STATE.logFormIsSetup && $('#log-mistake').value==='none',
