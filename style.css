@@ -204,3 +204,35 @@ button, input, select, textarea { touch-action: manipulation; }
   .modal-header { padding:.75rem .9rem; }
 }
 @media (min-width:701px) { .install-ios-hint { display:none; } }
+
+
+/* ---------- Trading journal upgrades ---------- */
+.journal-kpis { grid-template-columns:repeat(3,1fr); margin-top:1rem; }
+.journal-kpis > div { background:var(--slate-50); border:1px solid var(--slate-200); border-radius:.9rem; padding:.75rem; }
+.journal-kpis strong { display:block; font-size:1.25rem; font-family:monospace; }
+.strategy-performance-list { display:flex; flex-direction:column; gap:.55rem; }
+.strategy-performance-row { display:flex; justify-content:space-between; align-items:center; gap:1rem; padding:.8rem; border:1px solid var(--slate-200); background:var(--slate-50); border-radius:.9rem; }
+.strategy-performance-row strong { display:block; font-size:.75rem; }
+.strategy-performance-row span { display:block; font-size:.62rem; color:var(--slate-500); margin-top:.2rem; }
+.strategy-performance-row small { font-size:.6rem; color:var(--slate-500); font-weight:600; }
+.history-filter-grid { display:grid; grid-template-columns:1fr 1fr; gap:.75rem; }
+.history-filter-grid label { display:block; font-size:.65rem; font-weight:700; color:var(--slate-500); margin-bottom:.3rem; }
+.history-filter-grid select { width:100%; }
+.plan-actual-grid { display:grid; grid-template-columns:1fr 1fr; gap:.5rem; }
+.plan-actual-grid > div { padding:.55rem; border-radius:.7rem; border:1px solid var(--slate-200); background:var(--slate-50); }
+.plan-actual-grid span { font-size:.55rem; font-weight:800; color:var(--slate-400); }
+.plan-actual-grid p { margin:.25rem 0 0; font-size:.62rem; color:var(--slate-600); line-height:1.4; }
+.journal-chip { font-size:.6rem; font-weight:700; color:var(--slate-600); background:var(--slate-100); border:1px solid var(--slate-200); padding:.25rem .5rem; border-radius:.65rem; }
+.screenshot-pair { display:grid; grid-template-columns:1fr 1fr; gap:.55rem; margin-top:.55rem; }
+.screenshot-pair > div { position:relative; min-height:4rem; border:1px solid var(--slate-200); border-radius:.8rem; overflow:hidden; background:#fff; }
+.screenshot-pair img { width:100%; height:8rem; object-fit:cover; display:block; cursor:pointer; }
+.screenshot-pair span { display:block; font-size:.58rem; font-weight:800; color:var(--slate-500); padding:.35rem .5rem; }
+.shot-empty { min-height:8rem; display:grid; place-items:center; color:var(--slate-400); font-size:.6rem; text-align:center; padding:.5rem; }
+@media (max-width:700px) {
+  .journal-kpis { grid-template-columns:repeat(3,1fr) !important; }
+  .journal-kpis > div { padding:.6rem; }
+  .journal-kpis strong { font-size:1rem; }
+  .strategy-performance-row { align-items:flex-start; }
+  .history-filter-grid, .plan-actual-grid { grid-template-columns:1fr; }
+  .screenshot-pair img { height:7rem; }
+}

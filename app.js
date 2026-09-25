@@ -4,25 +4,15 @@
    auth and per-user data storage.
    ============================================================ */
 
-const DEFAULT_PLAYBOOK = [
-  { id:'pb-1', name:'Asian High/Low Liquidity Sweep (AMD)', winRate:74, avgRR:'2.8R',
-    mandatoryRules:['Asian High or Low must be clearly swept on 15m/5m timeframe','Market Structure Shift (MSS) with displacement post-sweep','Entry on Fair Value Gap (FVG) or Breaker Block return','Stop loss strictly above/below manipulation wick extreme'],
-    commonTraps:['Entering BEFORE displacement candle closes (faking the sweep)','Trading into higher timeframe major opposition level','Taking trades right during high-impact CPI/FOMC news releases'],
-    winningExamples:[{symbol:'BTC/USDT',pnl:1250,rr:'2.5R',note:'Clean Asia Low sweep + 5m displacement FVG entry during London open.'}],
-    losingExamples:[{symbol:'NVDA',pnl:-350,rr:'-1.75R',note:'Entered early BEFORE liquidity sweep was complete!',ruleBroken:'RULE BROKEN: Faked displacement candle; entered before candle close.'}]
-  },
-  { id:'pb-2', name:'ICT Fair Value Gap (FVG) + Breaker', winRate:68, avgRR:'2.2R',
-    mandatoryRules:['Clear 3-candle imbalance (FVG) present on 5m or 15m','Higher Timeframe (1H/4H) bias aligns with direction','Discount/Premium array check: Buy in Discount, Sell in Premium','Target opposing liquidity pool or unmitigated FVG'],
-    commonTraps:['Entering an old, already mitigated FVG','Ignoring HTF trend and picking tops/bottoms blindly'],
-    winningExamples:[{symbol:'ETH/USDT',pnl:420,rr:'2.8R',note:'Standard 15m FVG fill during NY Killzone with 4H bullish alignment.'}],
-    losingExamples:[{symbol:'SOL/USDT',pnl:-210,rr:'-1.0R',note:'FVG was already mitigated twice on 15m chart.',ruleBroken:'RULE BROKEN: Entered an old, already mitigated FVG pool.'}]
-  },
-  { id:'pb-3', name:'Order Block (OB) Retest with Displacement', winRate:62, avgRR:'2.0R',
-    mandatoryRules:['OB must create a strong Break of Structure (BOS)','FVG must be present right after the Order Block candle','Clean unmitigated level on 15m timeframe','Risk capped at 1% of total portfolio'],
-    commonTraps:['Taking OB retests after the price has already lingered nearby too long'],
-    winningExamples:[], losingExamples:[]
-  }
-];
+// No built-in trading strategies are shipped with the app.
+// Users create and save their own strategies from Notes → ADD STRATEGY.
+// Remove strategies that belonged to older demo/default versions of the app.
+// This does not affect strategies created by the user.
+const LEGACY_DEFAULT_STRATEGY_NAMES = new Set([
+  'Asian High/Low Liquidity Sweep (AMD)',
+  'ICT Fair Value Gap (FVG) + Breaker',
+  'Order Block (OB) Retest with Displacement'
+]);
 
 const MINDSET_ARCHETYPES = [
   {id:'calm',name:'Calm Ninja',emoji:'🧘',battery:100,desc:'Rule Follower • Zero Impulse'},
@@ -39,13 +29,14 @@ const STATE = {
   user: null,
   trades: [], notes: [], customStrategies: [],
   activeTab: 'copilot',
-  selectedPlaybookId: DEFAULT_PLAYBOOK[0].id,
+  selectedPlaybookId: '',
   checkedRules: {},
   inspectionTab: 'winning',
   energyLevel: 85, noiseLevel: 15,
   selectedMindsetId: MINDSET_ARCHETYPES[0].id,
-  logFormIsSetup: true, logFormDevice: 'Laptop', logFormLocation: 'Desk', logFormImage: '',
-  noteFormStrategy: DEFAULT_PLAYBOOK[0].name, noteFormImage: ''
+  logFormIsSetup: true, logFormDevice: 'Laptop', logFormLocation: 'Desk', logFormImage: '', logFormBeforeImage: '', logFormAfterImage: '',
+  noteFormStrategy: '', noteFormImage: '',
+  historyStrategyFilter: 'ALL', historyMistakeFilter: 'ALL'
 };
 
 /* ---------------- utils ---------------- */
@@ -61,10 +52,16 @@ function normalizeCustomStrategy(s){
   return s || {id:'', name:'', entryCriteria:'', exitCriteria:'', rules:[]};
 }
 function allStrategies(){
-  return [...DEFAULT_PLAYBOOK, ...STATE.customStrategies.map(normalizeCustomStrategy)];
+  return STATE.customStrategies.map(normalizeCustomStrategy);
 }
-function findStrategy(id){ return allStrategies().find(p=>p.id===id) || DEFAULT_PLAYBOOK[0]; }
-function findStrategyByName(name){ return allStrategies().find(p=>p.name===name) || DEFAULT_PLAYBOOK[0]; }
+function emptyStrategy(){
+  return { id:'', name:'No strategy selected', entryCriteria:'', exitCriteria:'', rules:[], mandatoryRules:[], commonTraps:[], winningExamples:[], losingExamples:[], winRate:0, avgRR:'—' };
+}
+function findStrategy(id){ return allStrategies().find(p=>p.id===id) || emptyStrategy(); }
+function findStrategyByName(name){ return allStrategies().find(p=>p.name===name) || emptyStrategy(); }
+function sanitizeCustomStrategies(list){
+  return (list || []).map(normalizeCustomStrategy).filter(s => s.name && !LEGACY_DEFAULT_STRATEGY_NAMES.has(s.name.trim()));
+}
 function customStrategyNames(){ return STATE.customStrategies.map(normalizeCustomStrategy); }
 
 async function api(path, method='GET', body){
@@ -128,7 +125,14 @@ async function loadUserData(){
   const data = await api('/api/data');
   STATE.trades = data.trades || [];
   STATE.notes = data.notes || [];
-  STATE.customStrategies = (data.customStrategies || []).map(normalizeCustomStrategy);
+  STATE.customStrategies = sanitizeCustomStrategies(data.customStrategies);
+  if (STATE.customStrategies.length) {
+    if (!STATE.selectedPlaybookId || !allStrategies().some(s => s.id === STATE.selectedPlaybookId)) STATE.selectedPlaybookId = allStrategies()[0].id;
+    if (!STATE.noteFormStrategy || !allStrategies().some(s => s.name === STATE.noteFormStrategy)) STATE.noteFormStrategy = allStrategies()[0].name;
+  } else {
+    STATE.selectedPlaybookId = '';
+    STATE.noteFormStrategy = '';
+  }
 }
 
 async function saveUserData(){
@@ -153,6 +157,38 @@ async function init(){
     setAuthMode('login');
     showAuth();
   }
+}
+
+/* ---------------- journal analytics ---------------- */
+const MISTAKE_OPTIONS = [
+  ['none','No mistake'], ['fomo','FOMO'], ['early-entry','Early Entry'], ['late-entry','Late Entry'],
+  ['moved-sl','Moved SL'], ['early-exit','Early Exit'], ['overtrading','Overtrading'], ['revenge','Revenge Trade'], ['rule-break','Broke Strategy Rule']
+];
+function tradeStrategyName(t){ return t.strategy || 'No strategy'; }
+function filteredHistoryTrades(){
+  return STATE.trades.filter(t =>
+    (STATE.historyStrategyFilter==='ALL' || tradeStrategyName(t)===STATE.historyStrategyFilter) &&
+    (STATE.historyMistakeFilter==='ALL' || (t.mistake || 'none')===STATE.historyMistakeFilter)
+  );
+}
+function strategyPerformance(){
+  const groups = {};
+  STATE.trades.forEach(t => {
+    const name = tradeStrategyName(t);
+    if (!groups[name]) groups[name] = {name, trades:0, wins:0, pnl:0, r:0, losses:0, followed:0};
+    const g=groups[name]; g.trades++; g.pnl += Number(t.pnl)||0; g.r += Number(t.rr)||0;
+    if ((Number(t.pnl)||0)>0) g.wins++; else if ((Number(t.pnl)||0)<0) g.losses++;
+    if (t.followedPlan) g.followed++;
+  });
+  return Object.values(groups).map(g=>({...g, winRate:g.trades?Math.round(g.wins/g.trades*100):0, avgR:g.trades?(g.r/g.trades).toFixed(2):'0.00', discipline:g.trades?Math.round(g.followed/g.trades*100):0})).sort((a,b)=>b.pnl-a.pnl);
+}
+function mistakeLabel(id){ return MISTAKE_OPTIONS.find(x=>x[0]===id)?.[1] || id || 'No mistake'; }
+function plannedVsActual(t){
+  const pe = t.plannedEntry ?? t.entryPrice;
+  const ps = t.plannedSL ?? t.stopLoss;
+  const pt = t.plannedTP ?? t.takeProfit;
+  const pr = t.plannedRR ?? null;
+  return {pe,ps,pt,pr};
 }
 
 /* ---------------- computed stats ---------------- */
@@ -288,15 +324,15 @@ function renderCopilotTab(){
       <div class="card">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; padding-bottom:.75rem; border-bottom:1px solid var(--slate-100); flex-wrap:wrap; gap:.5rem;">
           <div><span class="uppercase-label" style="margin:0; color:var(--indigo);">Playbook Model</span><h3 style="margin:.1rem 0 0; font-size:.95rem; font-weight:800;">${esc(strategy.name)}</h3></div>
-          <select id="playbook-select" style="background:var(--slate-50); border:1px solid var(--slate-200); border-radius:.75rem; padding:.4rem .7rem; font-size:.7rem; font-weight:700; color:var(--indigo);">
-            ${DEFAULT_PLAYBOOK.map(p => `<option value="${p.id}" ${p.id===STATE.selectedPlaybookId?'selected':''}>${esc(p.name)}</option>`).join('')}
+          <select id="playbook-select" ${allStrategies().length ? '' : 'disabled'} style="background:var(--slate-50); border:1px solid var(--slate-200); border-radius:.75rem; padding:.4rem .7rem; font-size:.7rem; font-weight:700; color:var(--indigo);">
+            ${allStrategies().length ? allStrategies().map(p => `<option value="${esc(p.id)}" ${p.id===STATE.selectedPlaybookId?'selected':''}>${esc(p.name)}</option>`).join('') : '<option>No custom strategies yet</option>'}
           </select>
         </div>
         <span class="uppercase-label">Pre-Flight Mandatory Rules</span>
-        ${strategy.mandatoryRules.map((rule, idx) => `
+        ${strategy.mandatoryRules.length ? strategy.mandatoryRules.map((rule, idx) => `
           <div class="rule-item ${STATE.checkedRules[idx]?'checked':''}" data-action="toggle-rule" data-idx="${idx}">
             <div class="rule-check">${STATE.checkedRules[idx]?'✓':''}</div><span>${esc(rule)}</span>
-          </div>`).join('')}
+          </div>`).join('') : `<div class="empty-msg">Apni custom strategy banane ke liye <strong>Notes → ADD STRATEGY</strong> par jaiye. Yahan koi built-in ICT/Order Block/FVG playbook nahi hai.</div>`}
       </div>
 
       <div class="card">
@@ -350,7 +386,7 @@ function computeLogPreview(){
   if (sl && entry!==sl) { rr = Math.abs(exit-entry)/Math.abs(entry-sl); if (pnl<0) rr = -rr; }
   let xp = STATE.logFormIsSetup ? 100 : 20;
   if (STATE.logFormLocation==='Desk' && STATE.logFormDevice==='Laptop') xp += 20;
-  if (STATE.logFormImage) xp += 30;
+  if (STATE.logFormBeforeImage || STATE.logFormAfterImage || STATE.logFormImage) xp += 30;
   return { pnl: Math.round(pnl*100)/100, rr: Math.round(rr*100)/100, xp };
 }
 function updateLogPreview(){
@@ -361,12 +397,13 @@ function updateLogPreview(){
 function renderLogImagePreview(){
   const box = $('#log-image-preview');
   if (!box) return;
-  box.innerHTML = STATE.logFormImage ? `
-    <div class="image-preview-row">
-      <div style="display:flex; align-items:center; gap:.6rem;"><img src="${STATE.logFormImage}"><span style="font-size:.7rem; color:var(--emerald); font-weight:700;">✅ Screenshot Attached</span></div>
-      <button type="button" data-action="remove-log-image" style="background:var(--rose-light); color:var(--rose); border:none; border-radius:.7rem; padding:.35rem .6rem; cursor:pointer;">🗑️</button>
-    </div>` : '';
+  const before = STATE.logFormBeforeImage, after = STATE.logFormAfterImage;
+  box.innerHTML = (before || after) ? `<div class="screenshot-pair">
+    <div>${before ? `<img src="${esc(before)}" data-action="view-image" data-src="${esc(before)}"><span>Before Entry</span>` : '<div class="shot-empty">No Before Screenshot</div>'}</div>
+    <div>${after ? `<img src="${esc(after)}" data-action="view-image" data-src="${esc(after)}"><span>After Exit</span>` : '<div class="shot-empty">No After Screenshot</div>'}</div>
+  </div>` : '';
 }
+
 function renderLogTab(){
   const strategyOptions = allStrategies().map(p => `<option value="${esc(p.id)}" ${STATE.selectedPlaybookId===p.id?'selected':''}>${esc(p.name)}</option>`).join('');
   return `
@@ -386,15 +423,19 @@ function renderLogTab(){
 
       ${STATE.logFormIsSetup ? `<div class="field strategy-select-field" style="background:var(--indigo-light); border:1px solid #c7d2fe; border-radius:1rem; padding:.85rem;">
         <label style="display:flex; justify-content:space-between; color:var(--indigo);"><span>🎯 Select Strategy</span><span style="font-size:.6rem; text-transform:none;">Playbook + My Strategies</span></label>
-        <select id="log-strategy-select">${strategyOptions}</select>
+        <select id="log-strategy-select" ${allStrategies().length ? '' : 'disabled'}>${allStrategies().length ? strategyOptions : '<option>No custom strategies yet</option>'}</select>
         <p class="card-sub" style="margin:.4rem 0 0;">Ye strategy aapke Trade History mein save hogi.</p>
       </div>` : ''}
 
       <div class="field" style="background:var(--slate-50); border:1px solid var(--slate-200); border-radius:1rem; padding:.85rem;">
-        <label style="display:flex; justify-content:space-between;"><span>📷 Attach Chart Screenshot</span><span style="color:var(--indigo);">+30 XP Bonus</span></label>
+        <label style="display:flex; justify-content:space-between;"><span>📸 Trade Screenshots</span><span style="color:var(--indigo);">Before + After</span></label>
         <div class="grid-3" style="grid-template-columns:1fr 1fr;">
-          <label class="upload-box"><span>⬆️</span><span style="font-size:.7rem; font-weight:700;">Upload Local File</span><input type="file" id="log-image-file" accept="image/*" style="display:none;"></label>
-          <input type="url" id="log-image-url" placeholder="Or paste image URL...">
+          <label class="upload-box"><span>🟦</span><span style="font-size:.7rem; font-weight:700;">Before Entry</span><input type="file" id="log-before-image-file" accept="image/*" style="display:none;"></label>
+          <label class="upload-box"><span>🟩</span><span style="font-size:.7rem; font-weight:700;">After Exit</span><input type="file" id="log-after-image-file" accept="image/*" style="display:none;"></label>
+        </div>
+        <div class="grid-3" style="grid-template-columns:1fr 1fr; margin-top:.5rem;">
+          <input type="url" id="log-before-image-url" placeholder="Before image URL...">
+          <input type="url" id="log-after-image-url" placeholder="After image URL...">
         </div>
         <div id="log-image-preview"></div>
       </div>
@@ -432,7 +473,22 @@ function renderLogTab(){
         <div><label>Take Profit ($)</label><input type="number" step="any" id="log-tp"></div>
       </div>
 
-      <div class="field"><label>Notes &amp; Mistakes</label><textarea id="log-notes" rows="2" placeholder="Kyu kiya trade? Rules follow kiye ya jaldi baazi me button daba diya?"></textarea></div>
+      <div class="field" style="background:var(--indigo-light); border:1px solid #c7d2fe; border-radius:1rem; padding:.85rem;">
+        <label style="color:var(--indigo);">🎯 Planned Trade</label>
+        <div class="grid-3" style="grid-template-columns:repeat(3,1fr);">
+          <div><label>Planned Entry</label><input type="number" step="any" id="log-planned-entry"></div>
+          <div><label>Planned SL</label><input type="number" step="any" id="log-planned-sl"></div>
+          <div><label>Planned Target</label><input type="number" step="any" id="log-planned-tp"></div>
+        </div>
+        <p class="card-sub" style="margin:.45rem 0 0;">Agar blank chhoda to actual values ko planned maana jayega.</p>
+      </div>
+
+      <div class="field grid-3" style="grid-template-columns:1fr 1fr;">
+        <div><label>🧠 Mistake Tag</label><select id="log-mistake">${MISTAKE_OPTIONS.map(x=>`<option value="${x[0]}">${x[1]}</option>`).join('')}</select></div>
+        <div><label>Trade Quality</label><select id="log-quality"><option value="5">★★★★★ Excellent Process</option><option value="4">★★★★ Good Process</option><option value="3" selected>★★★ Average</option><option value="2">★★ Poor Process</option><option value="1">★ Rule Break</option></select></div>
+      </div>
+
+      <div class="field"><label>Notes &amp; Review</label><textarea id="log-notes" rows="2" placeholder="Trade ke baad kya seekha? Kya plan follow hua? Kya improve karna hai?"></textarea></div>
 
       <button type="submit" class="btn-primary btn-block">Save Trade Log</button>
     </form>
@@ -463,7 +519,7 @@ function renderStrategyBuilder(){
       <div id="strategy-builder-form" style="display:none; margin-top:1rem; padding-top:1rem; border-top:1px solid #dbeafe;">
         <div class="field">
           <label>Strategy Name *</label>
-          <input type="text" id="strategy-name" placeholder="e.g. Liquidity Sweep + FVG" maxlength="80">
+          <input type="text" id="strategy-name" placeholder="e.g. My Opening Range Strategy" maxlength="80">
         </div>
         <div class="field grid-3" style="grid-template-columns:1fr 1fr;">
           <div><label>Entry Criteria</label><textarea id="strategy-entry" rows="3" placeholder="Entry ke liye mandatory conditions..."></textarea></div>
@@ -497,7 +553,7 @@ function renderNotesTab(){
 
       <div class="field">
         <label>Strategy</label>
-        <select id="note-strategy-select">${strategyOptions}</select>
+        <select id="note-strategy-select" ${strategyObjects.length ? '' : 'disabled'}>${strategyObjects.length ? strategyOptions : '<option>No custom strategies yet</option>'}</select>
         <p class="card-sub" style="margin:.4rem 0 0;">New strategy banane ke liye upar <strong>ADD STRATEGY</strong> use karein.</p>
       </div>
 
@@ -567,12 +623,43 @@ function renderRealityTab(){
 
 /* ---------------- History tab ---------------- */
 function renderHistoryTab(){
-  if (!STATE.trades.length) return `<p class="empty-msg">Abhi koi trade log nahi hai. "Log Trade" tab se apna pehla trade add karo.</p>`;
-  return `<div class="cards-grid">
-    ${STATE.trades.map(t => `
+  const all = STATE.trades;
+  if (!all.length) return `<p class="empty-msg">Abhi koi trade log nahi hai. "Log Trade" tab se apna pehla trade add karo.</p>`;
+  const trades = filteredHistoryTrades();
+  const perf = strategyPerformance();
+  const strategyNames = [...new Set(all.map(tradeStrategyName))];
+  const totalPnl = trades.reduce((a,t)=>a+(Number(t.pnl)||0),0);
+  const wins = trades.filter(t=>(Number(t.pnl)||0)>0).length;
+  return `
+  <div class="card journal-summary-card">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:.75rem;flex-wrap:wrap;">
+      <div><h2 class="section-title">📊 Journal Review</h2><p class="card-sub">Plan vs actual, mistakes aur strategy performance ek jagah.</p></div>
+      <div class="mono" style="font-weight:800;color:${totalPnl>=0?'var(--emerald)':'var(--rose)'};">${money(totalPnl)}</div>
+    </div>
+    <div class="grid-3 journal-kpis">
+      <div><span class="uppercase-label">Trades</span><strong>${trades.length}</strong></div>
+      <div><span class="uppercase-label">Win Rate</span><strong>${trades.length?Math.round(wins/trades.length*100):0}%</strong></div>
+      <div><span class="uppercase-label">Avg Quality</span><strong>${trades.length?(trades.reduce((a,t)=>a+(Number(t.quality)||3),0)/trades.length).toFixed(1):'—'}/5</strong></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 class="section-title">🎯 Strategy-wise Performance</h3>
+    ${perf.length ? `<div class="strategy-performance-list">${perf.map(g=>`<div class="strategy-performance-row"><div><strong>${esc(g.name)}</strong><span>${g.trades} trades • ${g.winRate}% win • ${g.discipline}% rule-follow</span></div><div class="mono" style="font-weight:800;color:${g.pnl>=0?'var(--emerald)':'var(--rose)'};">${money(Math.round(g.pnl*100)/100)}<small> ${g.avgR}R avg</small></div></div>`).join('')}</div>` : '<p class="empty-msg">Strategy performance yahan dikhega.</p>'}
+  </div>
+
+  <div class="card">
+    <div class="history-filter-grid">
+      <div><label>Strategy Filter</label><select id="history-strategy-filter"><option value="ALL">All Strategies</option>${strategyNames.map(n=>`<option value="${esc(n)}" ${STATE.historyStrategyFilter===n?'selected':''}>${esc(n)}</option>`).join('')}</select></div>
+      <div><label>Mistake Filter</label><select id="history-mistake-filter"><option value="ALL">All Mistakes</option>${MISTAKE_OPTIONS.map(x=>`<option value="${x[0]}" ${STATE.historyMistakeFilter===x[0]?'selected':''}>${x[1]}</option>`).join('')}</select></div>
+    </div>
+  </div>
+
+  <div class="cards-grid">
+    ${trades.length ? trades.map(t => { const pv=plannedVsActual(t); return `
       <div class="item-card">
         <div class="thumb-wrap">
-          ${t.image ? `<img class="item-thumb" src="${t.image}" data-action="view-image" data-src="${t.image}">` : `<div class="item-thumb-placeholder">🖼️</div>`}
+          ${t.beforeImage || t.image ? `<img class="item-thumb" src="${esc(t.beforeImage || t.image)}" data-action="view-image" data-src="${esc(t.beforeImage || t.image)}">` : `<div class="item-thumb-placeholder">🖼️</div>`}
           <span class="${t.type==='LONG'?'badge-long':'badge-short'}">${t.type}</span>
         </div>
         <div class="item-body">
@@ -580,13 +667,12 @@ function renderHistoryTab(){
             <div><span style="font-weight:800; font-size:.8rem;">${esc(t.symbol)}</span><span style="display:block; font-size:.6rem; color:var(--slate-500);">${esc(t.strategy)}</span></div>
             <div style="text-align:right;"><span class="mono" style="font-weight:800; display:block; color:${t.pnl>=0?'var(--emerald)':'var(--rose)'};">${money(t.pnl)}</span><span class="mono" style="font-size:.6rem; color:var(--slate-400);">${t.rr} R</span></div>
           </div>
+          <div class="plan-actual-grid"><div><span>PLANNED</span><p>Entry ${pv.pe ?? '—'} • SL ${pv.ps ?? '—'} • Target ${pv.pt ?? '—'}</p></div><div><span>ACTUAL</span><p>Entry ${t.entryPrice} • SL ${t.stopLoss ?? '—'} • Exit ${t.exitPrice}</p></div></div>
+          <div style="display:flex;gap:.4rem;flex-wrap:wrap;"><span class="journal-chip">🧠 ${esc(mistakeLabel(t.mistake || 'none'))}</span><span class="journal-chip">⭐ ${t.quality||3}/5</span>${t.afterImage?'<span class="journal-chip">📸 Before + After</span>':''}</div>
           <p class="item-notes">${esc(t.notes)}</p>
-          <div class="item-footer mono">
-            <span>${t.device==='Laptop'?'💻':'📱'} ${esc(t.device)} • ${esc(t.location)}</span>
-            <span style="color:var(--indigo); font-weight:700;">${esc(t.emotion)}</span>
-          </div>
+          <div class="item-footer mono"><span>${t.device==='Laptop'?'💻':'📱'} ${esc(t.device)} • ${esc(t.location)}</span><span style="color:var(--indigo); font-weight:700;">${esc(t.emotion)}</span></div>
         </div>
-      </div>`).join('')}
+      </div>`; }).join('') : '<p class="empty-msg">Is filter ke liye koi trade nahi mila.</p>'}
   </div>`;
 }
 
@@ -622,7 +708,7 @@ document.addEventListener('click', async (e) => {
   else if (action==='record-state') { alert(`Mindset saved: ${findMindset(STATE.selectedMindsetId).name} (+20 XP)`); }
   else if (action==='set-log-setup') { STATE.logFormIsSetup = btn.dataset.value==='true'; renderTabOnly(); }
   else if (action==='set-log-device') { STATE.logFormDevice = btn.dataset.value; renderTabOnly(); }
-  else if (action==='remove-log-image') { STATE.logFormImage=''; renderLogImagePreview(); updateLogPreview(); }
+  else if (action==='remove-log-image') { STATE.logFormImage=''; STATE.logFormBeforeImage=''; STATE.logFormAfterImage=''; renderLogImagePreview(); updateLogPreview(); }
   else if (action==='remove-note-image') { STATE.noteFormImage=''; renderNoteImagePreview(); }
   else if (action==='view-image') { $('#modal-image').src = btn.dataset.src; $('#image-modal').style.display='flex'; }
   else if (action==='toggle-strategy-builder') {
@@ -662,6 +748,7 @@ document.addEventListener('click', async (e) => {
     const strategy = { id:`custom-${Date.now()}`, name:val, entryCriteria:'', exitCriteria:'', rules:[], mandatoryRules:[], commonTraps:[], winningExamples:[], losingExamples:[], winRate:0, avgRR:'—' };
     if (!STATE.customStrategies.some(s=>normalizeCustomStrategy(s).name===val)) STATE.customStrategies.push(strategy);
     STATE.noteFormStrategy = val;
+    STATE.selectedPlaybookId = strategy.id;
     await saveUserData();
     renderTabOnly();
   }
@@ -679,7 +766,8 @@ document.addEventListener('input', (e) => {
   if (e.target.id==='energy-slider') { STATE.energyLevel = Number(e.target.value); $('#energy-val').textContent = STATE.energyLevel+'%'; refreshBatteryOnly(); }
   else if (e.target.id==='noise-slider') { STATE.noiseLevel = Number(e.target.value); $('#noise-val').textContent = STATE.noiseLevel+'%'; refreshBatteryOnly(); }
   else if (['log-entry','log-exit','log-qty','log-sl','log-type'].includes(e.target.id)) { updateLogPreview(); }
-  else if (e.target.id==='log-image-url') { STATE.logFormImage = e.target.value; renderLogImagePreview(); updateLogPreview(); }
+  else if (e.target.id==='log-before-image-url') { STATE.logFormBeforeImage = e.target.value; renderLogImagePreview(); updateLogPreview(); }
+  else if (e.target.id==='log-after-image-url') { STATE.logFormAfterImage = e.target.value; renderLogImagePreview(); updateLogPreview(); }
   else if (e.target.id==='note-image-url') { STATE.noteFormImage = e.target.value; renderNoteImagePreview(); }
 });
 
@@ -699,15 +787,17 @@ document.addEventListener('change', (e) => {
   if (e.target.id==='playbook-select') { STATE.selectedPlaybookId = e.target.value; STATE.checkedRules = {}; renderTabOnly(); }
   else if (e.target.id==='log-strategy-select') { STATE.selectedPlaybookId = e.target.value; STATE.checkedRules = {}; updateLogPreview(); }
   else if (e.target.id==='log-location-select') { STATE.logFormLocation = e.target.value; updateLogPreview(); }
+  else if (e.target.id==='history-strategy-filter') { STATE.historyStrategyFilter = e.target.value; renderTabOnly(); }
+  else if (e.target.id==='history-mistake-filter') { STATE.historyMistakeFilter = e.target.value; renderTabOnly(); }
   else if (e.target.id==='note-strategy-select') {
     const row = $('#note-custom-strategy-row');
     if (e.target.value==='__custom__') { row.style.display='flex'; }
     else { row.style.display='none'; STATE.noteFormStrategy = e.target.value; }
   }
-  else if (e.target.id==='log-image-file') {
+  else if (e.target.id==='log-before-image-file' || e.target.id==='log-after-image-file') {
     const file = e.target.files[0]; if (!file) return;
     const reader = new FileReader();
-    reader.onloadend = () => { STATE.logFormImage = reader.result; renderLogImagePreview(); updateLogPreview(); };
+    reader.onloadend = () => { if (e.target.id==='log-before-image-file') STATE.logFormBeforeImage = reader.result; else STATE.logFormAfterImage = reader.result; renderLogImagePreview(); updateLogPreview(); };
     reader.readAsDataURL(file);
   }
   else if (e.target.id==='note-image-file') {
@@ -725,6 +815,10 @@ document.addEventListener('submit', async (e) => {
     const entry = $('#log-entry').value, exit = $('#log-exit').value, qty = $('#log-qty').value;
     if (!symbol || !entry || !exit || !qty) { alert('Please fill out Symbol, Entry, Exit, and Quantity!'); return; }
     const p = computeLogPreview();
+    const plannedEntry = parseFloat($('#log-planned-entry')?.value) || parseFloat(entry);
+    const plannedSL = parseFloat($('#log-planned-sl')?.value) || ($('#log-sl').value ? parseFloat($('#log-sl').value) : null);
+    const plannedTP = parseFloat($('#log-planned-tp')?.value) || ($('#log-tp').value ? parseFloat($('#log-tp').value) : null);
+    const plannedRR = plannedSL && plannedEntry !== plannedSL && plannedTP ? Math.round((Math.abs(plannedTP-plannedEntry)/Math.abs(plannedEntry-plannedSL))*100)/100 : null;
     const strategyName = STATE.logFormIsSetup ? findStrategy(STATE.selectedPlaybookId).name : 'Bina Setup (Tukke Baazi)';
     const mindset = findMindset(STATE.selectedMindsetId);
     STATE.trades.unshift({
@@ -732,10 +826,11 @@ document.addEventListener('submit', async (e) => {
       entryPrice: parseFloat(entry), exitPrice: parseFloat(exit), quantity: parseFloat(qty),
       stopLoss: $('#log-sl').value ? parseFloat($('#log-sl').value) : null, takeProfit: $('#log-tp').value ? parseFloat($('#log-tp').value) : null,
       strategy: strategyName, emotion: mindset.name, device: STATE.logFormDevice, location: STATE.logFormLocation,
-      notes: $('#log-notes').value, image: STATE.logFormImage || null, followedPlan: STATE.logFormIsSetup,
+      notes: $('#log-notes').value, image: STATE.logFormAfterImage || STATE.logFormBeforeImage || null, beforeImage: STATE.logFormBeforeImage || null, afterImage: STATE.logFormAfterImage || null,
+      plannedEntry, plannedSL, plannedTP, plannedRR, mistake: $('#log-mistake').value, quality: Number($('#log-quality').value), followedPlan: STATE.logFormIsSetup && $('#log-mistake').value==='none',
       date: new Date().toISOString(), pnl: p.pnl, rr: p.rr, xpEarned: p.xp
     });
-    STATE.logFormImage = '';
+    STATE.logFormImage = ''; STATE.logFormBeforeImage = ''; STATE.logFormAfterImage = '';
     await saveUserData();
     STATE.activeTab = 'history';
     render();
