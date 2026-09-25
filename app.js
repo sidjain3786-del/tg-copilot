@@ -37,7 +37,7 @@ const STATE = {
   logFormIsSetup: true, logFormDevice: 'Laptop', logFormLocation: 'Desk', logFormImage: '', logFormBeforeImage: '', logFormAfterImage: '', logFormImages: [],
   logEmotion: '', logCustomEmotion: '', logConfidence: 70, editingTradeId: null,
   noteFormStrategy: '', noteFormImage: '', activeNoteId: null,
-  historyStrategyFilter: 'ALL', historyMistakeFilter: 'ALL'
+  historyStrategyFilter: 'ALL', historyMistakeFilter: 'ALL', historyView: localStorage.getItem('tc_history_view') || 'grid'
 };
 
 /* ---------------- utils ---------------- */
@@ -750,6 +750,26 @@ function renderRealityTab(){
 }
 
 /* ---------------- History tab ---------------- */
+function tradeImages(t){
+  const imgs = Array.isArray(t.images) && t.images.length ? t.images : [t.beforeImage, t.afterImage, t.image].filter(Boolean);
+  return [...new Set(imgs.filter(Boolean))];
+}
+function historyViewButton(id, icon, label){
+  return `<button type="button" class="history-view-btn ${STATE.historyView===id?'active':''}" data-action="history-view" data-view="${id}">${icon}<span>${label}</span></button>`;
+}
+function renderTradeView(t, mode){
+  const pv=plannedVsActual(t), imgs=tradeImages(t);
+  const pnl=Number(t.pnl)||0, rr=t.rr ?? '—';
+  const resultClass=pnl>=0?'positive':'negative';
+  const meta=`${esc(t.symbol||'—')} • ${esc(t.type||'—')}`;
+  const chips=`<div class="history-chips"><span class="journal-chip">🧠 ${esc(t.emotion||'—')}</span><span class="journal-chip">🎯 ${Number(t.confidence)||0}/100</span><span class="journal-chip">📝 ${esc(mistakeLabel(t.mistake||'none'))}</span><span class="journal-chip">⭐ ${t.quality||3}/5</span></div>`;
+  const actions=`<button type="button" class="btn-secondary trade-edit-btn" data-action="edit-trade" data-id="${esc(t.id)}">✏️ Edit</button>`;
+  const shots = imgs.length ? `<div class="history-images">${imgs.map((src,i)=>`<div class="history-image"><img src="${esc(src)}" data-action="view-image" data-src="${esc(src)}"><span>${i===0?'Before':i===1?'After':`Image ${i+1}`}</span></div>`).join('')}</div>` : `<div class="history-no-images">🖼 No screenshots</div>`;
+  if(mode==='list') return `<div class="history-list-row"><div class="history-list-main"><div class="history-symbol">${meta}</div><span class="history-date">${esc(t.date||t.createdAt||'')}</span></div><div class="history-list-stat">${pv.pe??'—'} → ${t.exitPrice??'—'}</div><div class="history-list-stat">${esc(t.emotion||'—')}</div><div class="history-list-stat ${resultClass} mono">${money(pnl)}</div><div>${actions}</div></div>`;
+  if(mode==='detailed') return `<article class="history-detail-card"><div class="history-detail-head"><div><span class="history-kicker">TRADE JOURNAL</span><h3>${meta}</h3><p>${esc(t.date||t.createdAt||'')}</p></div><div class="history-detail-result ${resultClass}">${money(pnl)}<small>${esc(String(rr))} R</small></div>${actions}</div>${chips}<div class="history-detail-grid"><div><span>PLANNED</span><strong>Entry ${pv.pe??'—'} • SL ${pv.ps??'—'} • Target ${pv.pt??'—'} • R:R ${pv.prr??'—'}</strong></div><div><span>ACTUAL</span><strong>Entry ${t.entryPrice??'—'} • SL ${t.stopLoss??'—'} • Exit ${t.exitPrice??'—'}</strong></div><div><span>EXIT REASON</span><strong>${esc(t.exitReason||'—')}</strong></div><div><span>QUANTITY</span><strong>${esc(t.quantity??'—')}</strong></div></div><p class="history-note">${esc(t.notes||'No notes added.')}</p>${shots}</article>`;
+  if(mode==='gallery') return `<article class="history-gallery-card"><div class="history-gallery-head"><div><h3>${meta}</h3><p>${esc(t.date||t.createdAt||'')}</p></div><div class="history-detail-result ${resultClass}">${money(pnl)}<small>${esc(String(rr))} R</small></div>${actions}</div>${shots}<div class="history-gallery-meta">${chips}</div></article>`;
+  return `<article class="history-grid-card"><div class="history-grid-media">${imgs[0]?`<img src="${esc(imgs[0])}" data-action="view-image" data-src="${esc(imgs[0])}">`:`<div class="history-grid-placeholder">📈</div>`}<span class="${t.type==='LONG'?'badge-long':'badge-short'}">${esc(t.type||'—')}</span></div><div class="history-grid-body"><div class="history-grid-top"><div><h3>${esc(t.symbol||'—')}</h3><p>${esc(tradeStrategyName(t)||'No strategy')}</p></div><div class="history-detail-result ${resultClass}">${money(pnl)}<small>${esc(String(rr))} R</small></div></div>${chips}<div class="history-mini-stats"><span>Entry <b>${t.entryPrice??'—'}</b></span><span>Exit <b>${t.exitPrice??'—'}</b></span><span>Qty <b>${t.quantity??'—'}</b></span></div><div class="history-card-actions">${actions}</div></div></article>`;
+}
 function renderHistoryTab(){
   const all = STATE.trades;
   if (!all.length) return `<p class="empty-msg">Abhi koi trade log nahi hai. "Log Trade" tab se apna pehla trade add karo.</p>`;
@@ -758,50 +778,15 @@ function renderHistoryTab(){
   const strategyNames = [...new Set(all.map(tradeStrategyName))];
   const totalPnl = trades.reduce((a,t)=>a+(Number(t.pnl)||0),0);
   const wins = trades.filter(t=>(Number(t.pnl)||0)>0).length;
+  const mode=STATE.historyView;
   return `
   <div class="card journal-summary-card">
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:.75rem;flex-wrap:wrap;">
-      <div><h2 class="section-title">📊 Journal Review</h2><p class="card-sub">Plan vs actual, mistakes aur strategy performance ek jagah.</p></div>
-      <div class="mono" style="font-weight:800;color:${totalPnl>=0?'var(--emerald)':'var(--rose)'};">${money(totalPnl)}</div>
-    </div>
-    <div class="grid-3 journal-kpis">
-      <div><span class="uppercase-label">Trades</span><strong>${trades.length}</strong></div>
-      <div><span class="uppercase-label">Win Rate</span><strong>${trades.length?Math.round(wins/trades.length*100):0}%</strong></div>
-      <div><span class="uppercase-label">Avg Quality</span><strong>${trades.length?(trades.reduce((a,t)=>a+(Number(t.quality)||3),0)/trades.length).toFixed(1):'—'}/5</strong></div>
-    </div>
+    <div class="history-heading"><div><h2 class="section-title">📊 Trade History</h2><p class="card-sub">Apne trades ko jis tarah dekhna ho, wahi view choose karo.</p></div><div class="mono history-total ${totalPnl>=0?'positive':'negative'}">${money(totalPnl)}</div></div>
+    <div class="grid-3 journal-kpis"><div><span class="uppercase-label">Trades</span><strong>${trades.length}</strong></div><div><span class="uppercase-label">Win Rate</span><strong>${trades.length?Math.round(wins/trades.length*100):0}%</strong></div><div><span class="uppercase-label">Avg Quality</span><strong>${trades.length?(trades.reduce((a,t)=>a+(Number(t.quality)||3),0)/trades.length).toFixed(1):'—'}/5</strong></div></div>
   </div>
-
-  <div class="card">
-    <h3 class="section-title">🎯 Strategy-wise Performance</h3>
-    ${perf.length ? `<div class="strategy-performance-list">${perf.map(g=>`<div class="strategy-performance-row"><div><strong>${esc(g.name)}</strong><span>${g.trades} trades • ${g.winRate}% win • ${g.discipline}% rule-follow</span></div><div class="mono" style="font-weight:800;color:${g.pnl>=0?'var(--emerald)':'var(--rose)'};">${money(Math.round(g.pnl*100)/100)}<small> ${g.avgR}R avg</small></div></div>`).join('')}</div>` : '<p class="empty-msg">Strategy performance yahan dikhega.</p>'}
-  </div>
-
-  <div class="card">
-    <div class="history-filter-grid">
-      <div><label>Strategy Filter</label><select id="history-strategy-filter"><option value="ALL">All Strategies</option>${strategyNames.map(n=>`<option value="${esc(n)}" ${STATE.historyStrategyFilter===n?'selected':''}>${esc(n)}</option>`).join('')}</select></div>
-      <div><label>Mistake Filter</label><select id="history-mistake-filter"><option value="ALL">All Mistakes</option>${MISTAKE_OPTIONS.map(x=>`<option value="${x[0]}" ${STATE.historyMistakeFilter===x[0]?'selected':''}>${x[1]}</option>`).join('')}</select></div>
-    </div>
-  </div>
-
-  <div class="cards-grid">
-    ${trades.length ? trades.map(t => { const pv=plannedVsActual(t); return `
-      <div class="item-card">
-        <div class="thumb-wrap">
-          ${t.beforeImage || t.image ? `<img class="item-thumb" src="${esc(t.beforeImage || t.image)}" data-action="view-image" data-src="${esc(t.beforeImage || t.image)}">` : `<div class="item-thumb-placeholder">🖼️</div>`}
-          <span class="${t.type==='LONG'?'badge-long':'badge-short'}">${t.type}</span>
-        </div>
-        <div class="item-body">
-          <div style="display:flex; justify-content:space-between;">
-            <div><span style="font-weight:800; font-size:.8rem;">${esc(t.symbol)}</span><span style="display:block; font-size:.6rem; color:var(--slate-500);">${esc(t.strategy)}</span></div><button type="button" class="btn-secondary trade-edit-btn" data-action="edit-trade" data-id="${esc(t.id)}">✏️ Edit</button>
-            <div style="text-align:right;"><span class="mono" style="font-weight:800; display:block; color:${t.pnl>=0?'var(--emerald)':'var(--rose)'};">${money(t.pnl)}</span><span class="mono" style="font-size:.6rem; color:var(--slate-400);">${t.rr} R</span></div>
-          </div>
-          <div class="plan-actual-grid"><div><span>PLANNED</span><p>Entry ${pv.pe ?? '—'} • SL ${pv.ps ?? '—'} • Target ${pv.pt ?? '—'}</p></div><div><span>ACTUAL</span><p>Entry ${t.entryPrice} • SL ${t.stopLoss ?? '—'} • Exit ${t.exitPrice}</p></div></div>
-          <div style="display:flex;gap:.4rem;flex-wrap:wrap;"><span class="journal-chip">🧠 ${esc(mistakeLabel(t.mistake || 'none'))}</span><span class="journal-chip">⭐ ${t.quality||3}/5</span>${t.afterImage?'<span class="journal-chip">📸 Before + After</span>':''}</div>
-          <p class="item-notes">${esc(t.notes)}</p>
-          <div class="item-footer mono"><span>${t.device==='Laptop'?'💻':'📱'} ${esc(t.device)} • ${esc(t.location)}</span><span style="color:var(--indigo); font-weight:700;">${esc(t.emotion)}</span></div>
-        </div>
-      </div>`; }).join('') : '<p class="empty-msg">Is filter ke liye koi trade nahi mila.</p>'}
-  </div>
+  <div class="card history-toolbar"><div class="history-toolbar-title"><strong>View</strong><span>${mode==='grid'?'Compact cards':mode==='list'?'Quick rows':mode==='detailed'?'Full journal':'Screenshot focused'}</span></div><div class="history-view-switcher">${historyViewButton('grid','▦','Grid')}${historyViewButton('list','☰','List')}${historyViewButton('detailed','📖','Detailed')}${historyViewButton('gallery','🖼','Gallery')}</div></div>
+  <div class="card history-filters"><div class="history-filter-grid"><div><label>Strategy Filter</label><select id="history-strategy-filter"><option value="ALL">All Strategies</option>${strategyNames.map(n=>`<option value="${esc(n)}" ${STATE.historyStrategyFilter===n?'selected':''}>${esc(n)}</option>`).join('')}</select></div><div><label>Mistake Filter</label><select id="history-mistake-filter"><option value="ALL">All Mistakes</option>${MISTAKE_OPTIONS.map(x=>`<option value="${x[0]}" ${STATE.historyMistakeFilter===x[0]?'selected':''}>${x[1]}</option>`).join('')}</select></div></div></div>
+  <div class="history-results ${mode}-view">${trades.length ? (mode==='list' ? `<div class="history-list-head"><span>Trade</span><span>Entry → Exit</span><span>Emotion</span><span>P&amp;L</span><span></span></div>${trades.map(t=>renderTradeView(t,mode)).join('')}` : trades.map(t=>renderTradeView(t,mode)).join('')) : '<p class="empty-msg">Is filter ke liye koi trade nahi mila.</p>'}</div>
   ${STATE.editingTradeId ? renderEditTradeModal(STATE.editingTradeId) : ''}`;
 }
 
