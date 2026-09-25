@@ -835,6 +835,14 @@ document.addEventListener('click', async (e) => {
   else if (action==='select-mindset') { STATE.selectedMindsetId = btn.dataset.id; renderTabOnly(); }
   else if (action==='toggle-rule') { const i=btn.dataset.idx; STATE.checkedRules[i]=!STATE.checkedRules[i]; renderTabOnly(); }
   else if (action==='set-inspection') { STATE.inspectionTab = btn.dataset.value; renderTabOnly(); }
+  else if (action==='history-view') {
+    const view = btn.dataset.view;
+    if (['grid','list','detailed','gallery'].includes(view)) {
+      STATE.historyView = view;
+      localStorage.setItem('tc_history_view', view);
+      renderTabOnly();
+    }
+  }
   else if (action==='record-state') { alert(`Mindset saved: ${findMindset(STATE.selectedMindsetId).name} (+20 XP)`); }
   else if (action==='set-log-setup') { const draft=captureLogDraft(); STATE.logFormIsSetup = btn.dataset.value==='true'; renderTabOnly(); restoreLogDraft(draft); updateLogPreview(); }
   else if (action==='set-log-emotion') { const draft=captureLogDraft(); STATE.logEmotion = btn.dataset.value; STATE.logCustomEmotion = ''; renderTabOnly(); restoreLogDraft(draft); }
