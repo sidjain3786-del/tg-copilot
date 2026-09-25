@@ -190,6 +190,13 @@ function plannedVsActual(t){
   const pr = t.plannedRR ?? null;
   return {pe,ps,pt,pr};
 }
+function strategyPastExecutions(strategyName){
+  const matches = STATE.trades.filter(t => tradeStrategyName(t) === strategyName);
+  return {
+    winning: matches.filter(t => (Number(t.pnl)||0) > 0),
+    losing: matches.filter(t => (Number(t.pnl)||0) < 0)
+  };
+}
 
 /* ---------------- computed stats ---------------- */
 function computeStats(){
@@ -343,19 +350,16 @@ function renderCopilotTab(){
             <button data-action="set-inspection" data-value="losing" class="tab-btn ${STATE.inspectionTab==='losing'?'active':''}" style="${STATE.inspectionTab==='losing'?'background:var(--rose);color:#fff;':''}">🔴 Losing</button>
           </div>
         </div>
-        ${STATE.inspectionTab==='winning' ? (
-          strategy.winningExamples.length===0 ? `<p class="empty-msg">No sample winning trades recorded yet for this setup.</p>` :
-          strategy.winningExamples.map(ex => `
-            <div class="example-row"><div style="display:flex; align-items:center; gap:.75rem;"><div><span style="font-weight:800; font-size:.75rem;">${esc(ex.symbol)}</span><p style="font-size:.72rem; color:var(--slate-600); margin:.2rem 0 0;">${esc(ex.note)}</p></div></div><span class="mono" style="color:var(--emerald); font-weight:800; font-size:.72rem;">+${ex.pnl} (${ex.rr})</span></div>`).join('')
-        ) : (
-          strategy.losingExamples.length===0 ? `<p class="empty-msg">No sample losing trades recorded yet for this setup.</p>` :
-          strategy.losingExamples.map(ex => `
-            <div class="example-row" style="flex-direction:column; align-items:flex-start; gap:.4rem;">
-              <div style="display:flex; justify-content:space-between; width:100%;"><span style="font-weight:800; font-size:.75rem;">${esc(ex.symbol)}</span><span class="mono" style="color:var(--rose); font-weight:800; font-size:.72rem;">${ex.pnl} (${ex.rr})</span></div>
-              <p style="font-size:.72rem; color:var(--slate-600); margin:0;">${esc(ex.note)}</p>
-              ${ex.ruleBroken ? `<p style="font-size:.6rem; font-weight:700; color:#9f1239; background:var(--rose-light); padding:.3rem .6rem; border-radius:.75rem;">${esc(ex.ruleBroken)}</p>` : ''}
-            </div>`).join('')
-        )}
+        ${(() => {
+          const past = strategyPastExecutions(strategy.name);
+          const list = STATE.inspectionTab==='winning' ? past.winning : past.losing;
+          if (!list.length) return `<p class="empty-msg">Is strategy ke ${STATE.inspectionTab==='winning'?'winning':'losing'} past executions abhi nahi hain.</p>`;
+          return list.slice(0, 8).map(t => `
+            <div class="example-row">
+              <div style="min-width:0;"><div style="display:flex;gap:.45rem;align-items:center;flex-wrap:wrap;"><span style="font-weight:800; font-size:.75rem;">${esc(t.symbol)}</span><span class="journal-chip">${esc(t.type)}</span><span class="journal-chip">⭐ ${t.quality||3}/5</span></div><p style="font-size:.66rem; color:var(--slate-500); margin:.25rem 0 0;">Entry ${t.entryPrice ?? '—'} • Exit ${t.exitPrice ?? '—'} • ${esc(mistakeLabel(t.mistake||'none'))}</p></div>
+              <span class="mono" style="color:${Number(t.pnl)>=0?'var(--emerald)':'var(--rose)'}; font-weight:800; font-size:.72rem; white-space:nowrap;">${money(Number(t.pnl)||0)} (${t.rr ?? '—'}R)</span>
+            </div>`).join('');
+        })()}
       </div>
     </div>
 
@@ -692,6 +696,8 @@ function renderTabOnly(){ // re-render just the active tab (after in-tab interac
   if (STATE.activeTab==='copilot') content.innerHTML = renderCopilotTab();
   else if (STATE.activeTab==='log') { content.innerHTML = renderLogTab(); renderLogImagePreview(); updateLogPreview(); }
   else if (STATE.activeTab==='notes') { content.innerHTML = renderNotesTab(); renderNoteImagePreview(); }
+  else if (STATE.activeTab==='reality') content.innerHTML = renderRealityTab();
+  else if (STATE.activeTab==='history') content.innerHTML = renderHistoryTab();
   renderTabNav();
 }
 
