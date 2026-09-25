@@ -35,7 +35,7 @@ const STATE = {
   energyLevel: 85, noiseLevel: 15,
   selectedMindsetId: MINDSET_ARCHETYPES[0].id,
   logFormIsSetup: true, logFormDevice: 'Laptop', logFormLocation: 'Desk', logFormImage: '', logFormBeforeImage: '', logFormAfterImage: '',
-  noteFormStrategy: '', noteFormImage: '',
+  noteFormStrategy: '', noteFormImage: '', activeNoteId: null,
   historyStrategyFilter: 'ALL', historyMistakeFilter: 'ALL'
 };
 
@@ -544,64 +544,103 @@ function renderStrategyBuilder(){
 function renderNotesTab(){
   const strategyObjects = allStrategies();
   const strategyOptions = strategyObjects.map(p => `<option value="${esc(p.name)}" ${STATE.noteFormStrategy===p.name?'selected':''}>${esc(p.name)}</option>`).join('');
+  const notes = STATE.notes || [];
+  if (!STATE.activeNoteId || !notes.some(n => n.id === STATE.activeNoteId)) STATE.activeNoteId = notes[0]?.id || null;
+  const active = notes.find(n => n.id === STATE.activeNoteId) || null;
+
+  const renderReading = () => active ? `
+    <article class="note-reading-paper">
+      <div class="note-reading-topline">
+        <div>
+          <div class="note-reading-meta">${esc(active.symbol || 'General')}${active.strategy ? ` <span>•</span> ${esc(active.strategy)}` : ''}</div>
+          <h2>${esc(active.title || active.symbol || 'Trading Note')}</h2>
+          <div class="note-reading-date">${new Date(active.date).toLocaleDateString(undefined,{day:'numeric',month:'long',year:'numeric'})}</div>
+        </div>
+        <button class="item-delete note-reading-delete" data-action="delete-note" data-id="${active.id}" title="Delete note">🗑️</button>
+      </div>
+
+      ${active.image ? `<figure class="note-reading-image"><img src="${active.image}" data-action="view-image" data-src="${active.image}"><figcaption>Chart attached to this note</figcaption></figure>` : ''}
+
+      ${(active.entryCriteria||active.exitCriteria) ? `<div class="note-reading-rules">
+        ${active.entryCriteria ? `<div><span>ENTRY CRITERIA</span><p>${esc(active.entryCriteria)}</p></div>` : ''}
+        ${active.exitCriteria ? `<div><span>EXIT / INVALIDATION</span><p>${esc(active.exitCriteria)}</p></div>` : ''}
+      </div>` : ''}
+
+      ${active.analysis ? `<section class="note-reading-section"><div class="note-reading-label">MY ANALYSIS</div><p>${esc(active.analysis)}</p></section>` : ''}
+      ${active.learning ? `<section class="note-reading-learning"><div class="note-reading-label">✦ WHAT I LEARNED</div><p>${esc(active.learning)}</p></section>` : ''}
+    </article>` : `
+    <div class="note-reading-empty">
+      <div class="note-reading-empty-icon">📝</div>
+      <h3>Your reading space</h3>
+      <p>Save a note and it will appear here in a calm, distraction-free format.</p>
+    </div>`;
 
   return `
-  ${renderStrategyBuilder()}
-  <div class="card" style="max-width:42rem; margin:0 auto;">
-    <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--slate-100); padding-bottom:.75rem; margin-bottom:1rem;">
-      <h2 class="section-title">🧾 Trade Notes &amp; Learnings</h2>
-      <span class="xp-badge">+15 XP</span>
+  <div class="notes-workspace">
+    ${renderStrategyBuilder()}
+
+    <div class="notes-capture card">
+      <div class="notes-capture-heading">
+        <div>
+          <span class="uppercase-label">WRITE &amp; REFLECT</span>
+          <h2 class="section-title">📝 Capture a Trade Thought</h2>
+          <p class="card-sub">Chart dekho, apni thinking likho, save karo. Padhne ka experience neeche alag rakha gaya hai.</p>
+        </div>
+        <span class="xp-badge">+15 XP</span>
+      </div>
+      <form id="notes-form">
+        <div class="field"><label>Title / Symbol / Tag</label><input type="text" id="note-symbol" placeholder="e.g. XAUUSD — London Liquidity Review"></div>
+
+        <div class="field">
+          <label>Strategy</label>
+          <select id="note-strategy-select" ${strategyObjects.length ? '' : 'disabled'}>${strategyObjects.length ? strategyOptions : '<option>No custom strategies yet</option>'}</select>
+          <p class="card-sub" style="margin:.4rem 0 0;">New strategy banane ke liye upar <strong>ADD STRATEGY</strong> use karein.</p>
+        </div>
+
+        <div class="field grid-3" style="grid-template-columns:1fr 1fr;">
+          <div><label>Entry Criteria</label><textarea id="note-entry" rows="3" placeholder="Kin conditions par entry loge?"></textarea></div>
+          <div><label>Exit Criteria</label><textarea id="note-exit" rows="3" placeholder="Kab exit / target / SL hit consider karoge..."></textarea></div>
+        </div>
+
+        <div class="field note-upload-field">
+          <label>📷 Attach Chart Screenshot <span>(optional)</span></label>
+          <div class="grid-3" style="grid-template-columns:1fr 1fr;">
+            <label class="upload-box"><span>⬆️</span><span style="font-size:.7rem; font-weight:700;">Upload Local File</span><input type="file" id="note-image-file" accept="image/*" style="display:none;"></label>
+            <input type="url" id="note-image-url" placeholder="Or paste image URL...">
+          </div>
+          <div id="note-image-preview"></div>
+        </div>
+
+        <div class="field"><label>Kya Samjha / Analysis</label><textarea id="note-analysis" rows="4" placeholder="Chart pe kya dikh raha tha? Setup kaisa tha? Aapne kya notice kiya?"></textarea></div>
+        <div class="field"><label>Seekh / Learning Summary</label><textarea id="note-learning" rows="3" placeholder="Is trade / analysis se kya seekh mili? Agli baar kya repeat ya avoid karoge?"></textarea></div>
+
+        <button type="submit" class="btn-primary btn-block">Save Note</button>
+      </form>
     </div>
-    <form id="notes-form">
-      <div class="field"><label>Symbol / Tag (optional)</label><input type="text" id="note-symbol" placeholder="e.g. BTC/USDT or 'Weekly Review'"></div>
 
-      <div class="field">
-        <label>Strategy</label>
-        <select id="note-strategy-select" ${strategyObjects.length ? '' : 'disabled'}>${strategyObjects.length ? strategyOptions : '<option>No custom strategies yet</option>'}</select>
-        <p class="card-sub" style="margin:.4rem 0 0;">New strategy banane ke liye upar <strong>ADD STRATEGY</strong> use karein.</p>
+    <div class="notes-reading-header">
+      <div>
+        <span class="uppercase-label">YOUR JOURNAL</span>
+        <h2 class="section-title">☕ Reading Room</h2>
+        <p class="card-sub">Yahan saved notes ko bina clutter ke, araam se read aur reflect karein.</p>
       </div>
+      <span class="notes-count">${notes.length} ${notes.length===1?'note':'notes'}</span>
+    </div>
 
-      <div class="field grid-3" style="grid-template-columns:1fr 1fr;">
-        <div><label>Entry Criteria</label><textarea id="note-entry" rows="3" placeholder="Kin conditions par entry loge?"></textarea></div>
-        <div><label>Exit Criteria</label><textarea id="note-exit" rows="3" placeholder="Kab exit / target / SL hit consider karoge..."></textarea></div>
-      </div>
-
-      <div class="field" style="background:var(--slate-50); border:1px solid var(--slate-200); border-radius:1rem; padding:.85rem;">
-        <label>📷 Attach Chart Screenshot (optional)</label>
-        <div class="grid-3" style="grid-template-columns:1fr 1fr;">
-          <label class="upload-box"><span>⬆️</span><span style="font-size:.7rem; font-weight:700;">Upload Local File</span><input type="file" id="note-image-file" accept="image/*" style="display:none;"></label>
-          <input type="url" id="note-image-url" placeholder="Or paste image URL...">
-        </div>
-        <div id="note-image-preview"></div>
-      </div>
-
-      <div class="field"><label>Kya Samjha / Analysis</label><textarea id="note-analysis" rows="3" placeholder="Chart pe kya dikh raha tha? Setup kaisa tha?"></textarea></div>
-      <div class="field"><label>Seekh / Learning Summary</label><textarea id="note-learning" rows="2" placeholder="Is analysis se kya seekh mili?"></textarea></div>
-
-      <button type="submit" class="btn-primary btn-block">Save Note</button>
-    </form>
-  </div>
-
-  <div class="cards-grid">
-    ${STATE.notes.length===0 ? `<p class="empty-msg">Abhi tak koi note nahi hai. Upar wala form bharke apni pehli learning save karo!</p>` :
-      STATE.notes.map(n => `
-      <div class="item-card">
-        ${n.image ? `<img class="item-thumb" src="${n.image}" data-action="view-image" data-src="${n.image}">` : ''}
-        <div class="item-body">
-          <div style="display:flex; justify-content:space-between;"><span class="item-tag">${esc(n.symbol)}</span><button class="item-delete" data-action="delete-note" data-id="${n.id}">🗑️</button></div>
-          ${n.strategy ? `<span class="item-strategy">${esc(n.strategy)}</span>` : ''}
-          ${(n.entryCriteria||n.exitCriteria) ? `<div class="item-criteria-grid">
-            ${n.entryCriteria ? `<div class="item-criteria entry"><strong style="font-size:.6rem; text-transform:uppercase;">Entry</strong><p style="margin:.2rem 0 0;">${esc(n.entryCriteria)}</p></div>` : ''}
-            ${n.exitCriteria ? `<div class="item-criteria exit"><strong style="font-size:.6rem; text-transform:uppercase;">Exit</strong><p style="margin:.2rem 0 0;">${esc(n.exitCriteria)}</p></div>` : ''}
-          </div>` : ''}
-          ${n.analysis ? `<p class="item-notes"><strong style="font-size:.6rem; color:var(--slate-400); text-transform:uppercase; display:block;">Analysis</strong>${esc(n.analysis)}</p>` : ''}
-          ${n.learning ? `<div class="item-learning"><strong style="font-size:.6rem; text-transform:uppercase; display:block;">📚 Learning</strong>${esc(n.learning)}</div>` : ''}
-          <div class="item-footer">${new Date(n.date).toLocaleDateString()}</div>
-        </div>
-      </div>`).join('')}
+    <div class="notes-reading-layout">
+      <aside class="notes-library">
+        <div class="notes-library-title">Saved Notes</div>
+        ${notes.length ? notes.map(n => `
+          <button type="button" class="note-library-row ${n.id===STATE.activeNoteId?'active':''}" data-action="select-note" data-id="${n.id}">
+            <span class="note-library-symbol">${esc(n.symbol || 'General')}</span>
+            <span class="note-library-preview">${esc((n.learning || n.analysis || n.entryCriteria || 'No summary yet').replace(/\s+/g,' ').slice(0,90))}</span>
+            <span class="note-library-date">${new Date(n.date).toLocaleDateString(undefined,{day:'2-digit',month:'short'})}</span>
+          </button>`).join('') : `<div class="notes-library-empty">Abhi koi note saved nahi hai.</div>`}
+      </aside>
+      <main class="note-reading-panel">${renderReading()}</main>
+    </div>
   </div>`;
 }
-
 /* ---------------- Reality tab ---------------- */
 function renderRealityTab(){
   const s = computeStats();
@@ -758,8 +797,13 @@ document.addEventListener('click', async (e) => {
     await saveUserData();
     renderTabOnly();
   }
+  else if (action==='select-note') {
+    STATE.activeNoteId = btn.dataset.id;
+    render();
+  }
   else if (action==='delete-note') {
     STATE.notes = STATE.notes.filter(n => n.id !== btn.dataset.id);
+    if (STATE.activeNoteId === btn.dataset.id) STATE.activeNoteId = STATE.notes[0]?.id || null;
     saveUserData();
     renderTabOnly();
   }
@@ -850,6 +894,7 @@ document.addEventListener('submit', async (e) => {
       strategy: STATE.noteFormStrategy, entryCriteria: $('#note-entry').value.trim(), exitCriteria: $('#note-exit').value.trim(),
       analysis, learning, date: new Date().toISOString()
     });
+    STATE.activeNoteId = STATE.notes[0]?.id || null;
     STATE.noteFormImage = '';
     await saveUserData();
     renderTabOnly();
