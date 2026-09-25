@@ -355,3 +355,63 @@ button, input, select, textarea { touch-action: manipulation; }
   .log-save-row{position:sticky;bottom:58px;background:rgba(255,255,255,.96);padding:.75rem 0 .2rem;z-index:5}
   .log-save-row .btn-primary{min-width:0;flex:1}
 }
+
+/* Required emotion capture — compact, fast and readable */
+.log-emotion-required{margin-top:1rem;padding:1rem;border:1px solid #fbcfe8;border-radius:1rem;background:linear-gradient(135deg,#fff7fb,#fff);}
+.log-emotion-head{display:flex;justify-content:space-between;align-items:flex-start;gap:.75rem;margin-bottom:.7rem;}
+.log-emotion-title{font-weight:900;color:#334155;font-size:.86rem;}
+.log-emotion-title span{font-size:.62rem;color:#e11d48;margin-left:.35rem;font-weight:800;}
+.log-emotion-sub{font-size:.68rem;color:#64748b;margin-top:.2rem;}
+.emotion-selected-badge{font-size:.64rem;font-weight:800;padding:.35rem .6rem;border-radius:999px;background:#ecfdf5;color:#047857;white-space:nowrap;}
+.emotion-selected-badge.empty{background:#f8fafc;color:#94a3b8;}
+.emotion-pills{display:flex;flex-wrap:wrap;gap:.45rem;}
+.emotion-pill{border:1px solid #e2e8f0;background:#fff;color:#475569;border-radius:999px;padding:.52rem .72rem;font-size:.68rem;font-weight:800;cursor:pointer;transition:.15s ease;}
+.emotion-pill:hover{transform:translateY(-1px);border-color:#a5b4fc;}
+.emotion-pill.selected{background:#eef2ff;border-color:#6366f1;color:#4338ca;box-shadow:0 0 0 2px rgba(99,102,241,.08);}
+.custom-emotion-row{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:.55rem;margin-top:.7rem;}
+.custom-emotion-row label{font-size:.66rem;font-weight:800;color:#64748b;white-space:nowrap;}
+.custom-emotion-row label span{font-weight:600;color:#94a3b8;}
+.custom-emotion-row input{min-width:0;}
+.use-custom-emotion{border:0;border-radius:.65rem;padding:.55rem .7rem;background:#ede9fe;color:#5b21b6;font-size:.64rem;font-weight:900;cursor:pointer;white-space:nowrap;}
+.use-custom-emotion.active{background:#4f46e5;color:#fff;}
+@media(max-width:700px){
+ .log-emotion-head{flex-direction:column;}
+ .emotion-pills{gap:.35rem;}
+ .emotion-pill{padding:.48rem .6rem;font-size:.62rem;}
+ .custom-emotion-row{grid-template-columns:1fr;}
+ .use-custom-emotion{width:100%;}
+}
+
+/* ---- Trade log upgrades: confidence, multi-images, update modal ---- */
+.emotion-confidence-row{display:grid;grid-template-columns:1.35fr 1fr;gap:.75rem;align-items:end;margin-top:.75rem}
+.confidence-box{background:#fff;border:1px solid var(--slate-200);border-radius:.85rem;padding:.7rem .8rem}
+.confidence-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:.35rem}
+.confidence-head label{font-size:.68rem;font-weight:800;color:var(--slate-600)}
+.confidence-head label span{color:var(--rose)}
+.confidence-head strong{font-size:.78rem;color:var(--indigo)}
+#log-confidence{width:100%;accent-color:var(--indigo);cursor:pointer}
+.confidence-scale{display:flex;justify-content:space-between;color:var(--slate-400);font-size:.55rem;margin-top:.15rem}
+.multi-upload-box{min-height:6rem;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.18rem;text-align:center;cursor:pointer}
+.multi-upload-box small{font-size:.58rem;color:var(--slate-400)}
+.image-url-add-row{display:grid;grid-template-columns:1fr auto;gap:.5rem;margin-top:.55rem}
+.multi-image-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.55rem;margin-top:.65rem}
+.multi-image-item{position:relative;border:1px solid var(--slate-200);border-radius:.8rem;overflow:hidden;background:#fff;min-width:0}
+.multi-image-item img{width:100%;height:7rem;display:block;object-fit:cover;cursor:pointer}
+.multi-image-item button{position:absolute;right:.35rem;top:.35rem;width:1.5rem;height:1.5rem;border:0;border-radius:50%;background:rgba(255,255,255,.94);color:var(--rose);font-weight:900;cursor:pointer}
+.multi-image-item span{display:block;padding:.28rem .45rem;font-size:.56rem;font-weight:800;color:var(--slate-500)}
+.image-count{font-size:.62rem;color:var(--slate-500);margin-top:.35rem;font-weight:700}
+.trade-edit-btn{font-size:.62rem!important;padding:.3rem .5rem!important;white-space:nowrap}
+.edit-overlay{position:fixed;inset:0;background:rgba(15,23,42,.42);backdrop-filter:blur(4px);z-index:1000;display:flex;align-items:center;justify-content:center;padding:1rem}
+.edit-modal{width:min(900px,100%);max-height:92vh;overflow:auto;background:#fff;border:1px solid var(--slate-200);border-radius:1.25rem;box-shadow:0 24px 70px rgba(15,23,42,.2);padding:1.15rem}
+.edit-modal-head{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;margin-bottom:.8rem}
+.modal-x{width:2rem;height:2rem;border:0;border-radius:.65rem;background:var(--slate-100);font-size:1.25rem;cursor:pointer;color:var(--slate-600)}
+.edit-confidence{display:flex;align-items:center;gap:.6rem;border:1px solid var(--slate-200);border-radius:.75rem;padding:.55rem .7rem}
+.edit-confidence input{flex:1;accent-color:var(--indigo)}
+.edit-confidence strong{font-size:.7rem;color:var(--indigo);min-width:3rem;text-align:right}
+.edit-images-list{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}
+.edit-image-item{position:relative;width:78px;height:60px;border-radius:.6rem;overflow:hidden;border:1px solid var(--slate-200)}
+.edit-image-item img{width:100%;height:100%;object-fit:cover}
+.edit-image-item button{position:absolute;right:2px;top:2px;width:18px;height:18px;border:0;border-radius:50%;background:#fff;color:var(--rose);font-weight:900;cursor:pointer}
+.edit-add-image{width:78px;height:60px;border:1px dashed var(--slate-300);border-radius:.6rem;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--indigo);font-weight:800;font-size:.65rem}
+.edit-modal-actions{display:flex;justify-content:flex-end;gap:.55rem;margin-top:1rem;padding-top:.8rem;border-top:1px solid var(--slate-200)}
+@media(max-width:700px){.emotion-confidence-row{grid-template-columns:1fr}.multi-image-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.multi-image-item img{height:6.5rem}.edit-overlay{padding:.5rem}.edit-modal{max-height:96vh;padding:.85rem}.edit-modal-actions{position:sticky;bottom:0;background:#fff}.trade-edit-btn{font-size:.58rem!important}}

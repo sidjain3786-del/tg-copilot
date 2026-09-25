@@ -34,7 +34,8 @@ const STATE = {
   inspectionTab: 'winning',
   energyLevel: 85, noiseLevel: 15,
   selectedMindsetId: MINDSET_ARCHETYPES[0].id,
-  logFormIsSetup: true, logFormDevice: 'Laptop', logFormLocation: 'Desk', logFormImage: '', logFormBeforeImage: '', logFormAfterImage: '',
+  logFormIsSetup: true, logFormDevice: 'Laptop', logFormLocation: 'Desk', logFormImage: '', logFormBeforeImage: '', logFormAfterImage: '', logFormImages: [],
+  logEmotion: '', logCustomEmotion: '', logConfidence: 70, editingTradeId: null,
   noteFormStrategy: '', noteFormImage: '', activeNoteId: null,
   historyStrategyFilter: 'ALL', historyMistakeFilter: 'ALL'
 };
@@ -390,7 +391,7 @@ function computeLogPreview(){
   if (sl && entry!==sl) { rr = Math.abs(exit-entry)/Math.abs(entry-sl); if (pnl<0) rr = -rr; }
   let xp = STATE.logFormIsSetup ? 100 : 20;
   if (STATE.logFormLocation==='Desk' && STATE.logFormDevice==='Laptop') xp += 20;
-  if (STATE.logFormBeforeImage || STATE.logFormAfterImage || STATE.logFormImage) xp += 30;
+  if ((STATE.logFormImages||[]).length || STATE.logFormBeforeImage || STATE.logFormAfterImage || STATE.logFormImage) xp += 30;
   return { pnl: Math.round(pnl*100)/100, rr: Math.round(rr*100)/100, xp };
 }
 function updateLogPreview(){
@@ -398,16 +399,24 @@ function updateLogPreview(){
   const badge = $('#log-xp-badge');
   if (badge) badge.textContent = `+${p.xp} XP`;
 }
+function currentLogImages(){
+  const arr = Array.isArray(STATE.logFormImages) ? STATE.logFormImages.filter(Boolean) : [];
+  [STATE.logFormBeforeImage, STATE.logFormAfterImage, STATE.logFormImage].filter(Boolean).forEach(x=>{ if(!arr.includes(x)) arr.push(x); });
+  return arr;
+}
 function renderLogImagePreview(){
   const box = $('#log-image-preview');
   if (!box) return;
-  const before = STATE.logFormBeforeImage, after = STATE.logFormAfterImage;
-  box.innerHTML = (before || after) ? `<div class="screenshot-pair">
-    <div>${before ? `<img src="${esc(before)}" data-action="view-image" data-src="${esc(before)}"><span>Before Entry</span>` : '<div class="shot-empty">No Before Screenshot</div>'}</div>
-    <div>${after ? `<img src="${esc(after)}" data-action="view-image" data-src="${esc(after)}"><span>After Exit</span>` : '<div class="shot-empty">No After Screenshot</div>'}</div>
-  </div>` : '';
+  const images = currentLogImages();
+  box.innerHTML = images.length ? `<div class="multi-image-grid">${images.map((src,i)=>`<div class="multi-image-item"><img src="${esc(src)}" data-action="view-image" data-src="${esc(src)}"><button type="button" data-action="remove-log-image-index" data-index="${i}">×</button><span>Image ${i+1}</span></div>`).join('')}</div><div class="image-count">📸 ${images.length} image${images.length===1?'':'s'} attached</div>` : '<div class="shot-empty">No images added yet</div>';
 }
-
+function addLogImages(images){
+  const arr=currentLogImages();
+  images.filter(Boolean).forEach(src=>{ if(!arr.includes(src)) arr.push(src); });
+  STATE.logFormImages=arr;
+  STATE.logFormBeforeImage=arr[0]||''; STATE.logFormAfterImage=arr[1]||'';
+  renderLogImagePreview(); updateLogPreview();
+}
 function renderLogTab(){
   const strategyOptions = allStrategies().map(p => `<option value="${esc(p.id)}" ${STATE.selectedPlaybookId===p.id?'selected':''}>${esc(p.name)}</option>`).join('');
   return `
@@ -430,8 +439,8 @@ function renderLogTab(){
           <div><label>Quantity</label><input type="number" step="any" id="log-qty" placeholder="1"></div>
         </div>
         <div class="field grid-3 log-price-grid">
-          <div><label>Entry</label><input type="number" step="any" id="log-entry" placeholder="Actual entry"></div>
-          <div><label>Exit</label><input type="number" step="any" id="log-exit" placeholder="Actual exit"></div>
+          <div><label>Entry <span class="optional-label">optional</span></label><input type="number" step="any" id="log-entry" placeholder="Entry"></div>
+          <div><label>Exit <span class="optional-label">optional</span></label><input type="number" step="any" id="log-exit" placeholder="Exit"></div>
           <div><label>SL <span class="optional-label">optional</span></label><input type="number" step="any" id="log-sl" placeholder="Stop loss"></div>
         </div>
       </div>
@@ -448,6 +457,34 @@ function renderLogTab(){
         </div>` : ''}
       </div>
 
+      <div class="log-emotion-required">
+        <div class="log-emotion-head">
+          <div>
+            <div class="log-emotion-title">🧠 How were you feeling? <span>* Required</span></div>
+            <div class="log-emotion-sub">Ek emotion choose karo — trade ke waqt tumhari actual state.</div>
+          </div>
+          ${STATE.logEmotion ? `<span class="emotion-selected-badge">✓ ${esc(STATE.logEmotion)}</span>` : '<span class="emotion-selected-badge empty">Select one</span>'}
+        </div>
+        <div class="emotion-pills">
+          ${[
+            ['Calm','😌'],['Confident','💪'],['Neutral','😐'],['Anxious','😰'],
+            ['FOMO','🔥'],['Revenge / Tilt','😡'],['Overexcited','🚀'],['Tired','😴']
+          ].map(([name,emoji]) => `<button type="button" class="emotion-pill ${STATE.logEmotion===name?'selected':''}" data-action="set-log-emotion" data-value="${esc(name)}">${emoji} ${esc(name)}</button>`).join('')}
+        </div>
+        <div class="emotion-confidence-row">
+          <div class="confidence-box">
+            <div class="confidence-head"><label>Confidence <span>*</span></label><strong id="log-confidence-val">${STATE.logConfidence}/100</strong></div>
+            <input type="range" id="log-confidence" min="1" max="100" value="${STATE.logConfidence}">
+            <div class="confidence-scale"><span>1</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
+          </div>
+          <div class="custom-emotion-row">
+            <label for="log-custom-emotion">Custom emotion <span>optional</span></label>
+            <input type="text" id="log-custom-emotion" value="${esc(STATE.logCustomEmotion)}" placeholder="e.g. bored, impatient, stressed..." maxlength="40">
+            ${STATE.logCustomEmotion ? `<button type="button" class="use-custom-emotion ${STATE.logEmotion===STATE.logCustomEmotion?'active':''}" data-action="use-custom-emotion">Use Custom</button>` : ''}
+          </div>
+        </div>
+      </div>
+
       <details class="log-advanced">
         <summary>🎯 Planned Trade <span>Optional — fill only if you had a pre-trade plan</span></summary>
         <div class="log-advanced-body">
@@ -461,15 +498,10 @@ function renderLogTab(){
       </details>
 
       <details class="log-advanced">
-        <summary>📸 Screenshots <span>Optional — before &amp; after chart</span></summary>
+        <summary>📸 Screenshots &amp; Images <span>Optional — add as many as you want</span></summary>
         <div class="log-advanced-body">
-          <div class="grid-3 log-shot-grid" style="grid-template-columns:1fr 1fr;">
-            <label class="upload-box"><span>🟦</span><span>Before Entry</span><input type="file" id="log-before-image-file" accept="image/*" style="display:none;"></label>
-            <label class="upload-box"><span>🟩</span><span>After Exit</span><input type="file" id="log-after-image-file" accept="image/*" style="display:none;"></label>
-          </div>
-          <div class="grid-3" style="grid-template-columns:1fr 1fr; margin-top:.5rem;">
-            <input type="url" id="log-before-image-url" placeholder="Before image URL..."><input type="url" id="log-after-image-url" placeholder="After image URL...">
-          </div>
+          <label class="upload-box multi-upload-box"><span>📸</span><span>Add multiple screenshots / images</span><small>PNG, JPG, WebP • multiple files allowed</small><input type="file" id="log-multi-image-file" accept="image/*" multiple style="display:none;"></label>
+          <div class="image-url-add-row"><input type="url" id="log-image-url" placeholder="Paste image URL..."><button type="button" class="btn-secondary" data-action="add-log-image-url">+ Add</button></div>
           <div id="log-image-preview"></div>
         </div>
       </details>
@@ -481,7 +513,7 @@ function renderLogTab(){
             <div><label>Mistake Tag</label><select id="log-mistake">${MISTAKE_OPTIONS.map(x=>`<option value="${x[0]}">${x[1]}</option>`).join('')}</select></div>
             <div><label>Trade Quality</label><select id="log-quality"><option value="5">★★★★★ Excellent</option><option value="4">★★★★ Good</option><option value="3" selected>★★★ Average</option><option value="2">★★ Poor</option><option value="1">★ Rule Break</option></select></div>
           </div>
-          <div class="field"><label>Notes</label><textarea id="log-notes" rows="2" placeholder="Kya sahi hua? Kya improve karna hai?"></textarea></div>
+          <div class="field grid-2"><div><label>Exit Reason <span class="optional-label">optional</span></label><input type="text" id="log-exit-reason" placeholder="Target, SL, manual, time, news..."></div><div><label>Quick Note <span class="optional-label">optional</span></label><input type="text" id="log-notes" placeholder="Kya sahi hua? Kya improve karna hai?"></div></div>
         </div>
       </details>
 
@@ -710,7 +742,7 @@ function renderHistoryTab(){
         </div>
         <div class="item-body">
           <div style="display:flex; justify-content:space-between;">
-            <div><span style="font-weight:800; font-size:.8rem;">${esc(t.symbol)}</span><span style="display:block; font-size:.6rem; color:var(--slate-500);">${esc(t.strategy)}</span></div>
+            <div><span style="font-weight:800; font-size:.8rem;">${esc(t.symbol)}</span><span style="display:block; font-size:.6rem; color:var(--slate-500);">${esc(t.strategy)}</span></div><button type="button" class="btn-secondary trade-edit-btn" data-action="edit-trade" data-id="${esc(t.id)}">✏️ Edit</button>
             <div style="text-align:right;"><span class="mono" style="font-weight:800; display:block; color:${t.pnl>=0?'var(--emerald)':'var(--rose)'};">${money(t.pnl)}</span><span class="mono" style="font-size:.6rem; color:var(--slate-400);">${t.rr} R</span></div>
           </div>
           <div class="plan-actual-grid"><div><span>PLANNED</span><p>Entry ${pv.pe ?? '—'} • SL ${pv.ps ?? '—'} • Target ${pv.pt ?? '—'}</p></div><div><span>ACTUAL</span><p>Entry ${t.entryPrice} • SL ${t.stopLoss ?? '—'} • Exit ${t.exitPrice}</p></div></div>
@@ -719,7 +751,22 @@ function renderHistoryTab(){
           <div class="item-footer mono"><span>${t.device==='Laptop'?'💻':'📱'} ${esc(t.device)} • ${esc(t.location)}</span><span style="color:var(--indigo); font-weight:700;">${esc(t.emotion)}</span></div>
         </div>
       </div>`; }).join('') : '<p class="empty-msg">Is filter ke liye koi trade nahi mila.</p>'}
-  </div>`;
+  </div>
+  ${STATE.editingTradeId ? renderEditTradeModal(STATE.editingTradeId) : ''}`;
+}
+
+function renderEditTradeModal(id){
+  const t=STATE.trades.find(x=>x.id===id); if(!t) return '';
+  const imgs=Array.isArray(t.images)&&t.images.length ? t.images : [t.beforeImage,t.afterImage,t.image].filter(Boolean);
+  const presets=['Calm','Confident','Neutral','Anxious','FOMO','Revenge / Tilt','Overexcited','Tired'];
+  return `<div class="edit-overlay"><div class="edit-modal">
+    <div class="edit-modal-head"><div><span class="uppercase-label">UPDATE TRADE</span><h2 class="section-title">✏️ Edit ${esc(t.symbol)}</h2><p class="card-sub">Jo field change karna hai karo, phir Update Trade.</p></div><button type="button" class="modal-x" data-action="cancel-edit-trade">×</button></div>
+    <div class="field grid-3"><div><label>Symbol</label><input id="edit-symbol" value="${esc(t.symbol)}"></div><div><label>Direction</label><select id="edit-type"><option ${t.type==='LONG'?'selected':''}>LONG</option><option ${t.type==='SHORT'?'selected':''}>SHORT</option></select></div><div><label>Quantity</label><input type="number" step="any" id="edit-qty" value="${t.quantity??''}"></div></div>
+    <div class="field grid-3"><div><label>Entry</label><input type="number" step="any" id="edit-entry" value="${t.entryPrice??''}"></div><div><label>Exit</label><input type="number" step="any" id="edit-exit" value="${t.exitPrice??''}"></div><div><label>SL</label><input type="number" step="any" id="edit-sl" value="${t.stopLoss??''}"></div></div>
+    <div class="field grid-2"><div><label>Emotion</label><select id="edit-emotion">${presets.map(x=>`<option ${t.emotion===x?'selected':''}>${x}</option>`).join('')}<option ${!presets.includes(t.emotion)?'selected':''}>${esc(t.emotion||'Custom')}</option></select></div><div><label>Confidence</label><div class="edit-confidence"><input type="range" id="edit-confidence" min="1" max="100" value="${t.confidence||70}"><strong>${t.confidence||70}/100</strong></div></div></div>
+    <div class="field grid-2"><div><label>Exit Reason</label><input id="edit-exit-reason" value="${esc(t.exitReason||'')}" placeholder="Target / SL / manual / time..."></div><div><label>Images</label><div class="edit-images-list" id="edit-images-list">${imgs.map((src,i)=>`<div class="edit-image-item"><img src="${esc(src)}" data-src="${esc(src)}"><button type="button" data-action="remove-edit-image" data-index="${i}">×</button></div>`).join('')}<label class="edit-add-image">+ Add<input type="file" id="edit-multi-image-file" accept="image/*" multiple style="display:none"></label></div></div></div>
+    <div class="edit-modal-actions"><button type="button" class="btn-secondary" data-action="cancel-edit-trade">Cancel</button><button type="button" class="btn-primary" data-action="update-trade" data-id="${esc(id)}">💾 Update Trade</button></div>
+  </div></div>`;
 }
 
 /* ---------------- main render ---------------- */
@@ -755,8 +802,16 @@ document.addEventListener('click', async (e) => {
   else if (action==='set-inspection') { STATE.inspectionTab = btn.dataset.value; renderTabOnly(); }
   else if (action==='record-state') { alert(`Mindset saved: ${findMindset(STATE.selectedMindsetId).name} (+20 XP)`); }
   else if (action==='set-log-setup') { STATE.logFormIsSetup = btn.dataset.value==='true'; renderTabOnly(); }
+  else if (action==='set-log-emotion') { STATE.logEmotion = btn.dataset.value; STATE.logCustomEmotion = ''; renderTabOnly(); }
+  else if (action==='use-custom-emotion') { const v = $('#log-custom-emotion')?.value.trim(); if (v) { STATE.logEmotion = v; STATE.logCustomEmotion = v; renderTabOnly(); } }
   else if (action==='set-log-device') { STATE.logFormDevice = btn.dataset.value; renderTabOnly(); }
-  else if (action==='remove-log-image') { STATE.logFormImage=''; STATE.logFormBeforeImage=''; STATE.logFormAfterImage=''; renderLogImagePreview(); updateLogPreview(); }
+  else if (action==='remove-log-image') { STATE.logFormImage=''; STATE.logFormBeforeImage=''; STATE.logFormAfterImage=''; STATE.logFormImages=[]; renderLogImagePreview(); updateLogPreview(); }
+  else if (action==='remove-log-image-index') { const i=Number(btn.dataset.index); const arr=currentLogImages(); arr.splice(i,1); STATE.logFormImages=arr; STATE.logFormBeforeImage=arr[0]||''; STATE.logFormAfterImage=arr[1]||''; renderLogImagePreview(); updateLogPreview(); }
+  else if (action==='add-log-image-url') { const v=$('#log-image-url')?.value.trim(); if(v){ addLogImages([v]); $('#log-image-url').value=''; } }
+  else if (action==='edit-trade') { STATE.editingTradeId=btn.dataset.id; render(); }
+  else if (action==='cancel-edit-trade') { STATE.editingTradeId=null; render(); }
+  else if (action==='update-trade') { await updateExistingTrade(btn.dataset.id); }
+  else if (action==='remove-edit-image') { const item=btn.closest('.edit-image-item'); item?.remove(); }
   else if (action==='remove-note-image') { STATE.noteFormImage=''; renderNoteImagePreview(); }
   else if (action==='view-image') { $('#modal-image').src = btn.dataset.src; $('#image-modal').style.display='flex'; }
   else if (action==='toggle-strategy-builder') {
@@ -821,6 +876,9 @@ document.addEventListener('input', (e) => {
   else if (['log-entry','log-exit','log-qty','log-sl','log-type'].includes(e.target.id)) { updateLogPreview(); }
   else if (e.target.id==='log-before-image-url') { STATE.logFormBeforeImage = e.target.value; renderLogImagePreview(); updateLogPreview(); }
   else if (e.target.id==='log-after-image-url') { STATE.logFormAfterImage = e.target.value; renderLogImagePreview(); updateLogPreview(); }
+  else if (e.target.id==='log-custom-emotion') { STATE.logCustomEmotion = e.target.value; }
+  else if (e.target.id==='log-confidence') { STATE.logConfidence = Number(e.target.value)||1; const v=$('#log-confidence-val'); if(v) v.textContent=STATE.logConfidence+'/100'; }
+  else if (e.target.id==='edit-confidence') { const box=e.target.closest('.edit-confidence'); const v=box?.querySelector('strong'); if(v) v.textContent=Number(e.target.value)+'/100'; }
   else if (e.target.id==='note-image-url') { STATE.noteFormImage = e.target.value; renderNoteImagePreview(); }
 });
 
@@ -847,11 +905,19 @@ document.addEventListener('change', (e) => {
     if (e.target.value==='__custom__') { row.style.display='flex'; }
     else { row.style.display='none'; STATE.noteFormStrategy = e.target.value; }
   }
+  else if (e.target.id==='log-multi-image-file') {
+    const files=[...e.target.files]; if(!files.length) return;
+    let remaining=files.length, loaded=[];
+    files.forEach(file=>{ const reader=new FileReader(); reader.onloadend=()=>{ loaded.push(reader.result); if(--remaining===0) addLogImages(loaded); }; reader.readAsDataURL(file); });
+  }
   else if (e.target.id==='log-before-image-file' || e.target.id==='log-after-image-file') {
     const file = e.target.files[0]; if (!file) return;
-    const reader = new FileReader();
-    reader.onloadend = () => { if (e.target.id==='log-before-image-file') STATE.logFormBeforeImage = reader.result; else STATE.logFormAfterImage = reader.result; renderLogImagePreview(); updateLogPreview(); };
-    reader.readAsDataURL(file);
+    const reader = new FileReader(); reader.onloadend = () => addLogImages([reader.result]); reader.readAsDataURL(file);
+  }
+  else if (e.target.id==='edit-multi-image-file') {
+    const files=[...e.target.files]; if(!files.length) return;
+    let remaining=files.length, loaded=[];
+    files.forEach(file=>{ const reader=new FileReader(); reader.onloadend=()=>{ loaded.push(reader.result); if(--remaining===0){ const box=$('#edit-images-list'); loaded.forEach(src=>{ const wrap=document.createElement('div'); wrap.className='edit-image-item'; wrap.innerHTML=`<img src="${src}" data-src="${src}"><button type="button" data-action="remove-edit-image">×</button>`; box?.insertBefore(wrap, box.querySelector('.edit-add-image')); }); } }; reader.readAsDataURL(file); });
   }
   else if (e.target.id==='note-image-file') {
     const file = e.target.files[0]; if (!file) return;
@@ -861,14 +927,31 @@ document.addEventListener('change', (e) => {
   }
 });
 
+async function updateExistingTrade(id){
+  const t=STATE.trades.find(x=>x.id===id); if(!t) return;
+  const symbol=$('#edit-symbol')?.value.trim() || t.symbol;
+  const qty=parseFloat($('#edit-qty')?.value), entry=parseFloat($('#edit-entry')?.value), exit=parseFloat($('#edit-exit')?.value), sl=parseFloat($('#edit-sl')?.value);
+  const type=$('#edit-type')?.value || t.type;
+  const emotion=$('#edit-emotion')?.value || t.emotion;
+  const confidence=Number($('#edit-confidence')?.value || t.confidence || 70);
+  const images=[...document.querySelectorAll('#edit-images-list img')].map(x=>x.dataset.src).filter(Boolean);
+  const pnl=(entry&&exit&&qty)?Math.round((type==='LONG'?(exit-entry)*qty:(entry-exit)*qty)*100)/100:(t.pnl||0);
+  const rr=(sl&&entry&&exit&&entry!==sl)?Math.round(((type==='LONG'?exit-entry:entry-exit)/Math.abs(entry-sl))*100)/100:(t.rr||0);
+  Object.assign(t,{symbol:symbol.toUpperCase(),type,quantity:Number.isFinite(qty)?qty:t.quantity,entryPrice:Number.isFinite(entry)?entry:null,exitPrice:Number.isFinite(exit)?exit:null,stopLoss:Number.isFinite(sl)?sl:null,emotion,confidence,exitReason:$('#edit-exit-reason')?.value.trim()||'',images,beforeImage:images[0]||null,afterImage:images[1]||null,image:images[0]||null,pnl,rr});
+  await saveUserData(); STATE.editingTradeId=null; render();
+}
+
 document.addEventListener('submit', async (e) => {
   if (e.target.id==='log-form') {
     e.preventDefault();
     const symbol = $('#log-symbol').value.trim();
     const entry = $('#log-entry').value, exit = $('#log-exit').value, qty = $('#log-qty').value;
-    if (!symbol || !entry || !exit || !qty) { alert('Please fill out Symbol, Entry, Exit, and Quantity!'); return; }
+    if (!symbol || !qty) { alert('Please fill out Symbol and Quantity. Entry, Exit and SL are optional.'); return; }
+    const customEmotion = $('#log-custom-emotion')?.value.trim() || '';
+    const finalEmotion = STATE.logEmotion || customEmotion;
+    if (!finalEmotion) { alert('Please select an emotion or enter your custom emotion.'); return; }
     const p = computeLogPreview();
-    const plannedEntry = parseFloat($('#log-planned-entry')?.value) || parseFloat(entry);
+    const plannedEntry = parseFloat($('#log-planned-entry')?.value) || (entry ? parseFloat(entry) : null);
     const plannedSL = parseFloat($('#log-planned-sl')?.value) || ($('#log-sl').value ? parseFloat($('#log-sl').value) : null);
     const plannedTP = parseFloat($('#log-planned-tp')?.value) || ($('#log-tp').value ? parseFloat($('#log-tp').value) : null);
     const plannedRR = plannedSL && plannedEntry !== plannedSL && plannedTP ? Math.round((Math.abs(plannedTP-plannedEntry)/Math.abs(plannedEntry-plannedSL))*100)/100 : null;
@@ -877,13 +960,13 @@ document.addEventListener('submit', async (e) => {
     STATE.trades.unshift({
       id:`t-${Date.now()}`, symbol: symbol.toUpperCase(), type: $('#log-type').value, isSetupTrade: STATE.logFormIsSetup,
       entryPrice: parseFloat(entry), exitPrice: parseFloat(exit), quantity: parseFloat(qty),
-      stopLoss: $('#log-sl').value ? parseFloat($('#log-sl').value) : null, takeProfit: $('#log-tp').value ? parseFloat($('#log-tp').value) : null,
-      strategy: strategyName, emotion: mindset.name, device: STATE.logFormDevice, location: STATE.logFormLocation,
-      notes: $('#log-notes').value, image: STATE.logFormAfterImage || STATE.logFormBeforeImage || null, beforeImage: STATE.logFormBeforeImage || null, afterImage: STATE.logFormAfterImage || null,
+      stopLoss: $('#log-sl').value ? parseFloat($('#log-sl').value) : null, takeProfit: $('#log-tp')?.value ? parseFloat($('#log-tp').value) : null,
+      strategy: strategyName, emotion: finalEmotion, emotionPreset: MINDSET_ARCHETYPES.find(m=>m.name===finalEmotion)?.name || null, device: STATE.logFormDevice, location: STATE.logFormLocation,
+      notes: $('#log-notes')?.value || '', exitReason: $('#log-exit-reason')?.value.trim() || '', image: currentLogImages()[0] || null, beforeImage: currentLogImages()[0] || null, afterImage: currentLogImages()[1] || null, images: currentLogImages(), confidence: Number(STATE.logConfidence)||70,
       plannedEntry, plannedSL, plannedTP, plannedRR, mistake: $('#log-mistake').value, quality: Number($('#log-quality').value), followedPlan: STATE.logFormIsSetup && $('#log-mistake').value==='none',
       date: new Date().toISOString(), pnl: p.pnl, rr: p.rr, xpEarned: p.xp
     });
-    STATE.logFormImage = ''; STATE.logFormBeforeImage = ''; STATE.logFormAfterImage = '';
+    STATE.logFormImage = ''; STATE.logFormBeforeImage = ''; STATE.logFormAfterImage = ''; STATE.logFormImages = []; STATE.logEmotion = ''; STATE.logCustomEmotion = ''; STATE.logConfidence = 70;
     await saveUserData();
     STATE.activeTab = 'history';
     render();
