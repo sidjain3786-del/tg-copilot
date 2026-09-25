@@ -1,5 +1,20 @@
 import { getUserFromRequest, json } from '../_lib/auth.js';
 
+const LEGACY_DEFAULT_STRATEGY_NAMES = new Set([
+  'Asian High/Low Liquidity Sweep (AMD)',
+  'ICT Fair Value Gap (FVG) + Breaker',
+  'Order Block (OB) Retest with Displacement'
+]);
+
+function cleanStrategies(value) {
+  let parsed = [];
+  try { parsed = Array.isArray(value) ? value : JSON.parse(value || '[]'); } catch { parsed = []; }
+  return parsed.filter(s => {
+    const name = typeof s === 'string' ? s : s?.name;
+    return name && !LEGACY_DEFAULT_STRATEGY_NAMES.has(String(name).trim());
+  });
+}
+
 export async function onRequestGet({ request, env }) {
   const user = await getUserFromRequest(request, env);
   if (!user) return json({ error: 'Not authenticated' }, { status: 401 });
@@ -8,11 +23,18 @@ export async function onRequestGet({ request, env }) {
     'SELECT trades, notes, custom_strategies FROM user_data WHERE user_id = ?'
   ).bind(user.id).first();
 
-  return json({
-    trades: row ? JSON.parse(row.trades) : [],
-    notes: row ? JSON.parse(row.notes) : [],
-    customStrategies: row ? JSON.parse(row.custom_strategies) : []
-  });
+  const trades = row ? JSON.parse(row.trades) : [];
+  const notes = row ? JSON.parse(row.notes) : [];
+  const customStrategies = cleanStrategies(row?.custom_strategies);
+
+  // Clean legacy demo/default strategies from D1 as well, while preserving
+  // every user-created strategy.
+  if (row && JSON.stringify(customStrategies) !== row.custom_strategies) {
+    await env.DB.prepare('UPDATE user_data SET custom_strategies = ?, updated_at = ? WHERE user_id = ?')
+      .bind(JSON.stringify(customStrategies), new Date().toISOString(), user.id).run();
+  }
+
+  return json({ trades, notes, customStrategies });
 }
 
 export async function onRequestPost({ request, env }) {
