@@ -36,8 +36,8 @@ const STATE = {
   selectedMindsetId: MINDSET_ARCHETYPES[0].id,
   logFormIsSetup: true, logFormDevice: 'Laptop', logFormLocation: 'Desk', logFormImage: '', logFormBeforeImage: '', logFormAfterImage: '', logFormImages: [],
   logEmotion: '', logCustomEmotion: '', editingTradeId: null,
-  noteFormStrategy: '', noteFormImage: '', activeNoteId: null,
-  historyStrategyFilter: 'ALL', historyMistakeFilter: 'ALL', historyView: localStorage.getItem('tc_history_view') || 'grid', noteCategoryFilter: 'ALL'
+  noteFormStrategy: '', noteFormImage: '', noteFormHandwriting: '', noteWritingMode: 'typed', activeNoteId: null,
+  historyStrategyFilter: 'ALL', historyMistakeFilter: 'ALL', historyView: localStorage.getItem('tc_history_view') || 'grid'
 };
 
 /* ---------------- utils ---------------- */
@@ -276,15 +276,14 @@ const TABS = [
   {id:'copilot', label:'⚡ Live Execution Co-Pilot'},
   {id:'log', label:'📝 Log Trade & Chart Screenshot'},
   {id:'notes', label:'🧾 Notes & Learnings'},
-  {id:'history', label:'📜 Trade History Log'},
-  {id:'review', label:'🔎 Review & Leaks'}
+  {id:'history', label:'📜 Trade History Log'}
 ];
 function renderTabNav(){
   $('#tab-nav').innerHTML = TABS.map(t =>
     `<button class="tab-btn ${STATE.activeTab===t.id?'active':''}" data-action="set-tab" data-tab="${t.id}">${t.label}</button>`
   ).join('');
-  const mobileIcons = {copilot:'⚡',log:'➕',notes:'🧠',history:'📜',review:'🔎'};
-  const mobileLabels = {copilot:'Co-Pilot',log:'Log Trade',notes:'Notes',history:'History',review:'Review'};
+  const mobileIcons = {copilot:'⚡',log:'➕',notes:'🧠',history:'📜'};
+  const mobileLabels = {copilot:'Co-Pilot',log:'Log Trade',notes:'Notes',history:'History'};
   const mobile = $('#mobile-tab-nav');
   if (mobile) mobile.innerHTML = TABS.map(t =>
     `<button class="mobile-tab-btn ${STATE.activeTab===t.id?'active':''}" data-action="set-tab" data-tab="${t.id}"><span class="mobile-tab-icon">${mobileIcons[t.id]}</span><span>${mobileLabels[t.id]}</span></button>`
@@ -565,52 +564,10 @@ function renderStrategyBuilder(){
     </div>`;
 }
 
-
-function noteCategory(n){ return n.category || (n.ruleText ? 'rule' : n.strategy ? 'strategy' : 'observation'); }
-const NOTE_CATEGORIES = [['ALL','All'],['concept','Concepts'],['strategy','Strategies'],['mistake','Mistakes'],['rule','My Rules'],['observation','Observations'],['review','Reviews']];
-function filteredNotes(){
-  if (STATE.noteCategoryFilter==='ALL') return STATE.notes || [];
-  return (STATE.notes || []).filter(n => noteCategory(n)===STATE.noteCategoryFilter);
-}
-function tradingLeaks(){
-  const trades=STATE.trades||[];
-  const map={};
-  trades.forEach(t=>{ const k=t.mistake||'none'; if(k==='none') return; if(!map[k]) map[k]={key:k,count:0,pnl:0,losses:0}; map[k].count++; map[k].pnl+=Number(t.pnl)||0; if((Number(t.pnl)||0)<0) map[k].losses++; });
-  return Object.values(map).sort((a,b)=>b.count-a.count || a.pnl-b.pnl);
-}
-function reviewInsight(){
-  const trades=STATE.trades||[]; const total=trades.length; if(!total) return {title:'Start with your first 10 trades',text:'Abhi prediction nahi — pehle enough journal data collect karo. Har trade mein emotion, mistake aur quick note honestly fill karo.'};
-  const leaks=tradingLeaks(); const top=leaks[0];
-  const followed=trades.filter(t=>t.isSetupTrade && (t.mistake||'none')==='none').length;
-  const setup=trades.filter(t=>t.isSetupTrade).length;
-  const rate=setup?Math.round(followed/setup*100):0;
-  if(top) return {title:`Your biggest journal leak: ${mistakeLabel(top.key)}`,text:`${top.count} trades tagged this way, ${top.losses} were losses, and their combined P&L is ${money(top.pnl)}. Review these trades before adding a new strategy.`};
-  return {title:`Process score: ${rate}% clean setup trades`,text:'Mistake-free execution is a stronger learning signal than any single winning trade. Keep collecting clean examples and turn repeated learnings into rules.'};
-}
-function renderReviewTab(){
-  const trades=STATE.trades||[], leaks=tradingLeaks(), s=computeStats(), insight=reviewInsight();
-  const setup=trades.filter(t=>t.isSetupTrade), clean=setup.filter(t=>(t.mistake||'none')==='none');
-  const preventable=trades.filter(t=>(Number(t.pnl)||0)<0 && (t.mistake||'none')!=='none');
-  const strategyRows=strategyPerformance().slice(0,6);
-  const week=trades.filter(t=>{const d=new Date(t.date||0); return Date.now()-d.getTime()<=7*86400000;});
-  return `<div class="review-page">
-    <div class="review-hero card"><div><span class="uppercase-label">SELF-COACHING</span><h2 class="section-title">🔎 Review &amp; Trading Leaks</h2><p class="card-sub">P&amp;L batata hai kya hua. Review batata hai kyun hua — aur next trade mein kya change karna hai.</p></div><div class="review-focus"><span>Next Focus</span><strong>${esc(insight.title)}</strong></div></div>
-    <div class="grid-3 review-kpis"><div class="stat-card"><span class="uppercase-label">7-Day Trades</span><p class="stat-value">${week.length}</p><p class="card-sub">Recent activity</p></div><div class="stat-card green"><span class="uppercase-label">Clean Setup Rate</span><p class="stat-value" style="color:var(--emerald);">${setup?Math.round(clean.length/setup*100):0}%</p><p class="card-sub">Setup trades without mistake tag</p></div><div class="stat-card red"><span class="uppercase-label">Preventable Losses</span><p class="stat-value" style="color:var(--rose);">${preventable.length}</p><p class="card-sub">Losses with a recorded mistake</p></div></div>
-    <div class="grid-3 review-main-grid">
-      <section class="card"><div class="dashboard-section-head"><div><span class="uppercase-label">LEAKS</span><h3 class="section-title">Where do you lose discipline?</h3></div></div>${leaks.length?`<div class="leak-list">${leaks.map(x=>`<div class="leak-row"><div><strong>${esc(mistakeLabel(x.key))}</strong><small>${x.count} trades · ${x.losses} losses</small></div><strong class="mono ${x.pnl>=0?'positive':'negative'}">${money(x.pnl)}</strong></div>`).join('')}</div>`:'<div class="dashboard-empty">No mistake pattern yet. Honest tagging will reveal one.</div>'}</section>
-      <section class="card"><div class="dashboard-section-head"><div><span class="uppercase-label">PROCESS</span><h3 class="section-title">Your execution check</h3></div></div><div class="review-check-list"><div><span>Setup trades</span><strong>${setup.length}</strong></div><div><span>Clean setup trades</span><strong>${clean.length}</strong></div><div><span>Rule-following rate</span><strong>${s.ruleRate||0}%</strong></div><div><span>Bad-loss count</span><strong>${preventable.length}</strong></div></div><div class="review-insight"><span>💡 Insight</span><p>${esc(insight.text)}</p></div></section>
-    </div>
-    <section class="card"><div class="dashboard-section-head"><div><span class="uppercase-label">STRATEGY CHECK</span><h3 class="section-title">What should you study?</h3></div></div>${strategyRows.length?`<div class="review-strategy-list">${strategyRows.map(g=>`<div class="review-strategy-row"><div><strong>${esc(g.name)}</strong><small>${g.trades} trades · ${g.winRate}% WR</small></div><span class="mono ${g.pnl>=0?'positive':'negative'}">${money(g.pnl)}</span></div>`).join('')}</div>`:'<div class="dashboard-empty">Create a strategy in Notes and tag it on setup trades.</div>'}</section>
-    <section class="card review-plan-card"><div><span class="uppercase-label">NEXT SESSION</span><h3 class="section-title">3 questions before your next trade</h3></div><div class="review-questions"><div>01 <strong>Is this actually one of my setups?</strong></div><div>02 <strong>What would invalidate this idea?</strong></div><div>03 <strong>If I lose, will I still call this a good process trade?</strong></div></div></section>
-  </div>`;
-}
-
 function renderNotesTab(){
   const strategyObjects = allStrategies();
   const strategyOptions = strategyObjects.map(p => `<option value="${esc(p.name)}" ${STATE.noteFormStrategy===p.name?'selected':''}>${esc(p.name)}</option>`).join('');
-  const notes = filteredNotes();
-  const allNotes = STATE.notes || [];
-  const ruleNotes = allNotes.filter(n=>n.ruleText || noteCategory(n)==='rule');
+  const notes = STATE.notes || [];
   if (!STATE.activeNoteId || !notes.some(n => n.id === STATE.activeNoteId)) STATE.activeNoteId = notes[0]?.id || null;
   const active = notes.find(n => n.id === STATE.activeNoteId) || null;
 
@@ -626,6 +583,7 @@ function renderNotesTab(){
       </div>
 
       ${active.image ? `<figure class="note-reading-image"><img src="${active.image}" data-action="view-image" data-src="${active.image}"><figcaption>Chart attached to this note</figcaption></figure>` : ''}
+      ${active.handwriting ? `<figure class="note-reading-image note-handwriting-reading"><img src="${active.handwriting}" data-action="view-image" data-src="${active.handwriting}"><figcaption>✍️ Handwritten note</figcaption></figure>` : ''}
 
       ${(active.entryCriteria||active.exitCriteria) ? `<div class="note-reading-rules">
         ${active.entryCriteria ? `<div><span>ENTRY CRITERIA</span><p>${esc(active.entryCriteria)}</p></div>` : ''}
@@ -633,7 +591,7 @@ function renderNotesTab(){
       </div>` : ''}
 
       ${active.analysis ? `<section class="note-reading-section"><div class="note-reading-label">MY ANALYSIS</div><p>${esc(active.analysis)}</p></section>` : ''}
-      ${active.learning ? `<section class="note-reading-learning"><div class="note-reading-label">✦ WHAT I LEARNED</div><p>${esc(active.learning)}</p>${active.ruleText ? `<div class="note-rule-box"><span>⚡ ACTIONABLE RULE</span><p>${esc(active.ruleText)}</p></div>` : `<button type="button" class="btn-secondary note-rule-btn" data-action="turn-note-into-rule" data-id="${active.id}">⚡ Turn this learning into a rule</button>`}</section>` : ''}
+      ${active.learning ? `<section class="note-reading-learning"><div class="note-reading-label">✦ WHAT I LEARNED</div><p>${esc(active.learning)}</p></section>` : ''}
     </article>` : `
     <div class="note-reading-empty">
       <div class="note-reading-empty-icon">📝</div>
@@ -656,7 +614,26 @@ function renderNotesTab(){
       </div>
       <form id="notes-form">
         <div class="field"><label>Title / Symbol / Tag</label><input type="text" id="note-symbol" placeholder="e.g. XAUUSD — London Liquidity Review"></div>
-        <div class="field grid-2"><div><label>Note Type</label><select id="note-category"><option value="concept">Concept</option><option value="strategy">Strategy</option><option value="mistake">Mistake</option><option value="rule">My Rule</option><option value="observation">Market Observation</option><option value="review">Review</option></select></div><div><label>Actionable Rule <span>(optional)</span></label><input type="text" id="note-rule" placeholder="e.g. Confirmation ke bina entry nahi"></div></div>
+
+        <div class="note-mode-switch" role="tablist" aria-label="Note writing mode">
+          <button type="button" class="toggle-btn ${STATE.noteWritingMode==='typed'?'active':''}" data-action="note-writing-mode" data-mode="typed">⌨️ Typed</button>
+          <button type="button" class="toggle-btn ${STATE.noteWritingMode==='handwriting'?'active':''}" data-action="note-writing-mode" data-mode="handwriting">✍️ Handwriting</button>
+        </div>
+
+        <div id="handwriting-note-panel" class="handwriting-note-panel" style="display:${STATE.noteWritingMode==='handwriting'?'block':'none'};">
+          <div class="handwriting-toolbar">
+            <div><strong>✍️ Handwriting Note</strong><span>Pen se likhiye — mouse, touch ya stylus supported.</span></div>
+            <div class="handwriting-tools">
+              <label>Size <input id="handwriting-size" type="range" min="1" max="12" value="3"></label>
+              <button type="button" class="toggle-btn" data-action="handwriting-undo">↶ Undo</button>
+              <button type="button" class="toggle-btn" data-action="handwriting-redo">↷ Redo</button>
+              <button type="button" class="toggle-btn" data-action="handwriting-clear">Clear</button>
+              <button type="button" class="btn-primary btn-small" data-action="handwriting-save">✓ Keep Handwriting</button>
+            </div>
+          </div>
+          <div class="handwriting-paper-wrap"><canvas id="handwriting-canvas" width="1400" height="820"></canvas></div>
+          <p class="card-sub handwriting-hint">Tip: tablet/pen use kar rahe hain to seedha canvas par likhiye. Note save hone par handwriting reading room mein image ki tarah dikhegi.</p>
+        </div>
 
         <div class="field">
           <label>Strategy</label>
@@ -685,8 +662,6 @@ function renderNotesTab(){
       </form>
     </div>
 
-    <div class="notes-category-bar"><div class="notes-category-tabs">${NOTE_CATEGORIES.map(([id,label])=>`<button type="button" class="note-category-btn ${STATE.noteCategoryFilter===id?'active':''}" data-action="note-category" data-category="${id}">${label}</button>`).join('')}</div><span class="notes-filter-count">${notes.length}/${allNotes.length}</span></div>
-    ${ruleNotes.length ? `<div class="my-rules-strip"><div><span class="uppercase-label">MY RULES</span><strong>Rules extracted from your own journal</strong></div><div class="my-rules-mini">${ruleNotes.slice(0,4).map(n=>`<span>⚡ ${esc(n.ruleText || n.learning || n.title || n.symbol)}</span>`).join('')}</div></div>` : ''}
     <div class="notes-reading-header">
       <div>
         <span class="uppercase-label">YOUR JOURNAL</span>
@@ -800,9 +775,7 @@ function renderEditTradeModal(id){
     <div class="field grid-3"><div><label>Symbol</label><input id="edit-symbol" value="${esc(t.symbol)}"></div><div><label>Direction</label><select id="edit-type"><option ${t.type==='LONG'?'selected':''}>LONG</option><option ${t.type==='SHORT'?'selected':''}>SHORT</option></select></div><div><label>Quantity</label><input type="number" step="any" id="edit-qty" value="${t.quantity??''}"></div></div>
     <div class="field grid-3"><div><label>Entry</label><input type="number" step="any" id="edit-entry" value="${t.entryPrice??''}"></div><div><label>Exit</label><input type="number" step="any" id="edit-exit" value="${t.exitPrice??''}"></div><div><label>SL</label><input type="number" step="any" id="edit-sl" value="${t.stopLoss??''}"></div></div>
     <div class="field"><label>Emotion</label><select id="edit-emotion">${presets.map(x=>`<option ${t.emotion===x?'selected':''}>${x}</option>`).join('')}<option ${!presets.includes(t.emotion)?'selected':''}>${esc(t.emotion||'Custom')}</option></select></div>
-    <div class="field grid-2"><div><label>Exit Reason</label><input id="edit-exit-reason" value="${esc(t.exitReason||'')}" placeholder="Target / SL / manual / time..."></div><div><label>Mistake</label><select id="edit-mistake">${MISTAKE_OPTIONS.map(x=>`<option value="${x[0]}" ${((t.mistake||'none')===x[0])?'selected':''}>${x[1]}</option>`).join('')}</select></div></div>
-    <div class="field grid-2"><div><label>Quick Note</label><textarea id="edit-notes" rows="3" placeholder="Kya sahi hua? Kya improve karna hai?">${esc(t.notes||'')}</textarea></div><div><label>Trade Quality</label><select id="edit-quality">${[['5','★★★★★ Excellent'],['4','★★★★ Good'],['3','★★★ Average'],['2','★★ Poor'],['1','★ Rule Break']].map(x=>`<option value="${x[0]}" ${String(t.quality||3)===x[0]?'selected':''}>${x[1]}</option>`).join('')}</select></div></div>
-    <div class="field"><label>Images</label><div class="edit-images-list" id="edit-images-list">${imgs.map((src,i)=>`<div class="edit-image-item"><img src="${esc(src)}" data-src="${src}"><button type="button" data-action="remove-edit-image" data-index="${i}">×</button></div>`).join('')}<label class="edit-add-image">+ Add<input type="file" id="edit-multi-image-file" accept="image/*" multiple style="display:none"></label></div></div>
+    <div class="field grid-2"><div><label>Exit Reason</label><input id="edit-exit-reason" value="${esc(t.exitReason||'')}" placeholder="Target / SL / manual / time..."></div><div><label>Images</label><div class="edit-images-list" id="edit-images-list">${imgs.map((src,i)=>`<div class="edit-image-item"><img src="${esc(src)}" data-src="${esc(src)}"><button type="button" data-action="remove-edit-image" data-index="${i}">×</button></div>`).join('')}<label class="edit-add-image">+ Add<input type="file" id="edit-multi-image-file" accept="image/*" multiple style="display:none"></label></div></div></div>
     <div class="edit-modal-actions"><button type="button" class="btn-secondary" data-action="cancel-edit-trade">Cancel</button><button type="button" class="btn-primary" data-action="update-trade" data-id="${esc(id)}">💾 Update Trade</button></div>
   </div></div>`;
 }
@@ -814,17 +787,15 @@ function render(){
   const content = $('#tab-content');
   if (STATE.activeTab==='copilot') content.innerHTML = renderCopilotTab();
   else if (STATE.activeTab==='log') { content.innerHTML = renderLogTab(); renderLogImagePreview(); updateLogPreview(); }
-  else if (STATE.activeTab==='notes') { content.innerHTML = renderNotesTab(); renderNoteImagePreview(); }
+  else if (STATE.activeTab==='notes') { content.innerHTML = renderNotesTab(); renderNoteImagePreview(); if (STATE.noteWritingMode==='handwriting') initHandwritingCanvas(); }
   else if (STATE.activeTab==='history') content.innerHTML = renderHistoryTab();
-  else if (STATE.activeTab==='review') content.innerHTML = renderReviewTab();
 }
 function renderTabOnly(){ // re-render just the active tab (after in-tab interactions)
   const content = $('#tab-content');
   if (STATE.activeTab==='copilot') content.innerHTML = renderCopilotTab();
   else if (STATE.activeTab==='log') { content.innerHTML = renderLogTab(); renderLogImagePreview(); updateLogPreview(); }
-  else if (STATE.activeTab==='notes') { content.innerHTML = renderNotesTab(); renderNoteImagePreview(); }
+  else if (STATE.activeTab==='notes') { content.innerHTML = renderNotesTab(); renderNoteImagePreview(); if (STATE.noteWritingMode==='handwriting') initHandwritingCanvas(); }
   else if (STATE.activeTab==='history') content.innerHTML = renderHistoryTab();
-  else if (STATE.activeTab==='review') content.innerHTML = renderReviewTab();
   renderTabNav();
 }
 
@@ -838,11 +809,6 @@ document.addEventListener('click', async (e) => {
   else if (action==='select-mindset') { STATE.selectedMindsetId = btn.dataset.id; renderTabOnly(); }
   else if (action==='toggle-rule') { const i=btn.dataset.idx; STATE.checkedRules[i]=!STATE.checkedRules[i]; renderTabOnly(); }
   else if (action==='set-inspection') { STATE.inspectionTab = btn.dataset.value; renderTabOnly(); }
-  else if (action==='note-category') { STATE.noteCategoryFilter = btn.dataset.category || 'ALL'; STATE.activeNoteId = filteredNotes()[0]?.id || null; renderTabOnly(); }
-  else if (action==='turn-note-into-rule') {
-    const n=STATE.notes.find(x=>x.id===btn.dataset.id);
-    if(n){ const rule=(n.ruleText||n.learning||n.analysis||'').trim(); if(rule){ n.ruleText=rule; n.category='rule'; await saveUserData(); renderTabOnly(); } }
-  }
   else if (action==='history-view') {
     const view = btn.dataset.view;
     if (['grid','list','detailed','gallery'].includes(view)) {
@@ -864,7 +830,12 @@ document.addEventListener('click', async (e) => {
   else if (action==='update-trade') { await updateExistingTrade(btn.dataset.id); }
   else if (action==='remove-edit-image') { const item=btn.closest('.edit-image-item'); item?.remove(); }
   else if (action==='remove-note-image') { STATE.noteFormImage=''; renderNoteImagePreview(); }
-  else if (action==='view-image') { $('#modal-image').src = btn.dataset.src; $('#image-modal').style.display='flex'; }
+  else if (action==='note-writing-mode') { STATE.noteWritingMode = btn.dataset.mode === 'handwriting' ? 'handwriting' : 'typed'; renderTabOnly(); initHandwritingCanvas(); }
+  else if (action==='handwriting-save') { saveHandwritingCanvas(); }
+  else if (action==='handwriting-clear') { clearHandwritingCanvas(); }
+  else if (action==='handwriting-undo') { undoHandwriting(); }
+  else if (action==='handwriting-redo') { redoHandwriting(); }
+  else if (action==='view-image') { openImageViewer(btn.dataset.src); }
   else if (action==='toggle-strategy-builder') {
     const form = $('#strategy-builder-form');
     if (form) form.style.display = form.style.display === 'none' ? 'block' : 'none';
@@ -918,8 +889,9 @@ document.addEventListener('click', async (e) => {
   }
 });
 
-$('#modal-close').addEventListener('click', () => $('#image-modal').style.display='none');
-$('#image-modal').addEventListener('click', (e) => { if (e.target.id==='image-modal') $('#image-modal').style.display='none'; });
+$('#modal-close').addEventListener('click', closeImageViewer);
+$('#image-modal').addEventListener('click', (e) => { if (e.target.id==='image-modal') closeImageViewer(); });
+document.addEventListener('keydown', e => { if (e.key==='Escape') closeImageViewer(); });
 
 document.addEventListener('input', (e) => {
   if (e.target.id==='energy-slider') { STATE.energyLevel = Number(e.target.value); $('#energy-val').textContent = STATE.energyLevel+'%'; refreshBatteryOnly(); }
@@ -928,6 +900,7 @@ document.addEventListener('input', (e) => {
   else if (e.target.id==='log-before-image-url') { STATE.logFormBeforeImage = e.target.value; renderLogImagePreview(); updateLogPreview(); }
   else if (e.target.id==='log-after-image-url') { STATE.logFormAfterImage = e.target.value; renderLogImagePreview(); updateLogPreview(); }
   else if (e.target.id==='log-custom-emotion') { STATE.logCustomEmotion = e.target.value; }
+  else if (e.target.id==='edit-confidence') { const box=e.target.closest('.edit-confidence'); const v=box?.querySelector('strong'); if(v) v.textContent=Number(e.target.value)+'/100'; }
   else if (e.target.id==='note-image-url') { STATE.noteFormImage = e.target.value; renderNoteImagePreview(); }
 });
 
@@ -992,11 +965,12 @@ async function updateExistingTrade(id){
   const qty=parseFloat($('#edit-qty')?.value), entry=parseFloat($('#edit-entry')?.value), exit=parseFloat($('#edit-exit')?.value), sl=parseFloat($('#edit-sl')?.value);
   const type=$('#edit-type')?.value || t.type;
   const emotion=$('#edit-emotion')?.value || t.emotion;
+  const confidence=Number($('#edit-confidence')?.value || t.confidence || 70);
   const images=[...document.querySelectorAll('#edit-images-list img')].map(x=>x.dataset.src).filter(Boolean);
   const pnl=(entry&&exit&&qty)?Math.round((type==='LONG'?(exit-entry)*qty:(entry-exit)*qty)*100)/100:(t.pnl||0);
   const rr=(sl&&entry&&exit&&entry!==sl)?Math.round(((type==='LONG'?exit-entry:entry-exit)/Math.abs(entry-sl))*100)/100:(t.rr||0);
   const snapshot = JSON.parse(JSON.stringify(t));
-  Object.assign(t,{symbol:symbol.toUpperCase(),type,quantity:Number.isFinite(qty)?qty:t.quantity,entryPrice:Number.isFinite(entry)?entry:null,exitPrice:Number.isFinite(exit)?exit:null,stopLoss:Number.isFinite(sl)?sl:null,emotion,exitReason:$('#edit-exit-reason')?.value.trim()||'',notes:$('#edit-notes')?.value.trim()||'',mistake:$('#edit-mistake')?.value||'none',quality:Number($('#edit-quality')?.value||3),followedPlan:!!t.isSetupTrade && ($('#edit-mistake')?.value||'none')==='none',images,beforeImage:images[0]||null,afterImage:images[1]||null,image:images[0]||null,pnl,rr});
+  Object.assign(t,{symbol:symbol.toUpperCase(),type,quantity:Number.isFinite(qty)?qty:t.quantity,entryPrice:Number.isFinite(entry)?entry:null,exitPrice:Number.isFinite(exit)?exit:null,stopLoss:Number.isFinite(sl)?sl:null,emotion,confidence,exitReason:$('#edit-exit-reason')?.value.trim()||'',images,beforeImage:images[0]||null,afterImage:images[1]||null,image:images[0]||null,pnl,rr});
   const saved = await saveUserData();
   if (!saved) { Object.assign(t, snapshot); return; }
   STATE.editingTradeId=null; render();
@@ -1040,17 +1014,44 @@ document.addEventListener('submit', async (e) => {
     const analysis = $('#note-analysis').value.trim(), learning = $('#note-learning').value.trim();
     if (!analysis && !learning) { alert('Please add at least an analysis or a learning/summary!'); return; }
     STATE.notes.unshift({
-      id:`n-${Date.now()}`, title: $('#note-symbol').value.trim() || 'Trading Note', symbol: $('#note-symbol').value.trim() || 'General', image: STATE.noteFormImage || null,
-      category: $('#note-category')?.value || 'observation', ruleText: $('#note-rule')?.value.trim() || '',
+      id:`n-${Date.now()}`, symbol: $('#note-symbol').value.trim() || 'General', image: STATE.noteFormImage || null,
       strategy: STATE.noteFormStrategy, entryCriteria: $('#note-entry').value.trim(), exitCriteria: $('#note-exit').value.trim(),
-      analysis, learning, date: new Date().toISOString()
+      analysis, learning, handwriting: STATE.noteFormHandwriting || null, date: new Date().toISOString()
     });
     STATE.activeNoteId = STATE.notes[0]?.id || null;
     STATE.noteFormImage = '';
+    STATE.noteFormHandwriting = '';
+    STATE.noteWritingMode = 'typed';
     await saveUserData();
     renderTabOnly();
   }
 });
+
+/* ---------------- Handwriting + full-screen image viewer ---------------- */
+let handwritingHistory = [], handwritingFuture = [], handwritingDrawing = false, handwritingLast = null;
+function getHandwritingCanvas(){ return $('#handwriting-canvas'); }
+function initHandwritingCanvas(){
+  const c=getHandwritingCanvas(); if(!c) return;
+  const ctx=c.getContext('2d');
+  ctx.lineCap='round'; ctx.lineJoin='round';
+  if(STATE.noteFormHandwriting){
+    const img=new Image(); img.onload=()=>{ctx.clearRect(0,0,c.width,c.height); ctx.drawImage(img,0,0,c.width,c.height);}; img.src=STATE.noteFormHandwriting;
+  } else { ctx.clearRect(0,0,c.width,c.height); ctx.fillStyle='#fff'; ctx.fillRect(0,0,c.width,c.height); }
+  handwritingHistory=[c.toDataURL('image/webp',.65)]; handwritingFuture=[];
+  c.onpointerdown=(e)=>{ handwritingDrawing=true; c.setPointerCapture?.(e.pointerId); handwritingLast=canvasPoint(c,e); };
+  c.onpointermove=(e)=>{ if(!handwritingDrawing) return; const p=canvasPoint(c,e), ctx=c.getContext('2d'); const size=Number($('#handwriting-size')?.value||3); const pressure=e.pressure&&e.pressure>0?e.pressure:1; ctx.strokeStyle='#111827'; ctx.lineWidth=Math.max(1,size*(.65+.7*pressure)); ctx.beginPath(); ctx.moveTo(handwritingLast.x,handwritingLast.y); ctx.lineTo(p.x,p.y); ctx.stroke(); handwritingLast=p; };
+  c.onpointerup=()=>{ if(handwritingDrawing) saveHandwritingSnapshot(); handwritingDrawing=false; handwritingLast=null; };
+  c.onpointercancel=()=>{ handwritingDrawing=false; handwritingLast=null; };
+}
+function canvasPoint(c,e){ const r=c.getBoundingClientRect(); return {x:(e.clientX-r.left)*(c.width/r.width),y:(e.clientY-r.top)*(c.height/r.height)}; }
+function saveHandwritingSnapshot(){ const c=getHandwritingCanvas(); if(!c) return; const snap=c.toDataURL('image/webp',.65); if(handwritingHistory.at(-1)!==snap) handwritingHistory.push(snap); if(handwritingHistory.length>25) handwritingHistory.shift(); handwritingFuture=[]; }
+function restoreCanvasData(src){ const c=getHandwritingCanvas(); if(!c) return; const ctx=c.getContext('2d'), img=new Image(); img.onload=()=>{ctx.clearRect(0,0,c.width,c.height);ctx.drawImage(img,0,0,c.width,c.height);}; img.src=src; }
+function undoHandwriting(){ if(handwritingHistory.length<=1)return; const current=handwritingHistory.pop(); handwritingFuture.push(current); restoreCanvasData(handwritingHistory.at(-1)); }
+function redoHandwriting(){ const next=handwritingFuture.pop(); if(!next)return; handwritingHistory.push(next); restoreCanvasData(next); }
+function clearHandwritingCanvas(){ const c=getHandwritingCanvas(); if(!c)return; const ctx=c.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,c.width,c.height);saveHandwritingSnapshot(); }
+function saveHandwritingCanvas(){ const c=getHandwritingCanvas(); if(!c)return; STATE.noteFormHandwriting=c.toDataURL('image/webp',.68); alert('✍️ Handwriting note attached. Ab Save Note dabaiye.'); }
+function openImageViewer(src){ if(!src)return; $('#modal-image').src=src; $('#image-modal').style.display='flex'; document.body.classList.add('image-viewer-open'); }
+function closeImageViewer(){ $('#image-modal').style.display='none'; $('#modal-image').src=''; document.body.classList.remove('image-viewer-open'); }
 
 /* ---------------- PWA install ---------------- */
 let deferredInstallPrompt = null;

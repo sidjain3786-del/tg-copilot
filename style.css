@@ -484,39 +484,10 @@ button, input, select, textarea { touch-action: manipulation; }
 .history-device-item .card-sub{margin:.15rem 0 0}
 @media(max-width:700px){.history-device-grid{grid-template-columns:1fr}.history-device-item{padding:.65rem}}
 
-/* --- Journal intelligence / self-coaching upgrade --- */
-.notes-category-bar{display:flex;align-items:center;justify-content:space-between;gap:.75rem;margin:0 0 .8rem;flex-wrap:wrap}
-.notes-category-tabs{display:flex;gap:.4rem;flex-wrap:wrap}
-.note-category-btn{border:1px solid var(--slate-200);background:#fff;color:var(--slate-600);border-radius:999px;padding:.45rem .72rem;font-size:.72rem;font-weight:800;cursor:pointer;transition:.15s}
-.note-category-btn:hover{border-color:#c7d2fe;color:var(--indigo)}
-.note-category-btn.active{background:#eef2ff;border-color:#a5b4fc;color:#4338ca}
-.notes-filter-count{font-size:.7rem;font-weight:800;color:var(--slate-500)}
-.my-rules-strip{display:grid;grid-template-columns:minmax(180px,.7fr) 2fr;gap:1rem;align-items:center;padding:1rem 1.1rem;margin:0 0 1rem;border:1px solid #dbeafe;background:linear-gradient(135deg,#f8fbff,#eef2ff);border-radius:1rem}
-.my-rules-strip>div:first-child{display:flex;flex-direction:column;gap:.2rem}
-.my-rules-mini{display:flex;gap:.45rem;overflow:auto;padding-bottom:2px}
-.my-rules-mini span{white-space:nowrap;background:#fff;border:1px solid #e0e7ff;border-radius:.7rem;padding:.55rem .7rem;font-size:.72rem;font-weight:700;color:#3730a3}
-.note-rule-box{margin-top:.8rem;padding:.8rem;border:1px solid #a7f3d0;background:#ecfdf5;border-radius:.8rem}
-.note-rule-box span{font-size:.66rem;font-weight:900;color:#047857;letter-spacing:.06em}
-.note-rule-box p{margin:.3rem 0 0;font-weight:750;color:#065f46}
-.note-rule-btn{margin-top:.75rem}
-.review-page{display:grid;gap:1rem}
-.review-hero{display:flex;align-items:stretch;justify-content:space-between;gap:1rem;flex-wrap:wrap}
-.review-focus{min-width:260px;max-width:440px;padding:1rem;border:1px solid #ddd6fe;background:#f5f3ff;border-radius:1rem;display:flex;flex-direction:column;justify-content:center;gap:.25rem}
-.review-focus span{font-size:.65rem;font-weight:900;color:#7c3aed;text-transform:uppercase;letter-spacing:.08em}
-.review-focus strong{font-size:.9rem;color:#312e81;line-height:1.35}
-.review-kpis{grid-template-columns:repeat(3,1fr)}
-.review-main-grid{grid-template-columns:1.15fr .85fr}
-.leak-list,.review-strategy-list{display:grid;gap:.55rem}
-.leak-row,.review-strategy-row{display:flex;align-items:center;justify-content:space-between;gap:.75rem;padding:.8rem .9rem;border:1px solid var(--slate-200);border-radius:.85rem;background:#fff}
-.leak-row small,.review-strategy-row small{display:block;color:var(--slate-500);font-size:.68rem;margin-top:.18rem}
-.review-check-list{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
-.review-check-list div{padding:.75rem;border-radius:.8rem;background:var(--slate-50);border:1px solid var(--slate-200);display:flex;justify-content:space-between;gap:.5rem}
-.review-check-list span{font-size:.72rem;color:var(--slate-600)}
-.review-insight{margin-top:.7rem;padding:.85rem;border-radius:.85rem;background:#fffbeb;border:1px solid #fde68a}
-.review-insight span{font-size:.68rem;font-weight:900;color:#92400e}
-.review-insight p{margin:.35rem 0 0;font-size:.76rem;line-height:1.5;color:#78350f}
-.review-plan-card{background:linear-gradient(135deg,#ffffff,#f8fafc)}
-.review-questions{display:grid;grid-template-columns:repeat(3,1fr);gap:.65rem;margin-top:.8rem}
-.review-questions div{padding:.9rem;border-radius:.9rem;background:#f8fafc;border:1px solid var(--slate-200);font-size:.7rem;color:var(--slate-400);font-weight:900}
-.review-questions strong{display:block;margin-top:.3rem;color:var(--slate-700);font-size:.78rem;line-height:1.4}
-@media(max-width:850px){.my-rules-strip,.review-main-grid{grid-template-columns:1fr}.review-kpis{grid-template-columns:1fr}.review-questions{grid-template-columns:1fr}.review-focus{max-width:none;width:100%}}
+
+/* Handwriting notebook */
+.note-mode-switch{display:flex;gap:.45rem;margin:.25rem 0 .8rem}.note-mode-switch .toggle-btn{min-width:110px}.note-mode-switch .toggle-btn.active{background:var(--slate-900);color:#fff;border-color:var(--slate-900)}
+.handwriting-note-panel{margin:.5rem 0 1rem;border:1px solid var(--slate-200);border-radius:1rem;background:var(--slate-50);padding:.75rem}.handwriting-toolbar{display:flex;justify-content:space-between;align-items:center;gap:.75rem;flex-wrap:wrap;margin-bottom:.65rem}.handwriting-toolbar strong{display:block;font-size:.78rem}.handwriting-toolbar span{display:block;font-size:.62rem;color:var(--slate-500);margin-top:.15rem}.handwriting-tools{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap}.handwriting-tools label{font-size:.62rem;font-weight:800;display:flex;align-items:center;gap:.3rem}.handwriting-tools input{width:90px}.handwriting-paper-wrap{width:100%;overflow:hidden;background:#fff;border:1px solid var(--slate-200);border-radius:.8rem;box-shadow:inset 0 0 0 1px rgba(15,23,42,.02)}#handwriting-canvas{display:block;width:100%;height:auto;min-height:300px;touch-action:none;cursor:crosshair;background:#fff}.handwriting-hint{margin:.5rem 0 0}.note-handwriting-reading img{background:#fff}
+
+/* Full-screen image inspection */
+#image-modal{position:fixed;inset:0;z-index:9999!important;background:rgba(2,6,23,.96);padding:0!important;align-items:center;justify-content:center}.image-viewer-open{overflow:hidden}#image-modal .modal-card{width:100vw;max-width:none;height:100vh;max-height:none;border-radius:0;background:#020617;box-shadow:none;display:flex;flex-direction:column}#image-modal .modal-header{flex:0 0 auto;background:rgba(2,6,23,.98);color:#fff;border-bottom:1px solid rgba(255,255,255,.12);padding:.8rem 1rem}#image-modal .modal-header button{color:#fff;background:transparent;border:0;font-size:1.2rem;cursor:pointer}#image-modal .modal-body{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:1rem;overflow:auto;background:#020617}#image-modal #modal-image{display:block;max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;cursor:zoom-out}#image-modal .modal-body::after{content:'ESC / ✕ to close';position:fixed;right:1rem;bottom:.8rem;color:rgba(255,255,255,.55);font-size:.62rem;pointer-events:none}@media(max-width:700px){.handwriting-toolbar{align-items:flex-start}.handwriting-tools{width:100%}.handwriting-tools .btn-primary,.handwriting-tools .toggle-btn{flex:1}.handwriting-tools label{width:100%;justify-content:space-between}.handwriting-tools input{flex:1}.handwriting-note-panel{padding:.6rem}#image-modal .modal-body{padding:.4rem}#image-modal .modal-header{padding:.7rem .8rem}}
