@@ -419,7 +419,7 @@ function renderLogImagePreview(){
   const box = $('#log-image-preview');
   if (!box) return;
   const images = currentLogImages();
-  box.innerHTML = images.length ? `<div class="multi-image-grid">${images.map((src,i)=>`<div class="multi-image-item"><img src="${esc(src)}" data-action="view-image" data-src="${esc(src)}"><button type="button" data-action="remove-log-image-index" data-index="${i}">×</button><span>Image ${i+1}</span></div>`).join('')}</div><div class="image-count">📸 ${images.length} image${images.length===1?'':'s'} attached</div>` : '<div class="shot-empty">No images added yet</div>';
+  box.innerHTML = images.length ? `<div class="multi-image-grid">${images.map((src,i)=>`<div class="multi-image-item"><img src="${esc(src)}" data-action="view-image" data-src="${esc(src)}" data-image-kind="log" data-image-index="${i}"><div class="multi-image-actions"><button type="button" data-action="annotate-log-image" data-index="${i}">✏️ Draw</button><button type="button" data-action="remove-log-image-index" data-index="${i}">×</button></div><span>Image ${i+1}</span></div>`).join('')}</div><div class="image-count">📸 ${images.length} image${images.length===1?'':'s'} attached · Image par <strong>Draw</strong> karke annotate karo</div>` : '<div class="shot-empty">No images added yet</div>';
 }
 function addLogImages(images){
   const arr=currentLogImages();
@@ -442,8 +442,26 @@ function renderLogTab(){
     </div>
 
     <form id="log-form">
+      <div class="log-step log-strategy-top">
+        <div class="log-step-title"><span>1</span><strong>Strategy &amp; trade type</strong></div>
+        <div class="strategy-top-grid">
+          <div class="field strategy-select-field log-strategy-top-field">
+            <label>🎯 Strategy</label>
+            <select id="log-strategy-select" ${allStrategies().length ? '' : 'disabled'}>${allStrategies().length ? strategyOptions : '<option>No strategy yet — Notes → ADD STRATEGY</option>'}</select>
+            <p class="card-sub">Strategy ko trade ke bilkul upar rakha gaya hai, taaki har setup ka journal clear rahe.</p>
+          </div>
+          <div>
+            <label class="strategy-type-label">Trade Type</label>
+            <div class="toggle-group log-setup-toggle">
+              <button type="button" class="toggle-btn ${STATE.logFormIsSetup?'active-green':''}" data-action="set-log-setup" data-value="true">🎯 Setup Trade</button>
+              <button type="button" class="toggle-btn ${!STATE.logFormIsSetup?'active-red':''}" data-action="set-log-setup" data-value="false">⚡ Quick Trade</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="log-step">
-        <div class="log-step-title"><span>1</span><strong>Trade basics</strong></div>
+        <div class="log-step-title"><span>2</span><strong>Trade basics</strong></div>
         <div class="field grid-3 log-basic-grid">
           <div><label>Symbol</label><input type="text" id="log-symbol" value="BTC/USDT" placeholder="XAUUSD, NIFTY..."></div>
           <div><label>Direction</label><select id="log-type"><option value="LONG">LONG</option><option value="SHORT">SHORT</option></select></div>
@@ -466,21 +484,9 @@ function renderLogTab(){
         </div>
 
         <div class="fast-journal-screenshots"><div class="fast-shot-head"><div><strong>📸 Before & After</strong><span>Optional — chart screenshots</span></div></div><div class="before-after-grid">
-          <label class="shot-upload-card ${STATE.logFormBeforeImage?'has-image':''}"><div class="shot-label">BEFORE ENTRY</div>${STATE.logFormBeforeImage ? `<img src="${esc(STATE.logFormBeforeImage)}" alt="Before entry">` : `<div class="shot-placeholder">＋<small>Upload before entry</small></div>`}<input type="file" id="log-before-image-file" accept="image/*" style="display:none;"></label>
-          <label class="shot-upload-card ${STATE.logFormAfterImage?'has-image':''}"><div class="shot-label">AFTER EXIT</div>${STATE.logFormAfterImage ? `<img src="${esc(STATE.logFormAfterImage)}" alt="After exit">` : `<div class="shot-placeholder">＋<small>Upload after exit</small></div>`}<input type="file" id="log-after-image-file" accept="image/*" style="display:none;"></label>
+          <label class="shot-upload-card ${STATE.logFormBeforeImage?'has-image':''}"><div class="shot-label">BEFORE ENTRY</div>${STATE.logFormBeforeImage ? `<img src="${esc(STATE.logFormBeforeImage)}" alt="Before entry" data-action="view-image" data-src="${esc(STATE.logFormBeforeImage)}" data-image-kind="log" data-image-index="0">` : `<div class="shot-placeholder">＋<small>Upload before entry</small></div>`}<input type="file" id="log-before-image-file" accept="image/*" style="display:none;"></label>
+          <label class="shot-upload-card ${STATE.logFormAfterImage?'has-image':''}"><div class="shot-label">AFTER EXIT</div>${STATE.logFormAfterImage ? `<img src="${esc(STATE.logFormAfterImage)}" alt="After exit" data-action="view-image" data-src="${esc(STATE.logFormAfterImage)}" data-image-kind="log" data-image-index="1">` : `<div class="shot-placeholder">＋<small>Upload after exit</small></div>`}<input type="file" id="log-after-image-file" accept="image/*" style="display:none;"></label>
         </div><div class="image-url-add-row fast-extra-image"><input type="url" id="log-image-url" placeholder="Optional: paste another image URL..."><button type="button" class="btn-secondary" data-action="add-log-image-url">+ Add</button></div><div id="log-image-preview"></div></div>
-      </div>
-
-      <div class="log-step">
-        <div class="log-step-title"><span>2</span><strong>Was this a setup?</strong></div>
-        <div class="toggle-group log-setup-toggle">
-          <button type="button" class="toggle-btn ${STATE.logFormIsSetup?'active-green':''}" data-action="set-log-setup" data-value="true">🎯 Yes, setup trade</button>
-          <button type="button" class="toggle-btn ${!STATE.logFormIsSetup?'active-red':''}" data-action="set-log-setup" data-value="false">⚡ Quick trade</button>
-        </div>
-        ${STATE.logFormIsSetup ? `<div class="field strategy-select-field log-strategy-mini">
-          <label>🎯 Strategy</label>
-          <select id="log-strategy-select" ${allStrategies().length ? '' : 'disabled'}>${allStrategies().length ? strategyOptions : '<option>No strategy yet</option>'}</select>
-        </div>` : ''}
       </div>
 
       <details class="log-advanced">
@@ -830,12 +836,21 @@ document.addEventListener('click', async (e) => {
   else if (action==='update-trade') { await updateExistingTrade(btn.dataset.id); }
   else if (action==='remove-edit-image') { const item=btn.closest('.edit-image-item'); item?.remove(); }
   else if (action==='remove-note-image') { STATE.noteFormImage=''; renderNoteImagePreview(); }
+  else if (action==='annotate-log-image') { const i=Number(btn.dataset.index); const src=currentLogImages()[i]; if(src) openImageEditor(src,{kind:'log',index:i}); }
+  else if (action==='image-annotate-toggle') { toggleImageAnnotationMode(); }
+  else if (action==='image-tool') { setImageTool(btn.dataset.tool); }
+  else if (action==='image-color') { setImageColor(btn.dataset.color); }
+  else if (action==='image-undo') { imageUndo(); }
+  else if (action==='image-redo') { imageRedo(); }
+  else if (action==='image-clear') { imageClear(); }
+  else if (action==='image-annotation-save') { saveImageAnnotation(); }
+  else if (action==='image-editor-download') { downloadCurrentImage(); }
   else if (action==='note-writing-mode') { STATE.noteWritingMode = btn.dataset.mode === 'handwriting' ? 'handwriting' : 'typed'; renderTabOnly(); initHandwritingCanvas(); }
   else if (action==='handwriting-save') { saveHandwritingCanvas(); }
   else if (action==='handwriting-clear') { clearHandwritingCanvas(); }
   else if (action==='handwriting-undo') { undoHandwriting(); }
   else if (action==='handwriting-redo') { redoHandwriting(); }
-  else if (action==='view-image') { openImageViewer(btn.dataset.src); }
+  else if (action==='view-image') { const kind=btn.dataset.imageKind, index=Number(btn.dataset.imageIndex); openImageViewer(btn.dataset.src, kind ? {kind,index} : null); }
   else if (action==='toggle-strategy-builder') {
     const form = $('#strategy-builder-form');
     if (form) form.style.display = form.style.display === 'none' ? 'block' : 'none';
@@ -891,6 +906,7 @@ document.addEventListener('click', async (e) => {
 
 $('#modal-close').addEventListener('click', closeImageViewer);
 $('#image-modal').addEventListener('click', (e) => { if (e.target.id==='image-modal') closeImageViewer(); });
+document.addEventListener('keydown', (e) => { if (e.key==='Escape' && $('#image-modal')?.style.display==='flex') closeImageViewer(); });
 document.addEventListener('keydown', e => { if (e.key==='Escape') closeImageViewer(); });
 
 document.addEventListener('input', (e) => {
@@ -902,6 +918,7 @@ document.addEventListener('input', (e) => {
   else if (e.target.id==='log-custom-emotion') { STATE.logCustomEmotion = e.target.value; }
   else if (e.target.id==='edit-confidence') { const box=e.target.closest('.edit-confidence'); const v=box?.querySelector('strong'); if(v) v.textContent=Number(e.target.value)+'/100'; }
   else if (e.target.id==='note-image-url') { STATE.noteFormImage = e.target.value; renderNoteImagePreview(); }
+  else if (e.target.id==='image-pen-size') { setImageSize(e.target.value); }
 });
 
 function refreshBatteryOnly(){
@@ -1050,8 +1067,29 @@ function undoHandwriting(){ if(handwritingHistory.length<=1)return; const curren
 function redoHandwriting(){ const next=handwritingFuture.pop(); if(!next)return; handwritingHistory.push(next); restoreCanvasData(next); }
 function clearHandwritingCanvas(){ const c=getHandwritingCanvas(); if(!c)return; const ctx=c.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,c.width,c.height);saveHandwritingSnapshot(); }
 function saveHandwritingCanvas(){ const c=getHandwritingCanvas(); if(!c)return; STATE.noteFormHandwriting=c.toDataURL('image/webp',.68); alert('✍️ Handwriting note attached. Ab Save Note dabaiye.'); }
-function openImageViewer(src){ if(!src)return; $('#modal-image').src=src; $('#image-modal').style.display='flex'; document.body.classList.add('image-viewer-open'); }
-function closeImageViewer(){ $('#image-modal').style.display='none'; $('#modal-image').src=''; document.body.classList.remove('image-viewer-open'); }
+let imageEditor = { src:'', context:null, drawing:false, last:null, tool:'pen', color:'#111827', size:5, history:[], future:[] };
+function imageCanvas(){ return $('#image-draw-canvas'); }
+function imageStage(){ return $('#image-editor-stage'); }
+function openImageViewer(src,context=null){ if(!src)return; imageEditor={...imageEditor,src,context,tool:'pen',color:'#111827',size:5,history:[],future:[],drawing:false,last:null}; $('#modal-image').src=src; $('#image-modal').style.display='flex'; document.body.classList.add('image-viewer-open'); resetImageEditorUI(); }
+function openImageEditor(src,context){ if(!src)return; imageEditor={...imageEditor,src,context,tool:'pen',color:'#111827',size:5,history:[],future:[],drawing:false,last:null}; $('#modal-image').src=src; $('#image-modal').style.display='flex'; document.body.classList.add('image-viewer-open'); resetImageEditorUI(); enableImageAnnotationMode(true); }
+function closeImageViewer(){ $('#image-modal').style.display='none'; $('#modal-image').src=''; const c=imageCanvas(); if(c)c.getContext('2d').clearRect(0,0,c.width,c.height); document.body.classList.remove('image-viewer-open'); imageEditor.context=null; }
+function resetImageEditorUI(){ const toolbar=$('#image-editor-toolbar'); if(toolbar)toolbar.style.display='none'; const save=$('#image-annotation-save'); if(save)save.style.display='none'; const toggle=$('#image-annotate-toggle'); if(toggle){toggle.textContent='✏️ Draw';toggle.classList.remove('active');} }
+function enableImageAnnotationMode(force=false){ const toolbar=$('#image-editor-toolbar');const save=$('#image-annotation-save');const toggle=$('#image-annotate-toggle');if(!toolbar)return;const active=force||toolbar.style.display==='none';toolbar.style.display=active?'flex':'none';if(save)save.style.display=active?'inline-flex':'none';if(toggle){toggle.textContent=active?'✕ Stop Drawing':'✏️ Draw';toggle.classList.toggle('active',active);}if(active)setupImageCanvas();}
+function toggleImageAnnotationMode(){ enableImageAnnotationMode(false); }
+function setupImageCanvas(){ const img=$('#modal-image'),c=imageCanvas(),stage=imageStage();if(!img||!c||!stage)return;const fit=()=>{if(!img.naturalWidth)return;const maxW=Math.max(280,window.innerWidth-24),maxH=Math.max(220,window.innerHeight-155),scale=Math.min(maxW/img.naturalWidth,maxH/img.naturalHeight,1),w=Math.max(1,Math.round(img.naturalWidth*scale)),h=Math.max(1,Math.round(img.naturalHeight*scale));stage.style.width=w+'px';stage.style.height=h+'px';c.width=w;c.height=h;c.style.width=w+'px';c.style.height=h+'px';c.getContext('2d').clearRect(0,0,w,h);imageEditor.history=[c.toDataURL('image/png')];imageEditor.future=[];bindImageDrawing(c);};if(img.complete&&img.naturalWidth)fit();else img.onload=fit;}
+function bindImageDrawing(c){c.onpointerdown=(e)=>{imageEditor.drawing=true;c.setPointerCapture?.(e.pointerId);imageEditor.last=canvasPoint(c,e);};c.onpointermove=(e)=>{if(!imageEditor.drawing)return;const p=canvasPoint(c,e),ctx=c.getContext('2d'),pressure=e.pressure&&e.pressure>0?e.pressure:1,size=Math.max(1,imageEditor.size*(.7+.6*pressure));ctx.save();ctx.lineCap='round';ctx.lineJoin='round';ctx.lineWidth=size;ctx.globalCompositeOperation=imageEditor.tool==='eraser'?'destination-out':'source-over';ctx.strokeStyle=imageEditor.color;ctx.beginPath();ctx.moveTo(imageEditor.last.x,imageEditor.last.y);ctx.lineTo(p.x,p.y);ctx.stroke();ctx.restore();imageEditor.last=p;};c.onpointerup=(e)=>{if(imageEditor.drawing){imageEditor.drawing=false;imageEditor.last=null;saveImageSnapshot();}c.releasePointerCapture?.(e.pointerId);};c.onpointercancel=()=>{imageEditor.drawing=false;imageEditor.last=null;};}
+function saveImageSnapshot(){const c=imageCanvas();if(!c)return;const snap=c.toDataURL('image/png');if(imageEditor.history.at(-1)!==snap)imageEditor.history.push(snap);if(imageEditor.history.length>30)imageEditor.history.shift();imageEditor.future=[];}
+function restoreImageSnapshot(src){const c=imageCanvas();if(!c)return;const img=new Image();img.onload=()=>{const ctx=c.getContext('2d');ctx.clearRect(0,0,c.width,c.height);ctx.drawImage(img,0,0,c.width,c.height);};img.src=src;}
+function imageUndo(){if(imageEditor.history.length<=1)return;const cur=imageEditor.history.pop();imageEditor.future.push(cur);restoreImageSnapshot(imageEditor.history.at(-1));}
+function imageRedo(){const next=imageEditor.future.pop();if(!next)return;imageEditor.history.push(next);restoreImageSnapshot(next);}
+function imageClear(){const c=imageCanvas();if(!c)return;c.getContext('2d').clearRect(0,0,c.width,c.height);saveImageSnapshot();}
+function setImageTool(tool){imageEditor.tool=tool;$$('#image-editor-toolbar [data-action="image-tool"]').forEach(b=>b.classList.toggle('active',b.dataset.tool===tool));}
+function setImageColor(color){imageEditor.color=color;setImageTool('pen');$$('#image-editor-toolbar .image-color').forEach(b=>b.classList.toggle('active',b.dataset.color===color));}
+function setImageSize(value){imageEditor.size=Number(value)||5;const out=$('#image-pen-size-value');if(out)out.textContent=imageEditor.size+'px';}
+function composeAnnotatedImage(){const base=$('#modal-image'),overlay=imageCanvas();if(!base?.naturalWidth||!overlay)return null;const max=1600,scale=Math.min(1,max/Math.max(base.naturalWidth,base.naturalHeight)),w=Math.round(base.naturalWidth*scale),h=Math.round(base.naturalHeight*scale),out=document.createElement('canvas');out.width=w;out.height=h;const ctx=out.getContext('2d');ctx.drawImage(base,0,0,w,h);ctx.drawImage(overlay,0,0,w,h);return out.toDataURL('image/jpeg',.78);}
+function saveImageAnnotation(){const result=composeAnnotatedImage();if(!result)return;const ctx=imageEditor.context;if(ctx?.kind==='log'){const arr=currentLogImages();if(arr[ctx.index]){arr[ctx.index]=result;STATE.logFormImages=arr;STATE.logFormBeforeImage=arr[0]||'';STATE.logFormAfterImage=arr[1]||'';STATE.logFormImage=arr[0]||'';renderLogImagePreview();updateLogPreview();}}else if(ctx?.kind==='trade'){const t=STATE.trades.find(x=>x.id===ctx.id);if(t){const arr=Array.isArray(t.images)&&t.images.length?t.images.slice():[t.beforeImage,t.afterImage,t.image].filter(Boolean);arr[ctx.index]=result;t.images=arr;t.beforeImage=arr[0]||null;t.afterImage=arr[1]||null;t.image=arr[0]||null;saveUserData();renderTabOnly();}}else if(ctx?.kind==='note'&&ctx.field==='image'){STATE.noteFormImage=result;renderNoteImagePreview();}imageEditor.src=result;$('#modal-image').src=result;alert('🖊️ Annotation save ho gayi.');enableImageAnnotationMode(true);}
+function downloadCurrentImage(){const src=composeAnnotatedImage()||imageEditor.src;if(!src)return;const a=document.createElement('a');a.href=src;a.download='trader-copilot-annotated-chart.jpg';document.body.appendChild(a);a.click();a.remove();}
+
 
 /* ---------------- PWA install ---------------- */
 let deferredInstallPrompt = null;
