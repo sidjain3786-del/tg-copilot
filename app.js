@@ -631,8 +631,6 @@ function renderStrategyBuilder(){
 }
 
 function renderNotesTab(){
-  const strategyObjects = allStrategies();
-  const strategyOptions = strategyObjects.map(p => `<option value="${esc(p.name)}" ${STATE.noteFormStrategy===p.name?'selected':''}>${esc(p.name)}</option>`).join('');
   const notes = STATE.notes || [];
   const noteMatchesFilter = (n) => {
     if (STATE.noteConceptFilter === 'ALL') return true;
@@ -649,193 +647,93 @@ function renderNotesTab(){
   ];
 
   const renderReading = () => active ? `
-    <article class="note-reading-paper note-live-editor">
-      <div class="note-reading-topline">
+    <article class="note-reading-paper note-live-editor samsung-note-editor">
+      <div class="note-reading-topline samsung-note-topline">
         <div class="note-live-title-wrap">
           <div class="note-reading-meta">${esc(active.customConcept || active.concept || 'General')}${active.strategy ? ` <span>•</span> ${esc(active.strategy)}` : ''}</div>
-          <input class="note-live-title" data-note-editor-title="${active.id}" value="${esc(active.title || active.symbol || 'Trading Note')}" placeholder="Note title…">
-          <div class="note-reading-date">${new Date(active.date).toLocaleDateString(undefined,{day:'numeric',month:'long',year:'numeric'})}</div>
+          <input class="note-live-title" data-note-editor-title="${active.id}" value="${esc(active.title || active.symbol || 'Untitled Note')}" placeholder="Note title…">
+          <div class="note-reading-date">${new Date(active.date || Date.now()).toLocaleDateString(undefined,{day:'numeric',month:'long',year:'numeric'})}</div>
         </div>
         <div class="note-live-actions">
           <span class="note-save-status" data-note-save-status>✓ Saved</span>
           <button type="button" class="note-plus-btn" data-action="toggle-note-plus" title="Add to note">＋</button>
-          <button class="item-delete note-reading-delete" data-action="delete-note" data-id="${active.id}" title="Delete note">🗑️</button>
+          <button type="button" class="item-delete note-reading-delete" data-action="delete-note" data-id="${active.id}" title="Delete note">🗑️</button>
         </div>
       </div>
 
       <div class="note-plus-menu" id="note-plus-menu" style="display:none">
         <button type="button" class="btn-secondary" data-action="add-live-text-block">＋ Text</button>
-        <button type="button" class="btn-secondary" data-action="trigger-live-image">🖼️ Image</button>
+        <button type="button" class="btn-secondary" data-action="trigger-live-image">🖼️ Images</button>
         <input type="file" id="live-note-image-file" accept="image/*" multiple hidden>
       </div>
 
-      <div class="note-live-meta-grid">
-        <label><span>CONCEPT</span><select data-note-editor-concept="${active.id}">${NOTE_CONCEPTS.map(c=>`<option value="${esc(c)}" ${(active.concept||'General')===c && !active.customConcept?'selected':''}>${esc(c)}</option>`).join('')}<option value="__custom__" ${active.customConcept?'selected':''}>Custom</option></select></label>
-        <label><span>STRATEGY</span><input data-note-editor-strategy="${active.id}" value="${esc(active.strategy||'')}" placeholder="Strategy…"></label>
+      <div class="samsung-note-meta-row">
+        <label class="samsung-note-concept"><span>CONCEPT</span><select data-note-editor-concept="${active.id}">${NOTE_CONCEPTS.map(c=>`<option value="${esc(c)}" ${(active.concept||'General')===c && !active.customConcept?'selected':''}>${esc(c)}</option>`).join('')}<option value="__custom__" ${active.customConcept?'selected':''}>Custom</option></select></label>
+        <label class="samsung-note-strategy"><span>STRATEGY</span><input data-note-editor-strategy="${active.id}" value="${esc(active.strategy||'')}" placeholder="Optional"></label>
       </div>
 
-      <div class="note-live-blocks">
+      <div class="samsung-note-page">
         ${normalizeNoteBlocks(active).map((b,i)=> b.type==='image' ? `
-          <div class="note-live-block image">
+          <div class="note-live-block image samsung-note-image-block">
             <div class="note-live-image-wrap">
               <img src="${esc(b.src)}" data-action="open-note-block-annotator" data-note-id="${active.id}" data-index="${i}" alt="Note image">
               <button type="button" class="note-block-remove-floating" data-action="remove-live-note-block" data-note-id="${active.id}" data-index="${i}" title="Remove image">×</button>
               <button type="button" class="note-draw-floating" data-action="open-note-block-annotator" data-note-id="${active.id}" data-index="${i}">✍️ Draw</button>
             </div>
           </div>` : `
-          <div class="note-live-block text">
+          <div class="note-live-block text samsung-note-text-block">
             <textarea data-live-note-text="${active.id}" data-index="${i}" placeholder="Write something…">${esc(b.text)}</textarea>
             <button type="button" class="note-text-remove" data-action="remove-live-note-block" data-note-id="${active.id}" data-index="${i}" title="Remove text">×</button>
           </div>`).join('')}
+        ${!normalizeNoteBlocks(active).length ? `<div class="samsung-note-empty-page">Yahan seedha likhna shuru karein, ya <strong>＋</strong> se image/text add karein.</div>` : ''}
       </div>
 
-      <div class="note-live-add-hint">＋ Press <strong>+</strong> to keep adding text, screenshots or chart annotations. Changes save automatically.</div>
-
-      <div class="note-live-section">
-        <label>ENTRY CRITERIA</label><textarea data-note-editor-entry="${active.id}" placeholder="Entry conditions…">${esc(active.entryCriteria||'')}</textarea>
-      </div>
-      <div class="note-live-section">
-        <label>EXIT / INVALIDATION</label><textarea data-note-editor-exit="${active.id}" placeholder="Exit / invalidation…">${esc(active.exitCriteria||'')}</textarea>
-      </div>
-      <div class="note-live-section">
-        <label>MY ANALYSIS</label><textarea data-note-editor-analysis="${active.id}" placeholder="Apni analysis likhte raho…">${esc(active.analysis||'')}</textarea>
-      </div>
-      <div class="note-live-section learning">
-        <label>✦ WHAT I LEARNED</label><textarea data-note-editor-learning="${active.id}" placeholder="Jo seekha, yahan likho…">${esc(active.learning||'')}</textarea>
+      <div class="samsung-note-bottom-add">
+        <button type="button" class="samsung-add-button" data-action="toggle-note-plus">＋ Add</button>
+        <span>Changes automatically save hote hain</span>
       </div>
     </article>` : `
-    <div class="note-reading-empty">
+    <div class="note-reading-empty samsung-note-empty">
       <div class="note-reading-empty-icon">📝</div>
-      <h3>Your reading space</h3>
-      <p>Left side se note kholo. Phir ye bilkul notes app ki tarah editable rahega.</p>
+      <h3>Open a note</h3>
+      <p>Left side se note select karein, ya neeche <strong>＋ New Note</strong> se naya notebook page banayein.</p>
     </div>`;
 
   return `
-  <div class="notes-workspace">
-    ${renderStrategyBuilder()}
-
-    <div class="notes-capture card">
-      <div class="notes-capture-heading">
-        <div>
-          <span class="uppercase-label">WRITE &amp; REFLECT</span>
-          <h2 class="section-title">📝 Capture a Trade Thought</h2>
-          <p class="card-sub">Chart dekho, apni thinking likho, save karo. Padhne ka experience neeche alag rakha gaya hai.</p>
-        </div>
-        <span class="xp-badge">+15 XP</span>
-      </div>
-      <form id="notes-form">
-        <div class="field"><label>Title / Symbol / Tag</label><input type="text" id="note-symbol" value="${active && STATE.editingNoteId===active.id ? esc(active.symbol || '') : ''}" placeholder="e.g. XAUUSD — London Liquidity Review"></div>
-
-        <div class="field">
-          <label>Strategy</label>
-          <select id="note-strategy-select" ${strategyObjects.length ? '' : 'disabled'}>${strategyObjects.length ? strategyOptions : '<option>No custom strategies yet</option>'}</select>
-          <p class="card-sub" style="margin:.4rem 0 0;">New strategy banane ke liye upar <strong>ADD STRATEGY</strong> use karein.</p>
-        </div>
-
-        <div class="field grid-2">
-          <div><label>Note Concept</label><select id="note-concept-select">${NOTE_CONCEPTS.map(c=>`<option value="${esc(c)}" ${STATE.noteFormConcept===c?'selected':''}>${esc(c)}</option>`).join('')}<option value="__custom__" ${STATE.noteFormConcept==='__custom__'?'selected':''}>＋ Custom Concept</option></select></div>
-          <div id="note-custom-concept-row" style="display:${STATE.noteFormConcept==='__custom__'?'block':'none'};"><label>Custom Concept</label><input id="note-custom-concept" value="${esc(STATE.noteFormCustomConcept)}" placeholder="e.g. Liquidity, BOS, Psychology..." maxlength="50"></div>
-        </div>
-
-        <div class="field grid-3" style="grid-template-columns:1fr 1fr;">
-          <div><label>Entry Criteria</label><textarea id="note-entry" rows="3" placeholder="Kin conditions par entry loge?">${active && STATE.editingNoteId===active.id ? esc(active.entryCriteria || '') : ''}</textarea></div>
-          <div><label>Exit Criteria</label><textarea id="note-exit" rows="3" placeholder="Kab exit / target / SL hit consider karoge...">${active && STATE.editingNoteId===active.id ? esc(active.exitCriteria || '') : ''}</textarea></div>
-        </div>
-
-        <div class="field note-upload-field">
-          <label>📚 Note Timeline <span>(Screenshot → text → screenshot → text)</span></label>
-          <div class="note-block-toolbar">
-            <label class="upload-box note-add-block"><span>🖼️</span><span>+ Screenshot</span><input type="file" id="note-block-image-file" accept="image/*" multiple style="display:none;"></label>
-            <button type="button" class="btn-secondary note-add-text" data-action="add-note-text-block">＋ Text</button>
-            <input type="url" id="note-image-url" placeholder="Paste image URL...">
-            <button type="button" class="btn-secondary" data-action="add-note-image-url">Add</button>
-          </div>
-          <p class="card-sub" style="margin:.45rem 0;">Har screenshot ke neeche alag text likh sakte ho. Screenshot par click karke pen, eraser, color aur thickness se draw bhi kar sakte ho.</p>
-          <div id="note-blocks-editor"></div>
-        </div>
-
-        <div class="field"><label>Kya Samjha / Analysis <span class="optional-label">optional</span></label><textarea id="note-analysis" rows="4" placeholder="Chart pe kya dikh raha tha? Setup kaisa tha? Aapne kya notice kiya?">${active && STATE.editingNoteId===active.id ? esc(active.analysis || '') : ''}</textarea></div>
-        <div class="field"><label>Seekh / Learning Summary</label><textarea id="note-learning" rows="3" placeholder="Is trade / analysis se kya seekh mili? Agli baar kya repeat ya avoid karoge?">${active && STATE.editingNoteId===active.id ? esc(active.learning || '') : ''}</textarea></div>
-
-        <div style="display:flex; gap:.6rem;"><button type="submit" class="btn-primary btn-block">${STATE.editingNoteId ? '💾 Update Note' : 'Save Note'}</button>${STATE.editingNoteId ? '<button type="button" class="btn-secondary" data-action="cancel-edit-note">Cancel</button>' : ''}</div>
-      </form>
-    </div>
-
-    <div class="notes-reading-header">
+  <div class="notes-workspace samsung-notes-workspace">
+    <div class="notes-library-header">
       <div>
-        <span class="uppercase-label">YOUR JOURNAL</span>
-        <h2 class="section-title">☕ Reading Room</h2>
-        <p class="card-sub">Concept choose karo aur sirf usi topic ke notes padho.</p>
+        <span class="uppercase-label">LEARNING LIBRARY</span>
+        <h2 class="section-title">📝 Notes</h2>
+        <p class="card-sub">Ek clean notebook — text, screenshots aur drawings ek hi page par.</p>
       </div>
-      <span class="notes-count">${filteredNotes.length} / ${notes.length} ${notes.length===1?'note':'notes'}</span>
+      <button type="button" class="btn-primary" data-action="create-note">＋ New Note</button>
     </div>
 
-    <div class="notes-concept-tabs" role="tablist" aria-label="Note concepts">
-      ${noteTabs.map(tab => {
-        const count = tab.value === 'ALL' ? notes.length : notes.filter(n => tab.value === '__custom__' ? !!(n.customConcept || n.concept === 'Custom') : (n.concept || 'General') === tab.value).length;
-        const selected = STATE.noteConceptFilter === tab.value;
-        return `<button type="button" class="notes-concept-tab ${selected?'active':''}" data-action="filter-note-concept" data-concept="${esc(tab.value)}" aria-selected="${selected}">${esc(tab.label)} <span>${count}</span></button>`;
-      }).join('')}
+    <div class="notes-concept-tabs samsung-concept-tabs">
+      ${noteTabs.map(t=>`<button type="button" class="note-concept-tab ${STATE.noteConceptFilter===t.value?'active':''}" data-action="filter-note-concept" data-concept="${esc(t.value)}">${esc(t.label)} <span>${notes.filter(n=>t.value==='ALL'?true:t.value==='__custom__'?(n.customConcept||n.concept==='Custom'):(n.concept||'General')===t.value).length}</span></button>`).join('')}
     </div>
 
-    <div class="notes-reading-layout">
-      <aside class="notes-library">
-        <div class="notes-library-title">${STATE.noteConceptFilter==='ALL'?'Saved Notes':esc(STATE.noteConceptFilter==='__custom__'?'Custom':STATE.noteConceptFilter)} </div>
-        ${filteredNotes.length ? filteredNotes.map(n => `
-          <button type="button" class="note-library-row ${n.id===STATE.activeNoteId?'active':''}" data-action="select-note" data-id="${n.id}">
-            <span class="note-library-symbol">${esc(n.symbol || 'General')} · ${esc(n.customConcept || n.concept || 'General')}</span>
-            <span class="note-library-preview">${esc((n.learning || n.analysis || n.entryCriteria || 'No summary yet').replace(/\s+/g,' ').slice(0,90))}</span>
-            <span class="note-library-date">${new Date(n.date).toLocaleDateString(undefined,{day:'2-digit',month:'short'})}</span>
-          </button>`).join('') : `<div class="notes-library-empty">Is concept par abhi koi note nahi hai.</div>`}
+    <div class="notes-samsung-layout">
+      <aside class="notes-list-panel card">
+        <div class="notes-list-head"><strong>${filteredNotes.length} note${filteredNotes.length===1?'':'s'}</strong><span>Auto-saved</span></div>
+        <div class="notes-list-items">
+          ${filteredNotes.length ? filteredNotes.map(n=>{
+            const blocks=normalizeNoteBlocks(n), preview=(blocks.find(b=>b.type==='text')?.text || n.learning || n.analysis || 'No text yet').trim();
+            const imageCount=blocks.filter(b=>b.type==='image').length;
+            return `<button type="button" class="note-list-item ${STATE.activeNoteId===n.id?'active':''}" data-action="select-note" data-id="${n.id}">
+              <span class="note-list-title">${esc(n.title || n.symbol || 'Untitled Note')}</span>
+              <span class="note-list-preview">${esc(preview.slice(0,110))}</span>
+              <span class="note-list-meta">${esc(n.customConcept || n.concept || 'General')}${imageCount?` · 🖼️ ${imageCount}`:''} · ${new Date(n.updatedAt || n.date || Date.now()).toLocaleDateString(undefined,{day:'numeric',month:'short'})}</span>
+            </button>`;
+          }).join('') : `<div class="notes-list-empty">No notes in this concept.<br><button type="button" class="btn-secondary" data-action="create-note" style="margin-top:.7rem">＋ Create Note</button></div>`}
+        </div>
       </aside>
-      <main class="note-reading-panel">${renderReading()}</main>
-    </div>
-  </div>`;
-}
-/* ---------------- Reality tab ---------------- */
-function renderRealityTab(){
-  const s = computeStats();
-  return `
-  <div class="grid-3" style="grid-template-columns:1fr 1fr;">
-    <div class="stat-card green"><span style="font-size:.7rem; font-weight:800; color:var(--emerald); text-transform:uppercase;">🎯 Rules Se Kamaya (Setup Trades)</span><p class="stat-value" style="color:var(--emerald);">${money(s.setupPnL)}</p><p class="card-sub">${s.setupCount} Setup Trades Logged</p></div>
-    <div class="stat-card red"><span style="font-size:.7rem; font-weight:800; color:var(--rose); text-transform:uppercase;">🎲 Tukke Me Gavaya (Bina Setup)</span><p class="stat-value" style="color:var(--rose);">${money(s.tukkaPnL)}</p><p class="card-sub">${s.tukkaCount} Random Trades Logged</p></div>
-  </div>
-  <div class="card">
-    <h3 class="section-title">💻 Device &amp; Location Impact Analytics</h3>
-    <div class="grid-3" style="grid-template-columns:1fr 1fr;">
-      <div style="background:var(--slate-50); border:1px solid var(--slate-200); border-radius:1rem; padding:1rem;">
-        <div style="display:flex; justify-content:space-between;"><span style="font-weight:700; font-size:.75rem;">🖥️ Laptop @ Trading Desk</span><span class="mono" style="font-weight:800; color:${s.deskPnL>=0?'var(--emerald)':'var(--rose)'};">${money(s.deskPnL)}</span></div>
-        <p class="card-sub">${s.deskCount} trades logged at desk.</p>
-      </div>
-      <div style="background:var(--slate-50); border:1px solid var(--slate-200); border-radius:1rem; padding:1rem;">
-        <div style="display:flex; justify-content:space-between;"><span style="font-weight:700; font-size:.75rem;">📱 Mobile @ Couch / Random</span><span class="mono" style="font-weight:800; color:${s.mobilePnL>=0?'var(--emerald)':'var(--rose)'};">${money(s.mobilePnL)}</span></div>
-        <p class="card-sub">${s.mobileCount} trades logged on mobile/couch.</p>
-      </div>
+      <section class="note-reading-panel">${renderReading()}</section>
     </div>
   </div>`;
 }
 
-/* ---------------- History tab ---------------- */
-function tradeImages(t){
-  const imgs = Array.isArray(t.images) && t.images.length ? t.images : [t.beforeImage, t.afterImage, t.image].filter(Boolean);
-  return [...new Set(imgs.filter(Boolean))];
-}
-function historyViewButton(id, icon, label){
-  return `<button type="button" class="history-view-btn ${STATE.historyView===id?'active':''}" data-action="history-view" data-view="${id}">${icon}<span>${label}</span></button>`;
-}
-function renderTradeView(t, mode){
-  const pv=plannedVsActual(t), imgs=tradeImages(t);
-  const pnl=Number(t.pnl)||0, rr=t.rr ?? '—';
-  const resultClass=pnl>=0?'positive':'negative';
-  const meta=`${esc(t.symbol||'—')} • ${esc(t.type||'—')}`;
-  const chips=`<div class="history-chips"><span class="journal-chip">🧠 ${esc(emotionText(t))}</span><span class="journal-chip">📝 ${esc(mistakeLabel(t.mistake||'none'))}</span><span class="journal-chip">⭐ ${t.quality||3}/5</span></div>`;
-  const actions=`<div class="trade-actions"><button type="button" class="btn-secondary trade-edit-btn" data-action="edit-trade" data-id="${esc(t.id)}">✏️ Edit</button><button type="button" class="btn-danger trade-delete-btn" data-action="delete-trade" data-id="${esc(t.id)}" title="Delete trade">🗑️ Delete</button></div>`;
-  const shots = imgs.length ? `<div class="history-images">${imgs.map((src,i)=>`<div class="history-image"><img src="${esc(src)}" data-action="view-image" data-src="${esc(src)}"><span>${i===0?'Before':i===1?'After':`Image ${i+1}`}</span></div>`).join('')}</div>` : `<div class="history-no-images">🖼 No screenshots</div>`;
-  if(mode==='list') return `<div class="history-list-row"><div class="history-list-main"><div class="history-symbol">${meta}</div><span class="history-date">${esc(t.date||t.createdAt||'')}</span></div><div class="history-list-stat">${pv.pe??'—'} → ${t.exitPrice??'—'}</div><div class="history-list-stat">${esc(emotionText(t))}</div><div class="history-list-stat ${resultClass} mono">${money(pnl)}</div><div>${actions}</div></div>`;
-  if(mode==='detailed') return `<article class="history-detail-card"><div class="history-detail-head"><div><span class="history-kicker">TRADE JOURNAL</span><h3>${meta}</h3><p>${esc(t.date||t.createdAt||'')}</p></div><div class="history-detail-result ${resultClass}">${money(pnl)}<small>${esc(String(rr))} R</small></div>${actions}</div>${chips}<div class="history-detail-grid"><div><span>PLANNED</span><strong>Entry ${pv.pe??'—'} • SL ${pv.ps??'—'} • Target ${pv.pt??'—'} • R:R ${pv.prr??'—'}</strong></div><div><span>ACTUAL</span><strong>Entry ${t.entryPrice??'—'} • SL ${t.stopLoss??'—'} • Exit ${t.exitPrice??'—'}</strong></div><div><span>EXIT REASON</span><strong>${esc(t.exitReason||'—')}</strong></div><div><span>LOT SIZE</span><strong>${esc(t.quantity??'—')}</strong></div></div><p class="history-note">${esc(t.notes||'No notes added.')}</p>${shots}</article>`;
-  if(mode==='gallery') return `<article class="history-gallery-card"><div class="history-gallery-head"><div><h3>${meta}</h3><p>${esc(t.date||t.createdAt||'')}</p></div><div class="history-detail-result ${resultClass}">${money(pnl)}<small>${esc(String(rr))} R</small></div>${actions}</div>${shots}<div class="history-gallery-meta">${chips}</div></article>`;
-  return `<article class="history-grid-card"><div class="history-grid-media">${imgs[0]?`<img src="${esc(imgs[0])}" data-action="view-image" data-src="${esc(imgs[0])}">`:`<div class="history-grid-placeholder">📈</div>`}<span class="${t.type==='LONG'?'badge-long':'badge-short'}">${esc(t.type||'—')}</span></div><div class="history-grid-body"><div class="history-grid-top"><div><h3>${esc(t.symbol||'—')}</h3><p>${esc(tradeStrategyName(t)||'No strategy')}</p></div><div class="history-detail-result ${resultClass}">${money(pnl)}<small>${esc(String(rr))} R</small></div></div>${chips}<div class="history-mini-stats"><span>Entry <b>${t.entryPrice??'—'}</b></span><span>Exit <b>${t.exitPrice??'—'}</b></span><span>Lot Size <b>${t.quantity??'—'}</b></span></div><div class="history-card-actions">${actions}</div></div></article>`;
-}
 function renderHistoryTab(){
   const all = STATE.trades;
   const s = computeStats();
@@ -999,6 +897,16 @@ document.addEventListener('click', async (e) => {
     await saveUserData();
     renderTabOnly();
   }
+  else if (action==='create-note') {
+    const id = `n-${Date.now()}`;
+    const note = { id, title:'Untitled Note', symbol:'General', concept:STATE.noteConceptFilter==='ALL'||STATE.noteConceptFilter==='__custom__'?'General':STATE.noteConceptFilter, customConcept:'', strategy:'', blocks:[], image:null, entryCriteria:'', exitCriteria:'', analysis:'', learning:'', date:new Date().toISOString(), updatedAt:new Date().toISOString() };
+    STATE.notes.unshift(note);
+    STATE.activeNoteId=id;
+    STATE.noteConceptFilter='ALL';
+    await saveUserData();
+    renderTabOnly();
+    setTimeout(()=>document.querySelector(`[data-note-editor-title=\"${id}\"]`)?.focus(),30);
+  }
   else if (action==='toggle-note-plus') {
     const menu = $('#note-plus-menu');
     if (menu) menu.style.display = menu.style.display === 'none' ? 'flex' : 'none';
@@ -1090,7 +998,7 @@ document.addEventListener('input', (e) => {
   else if (e.target.id==='log-custom-emotion') { STATE.logCustomEmotion = e.target.value; }
   else if (e.target.id==='note-image-url') { /* added via action button */ }
   else if (e.target.id==='note-custom-concept') { STATE.noteFormCustomConcept = e.target.value; }
-  else if (e.target.matches('[data-note-editor-title]')) { updateActiveNoteField(e.target.dataset.noteEditorTitle, 'symbol', e.target.value); }
+  else if (e.target.matches('[data-note-editor-title]')) { const note=STATE.notes.find(n=>n.id===e.target.dataset.noteEditorTitle); if(note){ note.title=e.target.value; note.symbol=e.target.value; scheduleNoteAutoSave(note.id); } }
   else if (e.target.matches('[data-live-note-text]')) {
     const note = STATE.notes.find(n=>n.id===e.target.dataset.liveNoteText); const i=Number(e.target.dataset.index);
     if(note){ note.blocks=normalizeNoteBlocks(note); if(note.blocks[i]) note.blocks[i].text=e.target.value; scheduleNoteAutoSave(note.id); }
