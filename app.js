@@ -41,7 +41,7 @@ const STATE = {
   noteFormStrategy: '', noteFormConcept: 'General', noteFormCustomConcept: '', noteFormImage: '', noteFormBlocks: [], activeNoteId: null, editingNoteId: null, noteConceptFilter: 'ALL',
   annotator: {src:'', noteId:null, blockIndex:null, drawing:false, mode:'pen', color:'#ef4444', size:4, history:[]},
   noteAutoSaveTimer: null, noteAutoSaveBusy: false, noteInsertIndex: null,
-  historyStrategyFilter: 'ALL', historyMistakeFilter: 'ALL', historyView: localStorage.getItem('tc_history_view') || 'grid'
+  historyStrategyFilter: 'ALL', historyMistakeFilter: 'ALL', historyDateFilter: '', analysisDateFilter: '', historyView: localStorage.getItem('tc_history_view') || 'grid'
 };
 
 /* ---------------- utils ---------------- */
@@ -267,10 +267,62 @@ const MISTAKE_OPTIONS = [
   ['moved-sl','Moved SL'], ['early-exit','Early Exit'], ['overtrading','Overtrading'], ['revenge','Revenge Trade'], ['rule-break','Broke Strategy Rule']
 ];
 function tradeStrategyName(t){ return t.strategy || 'No strategy'; }
+function tradeDateTimeRaw(t){ return t?.tradeDateTime || t?.date || t?.createdAt || ''; }
+function tradeLocalDate(t){
+  const raw=tradeDateTimeRaw(t);
+  if(!raw) return '';
+  if(/^\d{4}-\d{2}-\d{2}$/.test(String(raw))) return String(raw);
+  const d=new Date(raw);
+  if(Number.isNaN(d.getTime())) return String(raw).slice(0,10);
+  const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+function tradeLocalHour(t){
+  const raw=tradeDateTimeRaw(t); if(!raw) return null;
+  const d=new Date(raw); if(Number.isNaN(d.getTime())) return null;
+  return d.getHours();
+}
+const TRADING_SESSIONS = [
+  {id:'sydney', name:'Sydney', emoji:'🌏', start:22, end:7, utc:'22:00–07:00 UTC'},
+  {id:'tokyo', name:'Tokyo', emoji:'🗾', start:0, end:9, utc:'00:00–09:00 UTC'},
+  {id:'london', name:'London', emoji:'🇬🇧', start:8, end:17, utc:'08:00–17:00 UTC'},
+  {id:'newyork', name:'New York', emoji:'🇺🇸', start:13, end:22, utc:'13:00–22:00 UTC'}
+];
+function hourInSession(hour, session){ return session.start < session.end ? (hour >= session.start && hour < session.end) : (hour >= session.start || hour < session.end); }
+function tradeSessionTags(t){
+  const raw=tradeDateTimeRaw(t); if(!raw) return [];
+  const d=new Date(raw); if(Number.isNaN(d.getTime())) return [];
+  const utcHour=d.getUTCHours() + d.getUTCMinutes()/60;
+  return TRADING_SESSIONS.filter(s=>hourInSession(utcHour,s)).map(s=>s.id);
+}
+function sessionLabel(t){ const tags=tradeSessionTags(t); return tags.map(id=>TRADING_SESSIONS.find(s=>s.id===id)?.name).filter(Boolean).join(' + ') || 'Time not logged'; }
+function dailyAnalysis(date){
+  const trades=STATE.trades.filter(t=>tradeLocalDate(t)===date);
+  const timed=trades.filter(t=>tradeLocalHour(t)!==null);
+  const wins=trades.filter(t=>(Number(t.pnl)||0)>0), losses=trades.filter(t=>(Number(t.pnl)||0)<0);
+  const pnl=trades.reduce((a,t)=>a+(Number(t.pnl)||0),0), r=trades.reduce((a,t)=>a+(Number(t.rr)||0),0);
+  const hours={}; timed.forEach(t=>{const h=tradeLocalHour(t); if(!hours[h]) hours[h]={hour:h,trades:0,wins:0,losses:0,pnl:0,r:0}; const g=hours[h]; g.trades++; g.pnl+=Number(t.pnl)||0; g.r+=Number(t.rr)||0; if((Number(t.pnl)||0)>0)g.wins++; else if((Number(t.pnl)||0)<0)g.losses++;});
+  const hourRows=Object.values(hours).sort((a,b)=>b.pnl-a.pnl);
+  const sessions={}; TRADING_SESSIONS.forEach(s=>sessions[s.id]={...s,trades:0,wins:0,losses:0,pnl:0,r:0});
+  timed.forEach(t=>tradeSessionTags(t).forEach(id=>{const g=sessions[id]; if(!g)return; g.trades++; g.pnl+=Number(t.pnl)||0; g.r+=Number(t.rr)||0; if((Number(t.pnl)||0)>0)g.wins++; else if((Number(t.pnl)||0)<0)g.losses++;}));
+  return {trades,wins,losses,pnl,r,avgR:trades.length?r/trades.length:0,timed,untimed:trades.length-timed.length,hourRows,sessions:Object.values(sessions)};
+}
+function defaultAnalysisDate(){ return STATE.analysisDateFilter || STATE.trades.map(tradeLocalDate).filter(Boolean).sort().at(-1) || new Date().toISOString().slice(0,10); }
+function renderDailySessionAnalysis(){
+  const date=defaultAnalysisDate(), a=dailyAnalysis(date);
+  const best=a.hourRows[0], worst=[...a.hourRows].sort((x,y)=>x.pnl-y.pnl)[0];
+  const hourRows=a.hourRows.map(g=>`<div class="analysis-row"><div><strong>${String(g.hour).padStart(2,'0')}:00</strong><span>${g.trades} trades • ${g.wins}W / ${g.losses}L</span></div><strong class="mono ${g.pnl>=0?'positive':'negative'}">${money(g.pnl)}</strong></div>`).join('');
+  const sessionRows=a.sessions.map(g=>`<div class="session-analysis-card"><div class="session-analysis-head"><div><strong>${g.emoji} ${g.name}</strong><span>${g.utc}</span></div><strong class="mono ${g.pnl>=0?'positive':'negative'}">${money(g.pnl)}</strong></div><div class="session-analysis-stats"><span>${g.trades} trades</span><span>${g.wins}W / ${g.losses}L</span><span>${g.trades?Math.round(g.wins/g.trades*100):0}% win</span><span>Avg R ${g.trades?(g.r/g.trades).toFixed(2):'—'}</span></div></div>`).join('');
+  return `<section class="daily-session-analysis"><div class="history-heading"><div><span class="uppercase-label">TRADING ANALYSIS</span><h2 class="section-title">📅 Daily & Session Analysis</h2><p class="card-sub">Kis din, kis time aur kis global session mein aapka execution kaisa raha.</p></div><input type="date" id="analysis-date-filter" value="${esc(date)}" aria-label="Analysis date"></div><div class="grid-4 analysis-kpis"><div><span class="uppercase-label">Trades</span><strong>${a.trades.length}</strong></div><div><span class="uppercase-label">Winning</span><strong>${a.wins.length}</strong></div><div><span class="uppercase-label">Losing</span><strong>${a.losses.length}</strong></div><div><span class="uppercase-label">Net P&amp;L</span><strong class="${a.pnl>=0?'positive':'negative'}">${money(a.pnl)}</strong></div></div><div class="analysis-highlight-grid"><div class="card analysis-highlight"><span>🟢 Best trading hour</span><strong>${best?String(best.hour).padStart(2,'0')+':00 — '+money(best.pnl):'—'}</strong><small>${best?best.trades+' trades':''}</small></div><div class="card analysis-highlight"><span>🔴 Weakest trading hour</span><strong>${worst?String(worst.hour).padStart(2,'0')+':00 — '+money(worst.pnl):'—'}</strong><small>${worst?worst.trades+' trades':''}</small></div><div class="card analysis-highlight"><span>⏱️ Time captured</span><strong>${a.timed.length}/${a.trades.length}</strong><small>${a.untimed?'Add Trade Time to older trades for session analysis.':'All trades timed.'}</small></div></div><div class="analysis-columns"><div class="card"><div class="dashboard-section-head"><div><span class="uppercase-label">TIME OF DAY</span><h3 class="section-title">Hourly Performance</h3></div></div>${hourRows||'<p class="empty-msg">Is date par timed trades nahi hain.</p>'}</div><div class="card"><div class="dashboard-section-head"><div><span class="uppercase-label">GLOBAL SESSIONS</span><h3 class="section-title">Session Analysis</h3><p class="card-sub">A trade overlap mein ho to dono sessions mein count hoga.</p></div></div><div class="session-analysis-grid">${sessionRows}</div></div></div></section>`;
+}
+function renderAnalysisTab(){
+  return `<div class="analysis-page">${renderDailySessionAnalysis()}</div>`;
+}
 function filteredHistoryTrades(){
   return STATE.trades.filter(t =>
     (STATE.historyStrategyFilter==='ALL' || tradeStrategyName(t)===STATE.historyStrategyFilter) &&
-    (STATE.historyMistakeFilter==='ALL' || (t.mistake || 'none')===STATE.historyMistakeFilter)
+    (STATE.historyMistakeFilter==='ALL' || (t.mistake || 'none')===STATE.historyMistakeFilter) &&
+    (!STATE.historyDateFilter || tradeLocalDate(t)===STATE.historyDateFilter)
   );
 }
 function strategyPerformance(){
@@ -346,14 +398,15 @@ const TABS = [
   {id:'copilot', label:'⚡ Live Execution Co-Pilot'},
   {id:'log', label:'📝 Log Trade & Chart Screenshot'},
   {id:'notes', label:'🧾 Notes & Learnings'},
-  {id:'history', label:'📜 Trade History Log'}
+  {id:'history', label:'📜 Trade History Log'},
+  {id:'analysis', label:'📊 Daily & Session Analysis'}
 ];
 function renderTabNav(){
   $('#tab-nav').innerHTML = TABS.map(t =>
     `<button class="tab-btn ${STATE.activeTab===t.id?'active':''}" data-action="set-tab" data-tab="${t.id}">${t.label}</button>`
   ).join('');
-  const mobileIcons = {copilot:'⚡',log:'➕',notes:'🧠',history:'📜'};
-  const mobileLabels = {copilot:'Co-Pilot',log:'Log Trade',notes:'Notes',history:'History'};
+  const mobileIcons = {copilot:'⚡',log:'➕',notes:'🧠',history:'📜',analysis:'📊'};
+  const mobileLabels = {copilot:'Co-Pilot',log:'Log Trade',notes:'Notes',history:'History',analysis:'Analysis'};
   const mobile = $('#mobile-tab-nav');
   if (mobile) mobile.innerHTML = TABS.map(t =>
     `<button class="mobile-tab-btn ${STATE.activeTab===t.id?'active':''}" data-action="set-tab" data-tab="${t.id}"><span class="mobile-tab-icon">${mobileIcons[t.id]}</span><span>${mobileLabels[t.id]}</span></button>`
@@ -477,12 +530,13 @@ function currentLogImages(){
   [STATE.logFormBeforeImage, STATE.logFormAfterImage, STATE.logFormImage].filter(Boolean).forEach(x=>{ if(!arr.includes(x)) arr.push(x); });
   return arr;
 }
+function localDateTimeInputValue(d=new Date()){ const p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; }
 function captureLogDraft(){
   const get = id => $('#'+id)?.value ?? '';
   return {
     symbol:(get('log-symbol') === 'OTHER' ? get('log-custom-symbol') : get('log-symbol')), symbolChoice:get('log-symbol'), customSymbol:get('log-custom-symbol'), type:get('log-type') || 'LONG', qty:get('log-qty'), entry:get('log-entry'), exit:get('log-exit'), sl:get('log-sl'),
     strategy:get('log-strategy-select'), plannedEntry:get('log-planned-entry'), plannedSL:get('log-planned-sl'), plannedTP:get('log-planned-tp'),
-    imageUrl:get('log-image-url'), mistake:get('log-mistake'), quality:get('log-quality'), exitReason:get('log-exit-reason'), notes:get('log-notes'),
+    imageUrl:get('log-image-url'), mistake:get('log-mistake'), quality:get('log-quality'), tradeDateTime:get('log-trade-datetime'), exitReason:get('log-exit-reason'), notes:get('log-notes'),
     location:get('log-location-select'), customEmotion:get('log-custom-emotion'), emotions:[...STATE.logEmotions]
   };
 }
@@ -491,7 +545,7 @@ function restoreLogDraft(draft){
   const set=(id,val)=>{ const el=$('#'+id); if(el && val!==undefined && val!==null) el.value=val; };
   set('log-symbol',draft.symbolChoice || draft.symbol || 'XAUUSD'); set('log-custom-symbol',draft.customSymbol || (draft.symbolChoice==='OTHER' ? draft.symbol : '')); set('log-type',draft.type); set('log-qty',draft.qty); set('log-entry',draft.entry); set('log-exit',draft.exit); set('log-sl',draft.sl);
   set('log-strategy-select',draft.strategy); set('log-planned-entry',draft.plannedEntry); set('log-planned-sl',draft.plannedSL); set('log-planned-tp',draft.plannedTP);
-  set('log-image-url',draft.imageUrl); set('log-mistake',draft.mistake); set('log-quality',draft.quality); set('log-exit-reason',draft.exitReason); set('log-notes',draft.notes); set('log-location-select',draft.location); set('log-custom-emotion',draft.customEmotion);
+  set('log-image-url',draft.imageUrl); set('log-mistake',draft.mistake); set('log-quality',draft.quality); set('log-trade-datetime',draft.tradeDateTime || localDateTimeInputValue()); set('log-exit-reason',draft.exitReason); set('log-notes',draft.notes); set('log-location-select',draft.location); set('log-custom-emotion',draft.customEmotion);
   if (Array.isArray(draft.emotions)) STATE.logEmotions = [...draft.emotions];
 }
 function renderLogImagePreview(){
@@ -533,7 +587,8 @@ function renderLogTab(){
           <div><label>Exit <span class="optional-label">optional</span></label><input type="number" step="any" id="log-exit" placeholder="Exit"></div>
           <div><label>SL <span class="optional-label">optional</span></label><input type="number" step="any" id="log-sl" placeholder="Stop loss"></div>
         </div>
-        <div class="field grid-2 fast-journal-top-fields">
+        <div class="field grid-3 fast-journal-time-fields">
+          <div><label>Trade Date &amp; Time <span class="optional-label">used for session analysis</span></label><input type="datetime-local" id="log-trade-datetime" value="${esc(localDateTimeInputValue())}"></div>
           <div><label>Exit Reason <span class="optional-label">optional</span></label><input type="text" id="log-exit-reason" placeholder="Target, SL, manual, time, news..."></div>
           <div><label>Quick Note <span class="optional-label">optional</span></label><input type="text" id="log-notes" placeholder="Kya sahi hua? Kya improve karna hai?"></div>
         </div>
@@ -805,11 +860,12 @@ function renderHistoryTab(){
     <div class="grid-3 journal-kpis"><div><span class="uppercase-label">Trades</span><strong>${trades.length}</strong></div><div><span class="uppercase-label">Win Rate</span><strong>${trades.length?Math.round(wins/trades.length*100):0}%</strong></div><div><span class="uppercase-label">Avg Quality</span><strong>${trades.length?(trades.reduce((a,t)=>a+(Number(t.quality)||3),0)/trades.length).toFixed(1):'—'}/5</strong></div></div>
   </div>
   <div class="card history-toolbar"><div class="history-toolbar-title"><strong>View</strong><span>${mode==='grid'?'Compact cards':mode==='list'?'Quick rows':mode==='detailed'?'Full journal':'Screenshot focused'}</span></div><div class="history-view-switcher">${historyViewButton('grid','▦','Grid')}${historyViewButton('list','☰','List')}${historyViewButton('detailed','📖','Detailed')}${historyViewButton('gallery','🖼','Gallery')}</div></div>
-  <div class="card history-filters"><div class="history-filter-grid"><div><label>Strategy Filter</label><select id="history-strategy-filter"><option value="ALL">All Strategies</option>${strategyNames.map(n=>`<option value="${esc(n)}" ${STATE.historyStrategyFilter===n?'selected':''}>${esc(n)}</option>`).join('')}</select></div><div><label>Mistake Filter</label><select id="history-mistake-filter"><option value="ALL">All Mistakes</option>${MISTAKE_OPTIONS.map(x=>`<option value="${x[0]}" ${STATE.historyMistakeFilter===x[0]?'selected':''}>${x[1]}</option>`).join('')}</select></div></div></div>
+  <div class="card history-filters"><div class="history-filter-grid"><div><label>Strategy Filter</label><select id="history-strategy-filter"><option value="ALL">All Strategies</option>${strategyNames.map(n=>`<option value="${esc(n)}" ${STATE.historyStrategyFilter===n?'selected':''}>${esc(n)}</option>`).join('')}</select></div><div><label>Mistake Filter</label><select id="history-mistake-filter"><option value="ALL">All Mistakes</option>${MISTAKE_OPTIONS.map(x=>`<option value="${x[0]}" ${STATE.historyMistakeFilter===x[0]?'selected':''}>${x[1]}</option>`).join('')}</select></div><div><label>📅 Trade Date</label><input type="date" id="history-date-filter" value="${esc(STATE.historyDateFilter||'')}" aria-label="Select trade date"></div><div class="history-date-actions"><label>&nbsp;</label><button type="button" class="btn-secondary" data-action="clear-history-date" ${STATE.historyDateFilter?'':'disabled'}>Clear Date</button></div></div>${STATE.historyDateFilter?`<div class="history-date-active">📅 Showing trades for <strong>${esc(STATE.historyDateFilter)}</strong></div>`:''}</div>
   <div class="history-results ${mode}-view">${trades.length ? (mode==='list' ? `<div class="history-list-head"><span>Trade</span><span>Entry → Exit</span><span>Emotion</span><span>P&amp;L</span><span></span></div>${trades.map(t=>renderTradeView(t,mode)).join('')}` : trades.map(t=>renderTradeView(t,mode)).join('')) : '<p class="empty-msg">Is filter ke liye koi trade nahi mila.</p>'}</div>
   ${STATE.editingTradeId ? renderEditTradeModal(STATE.editingTradeId) : ''}`;
 }
 
+function toDateTimeLocalValue(raw){ if(!raw) return localDateTimeInputValue(); const d=new Date(raw); if(Number.isNaN(d.getTime())) return String(raw).slice(0,16); return localDateTimeInputValue(d); }
 function renderEditTradeModal(id){
   const t=STATE.trades.find(x=>x.id===id); if(!t) return '';
   const imgs=Array.isArray(t.images)&&t.images.length ? t.images : [t.beforeImage,t.afterImage,t.image].filter(Boolean);
@@ -833,6 +889,7 @@ function render(){
   else if (STATE.activeTab==='log') { content.innerHTML = renderLogTab(); renderLogImagePreview(); updateLogPreview(); }
   else if (STATE.activeTab==='notes') { content.innerHTML = renderNotesTab(); renderNoteImagePreview(); renderNoteBlocksEditor(); }
   else if (STATE.activeTab==='history') content.innerHTML = renderHistoryTab();
+  else if (STATE.activeTab==='analysis') content.innerHTML = renderAnalysisTab();
 }
 function renderTabOnly(){ // re-render just the active tab (after in-tab interactions)
   const content = $('#tab-content');
@@ -840,6 +897,7 @@ function renderTabOnly(){ // re-render just the active tab (after in-tab interac
   else if (STATE.activeTab==='log') { content.innerHTML = renderLogTab(); renderLogImagePreview(); updateLogPreview(); }
   else if (STATE.activeTab==='notes') { content.innerHTML = renderNotesTab(); renderNoteImagePreview(); renderNoteBlocksEditor(); }
   else if (STATE.activeTab==='history') content.innerHTML = renderHistoryTab();
+  else if (STATE.activeTab==='analysis') content.innerHTML = renderAnalysisTab();
   renderTabNav();
 }
 
@@ -853,6 +911,10 @@ document.addEventListener('click', async (e) => {
   else if (action==='select-mindset') { STATE.selectedMindsetId = btn.dataset.id; renderTabOnly(); }
   else if (action==='toggle-rule') { const i=btn.dataset.idx; STATE.checkedRules[i]=!STATE.checkedRules[i]; renderTabOnly(); }
   else if (action==='set-inspection') { STATE.inspectionTab = btn.dataset.value; renderTabOnly(); }
+  else if (action==='clear-history-date') {
+    STATE.historyDateFilter='';
+    renderTabOnly();
+  }
   else if (action==='history-view') {
     const view = btn.dataset.view;
     if (['grid','list','detailed','gallery'].includes(view)) {
@@ -1085,6 +1147,8 @@ document.addEventListener('change', (e) => {
   else if (e.target.id==='log-location-select') { STATE.logFormLocation = e.target.value; updateLogPreview(); }
   else if (e.target.id==='history-strategy-filter') { STATE.historyStrategyFilter = e.target.value; renderTabOnly(); }
   else if (e.target.id==='history-mistake-filter') { STATE.historyMistakeFilter = e.target.value; renderTabOnly(); }
+  else if (e.target.id==='history-date-filter') { STATE.historyDateFilter = e.target.value || ''; renderTabOnly(); }
+  else if (e.target.id==='analysis-date-filter') { STATE.analysisDateFilter = e.target.value || ''; renderTabOnly(); }
   else if (e.target.id==='note-strategy-select') {
     const row = $('#note-custom-strategy-row');
     if (e.target.value==='__custom__') { row.style.display='flex'; }
@@ -1212,7 +1276,7 @@ async function updateExistingTrade(id){
   const pnl=(entry&&exit&&qty)?Math.round((type==='LONG'?(exit-entry)*qty:(entry-exit)*qty)*100)/100:(t.pnl||0);
   const rr=(sl&&entry&&exit&&entry!==sl)?Math.round(((type==='LONG'?exit-entry:entry-exit)/Math.abs(entry-sl))*100)/100:(t.rr||0);
   const snapshot = JSON.parse(JSON.stringify(t));
-  Object.assign(t,{symbol:symbol.toUpperCase(),type,emotions,quantity:Number.isFinite(qty)?qty:t.quantity,entryPrice:Number.isFinite(entry)?entry:null,exitPrice:Number.isFinite(exit)?exit:null,stopLoss:Number.isFinite(sl)?sl:null,emotion,exitReason:$('#edit-exit-reason')?.value.trim()||'',images,beforeImage:images[0]||null,afterImage:images[1]||null,image:images[0]||null,pnl,rr});
+  Object.assign(t,{symbol:symbol.toUpperCase(),type,emotions,quantity:Number.isFinite(qty)?qty:t.quantity,entryPrice:Number.isFinite(entry)?entry:null,exitPrice:Number.isFinite(exit)?exit:null,stopLoss:Number.isFinite(sl)?sl:null,tradeDateTime:$('#edit-trade-datetime')?.value || t.tradeDateTime || t.date,emotion,exitReason:$('#edit-exit-reason')?.value.trim()||'',images,beforeImage:images[0]||null,afterImage:images[1]||null,image:images[0]||null,pnl,rr});
   const saved = await saveUserData();
   if (!saved) { Object.assign(t, snapshot); return; }
   STATE.editingTradeId=null; render();
@@ -1242,7 +1306,7 @@ document.addEventListener('submit', async (e) => {
       strategy: strategyName, emotions: finalEmotions, emotion: finalEmotions.join(' · '), emotionPreset: null, device: STATE.logFormDevice, location: STATE.logFormLocation,
       notes: $('#log-notes')?.value || '', exitReason: $('#log-exit-reason')?.value.trim() || '', image: currentLogImages()[0] || null, beforeImage: currentLogImages()[0] || null, afterImage: currentLogImages()[1] || null, images: currentLogImages(),
       plannedEntry, plannedSL, plannedTP, plannedRR, mistake: $('#log-mistake').value, quality: Number($('#log-quality').value), followedPlan: STATE.logFormIsSetup && $('#log-mistake').value==='none',
-      date: new Date().toISOString(), pnl: p.pnl, rr: p.rr, xpEarned: p.xp
+      date: new Date().toISOString(), tradeDateTime: $('#log-trade-datetime')?.value || new Date().toISOString(), pnl: p.pnl, rr: p.rr, xpEarned: p.xp
     };
     STATE.trades.unshift(newTrade);
     const saved = await saveUserData();
