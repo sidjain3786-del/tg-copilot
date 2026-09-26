@@ -14,6 +14,8 @@ const LEGACY_DEFAULT_STRATEGY_NAMES = new Set([
   'Order Block (OB) Retest with Displacement'
 ]);
 
+const NOTE_CONCEPTS = ['General','Entry','Exit','Strategy','Market Structure','Risk Management','Psychology','Mistakes','Trading Plan'];
+
 const MINDSET_ARCHETYPES = [
   {id:'calm',name:'Calm Ninja',emoji:'🧘',battery:100,desc:'Rule Follower • Zero Impulse'},
   {id:'focused',name:'Laser Focused',emoji:'⚡',battery:90,desc:'Peak Clarity • Fully Prepared'},
@@ -35,8 +37,8 @@ const STATE = {
   energyLevel: 85, noiseLevel: 15,
   selectedMindsetId: MINDSET_ARCHETYPES[0].id,
   logFormIsSetup: true, logFormDevice: 'Laptop', logFormLocation: 'Desk', logFormImage: '', logFormBeforeImage: '', logFormAfterImage: '', logFormImages: [],
-  logEmotion: '', logCustomEmotion: '', editingTradeId: null,
-  noteFormStrategy: '', noteFormImage: '', noteFormHandwriting: '', noteWritingMode: 'typed', activeNoteId: null,
+  logEmotions: [], logCustomEmotion: '', editingTradeId: null,
+  noteFormStrategy: '', noteFormConcept: 'General', noteFormCustomConcept: '', noteFormImage: '', activeNoteId: null,
   historyStrategyFilter: 'ALL', historyMistakeFilter: 'ALL', historyView: localStorage.getItem('tc_history_view') || 'grid'
 };
 
@@ -64,6 +66,12 @@ function sanitizeCustomStrategies(list){
   return (list || []).map(normalizeCustomStrategy).filter(s => s.name && !LEGACY_DEFAULT_STRATEGY_NAMES.has(s.name.trim()));
 }
 function customStrategyNames(){ return STATE.customStrategies.map(normalizeCustomStrategy); }
+function tradeEmotions(t){
+  if (Array.isArray(t?.emotions)) return t.emotions.filter(Boolean);
+  if (Array.isArray(t?.emotion)) return t.emotion.filter(Boolean);
+  return t?.emotion ? [t.emotion] : [];
+}
+function emotionText(t){ return tradeEmotions(t).join(' · ') || '—'; }
 
 async function api(path, method='GET', body){
   const res = await fetch(path, {
@@ -126,6 +134,8 @@ async function loadUserData(){
   const data = await api('/api/data');
   STATE.trades = data.trades || [];
   STATE.notes = data.notes || [];
+  STATE.notes = STATE.notes.map(n => ({...n, concept: n.concept || 'General', customConcept: n.customConcept || ''}));
+  STATE.trades = (data.trades || []).map(t => ({...t, emotions: tradeEmotions(t), emotion: emotionText(t)}));
   STATE.customStrategies = sanitizeCustomStrategies(data.customStrategies);
   if (STATE.customStrategies.length) {
     if (!STATE.selectedPlaybookId || !allStrategies().some(s => s.id === STATE.selectedPlaybookId)) STATE.selectedPlaybookId = allStrategies()[0].id;
@@ -358,14 +368,22 @@ function renderCopilotTab(){
 
   <div class="grid-2 dashboard-main-grid">
     <div class="card">
-      <div class="dashboard-section-head"><div><span class="uppercase-label">EXECUTION QUALITY</span><h3 class="section-title">Mistakes to Work On</h3></div></div>
+      <div class="dashboard-section-head"><div><span class="uppercase-label">EXECUTION QUALITY</span><h3 class="section-title">Mistakes to Avoid</h3></div><button class="btn-secondary btn-small" data-action="set-tab" data-tab="history">Review History</button></div>
       ${topMistakes.length ? `<div class="mistake-bars">${topMistakes.map(([k,n])=>{const pct=Math.round(n/Math.max(1,total)*100); return `<div class="mistake-bar-row"><div><span>${esc(mistakeLabel(k))}</span><strong>${n}</strong></div><div class="mistake-track"><span style="width:${pct}%"></span></div></div>`}).join('')}</div>` : '<div class="dashboard-empty">No repeated mistake pattern yet. Keep logging honestly.</div>'}
       <div class="dashboard-mini-stats"><div><span>Best Trade</span><strong class="positive">${money(best)}</strong></div><div><span>Worst Trade</span><strong class="negative">${money(worst)}</strong></div></div>
     </div>
 
     <div class="card">
-      <div class="dashboard-section-head"><div><span class="uppercase-label">RECENT ACTIVITY</span><h3 class="section-title">Latest Trades</h3></div><button class="btn-secondary btn-small" data-action="set-tab" data-tab="history">Open All</button></div>
-      ${recent.length ? `<div class="recent-trades">${recent.map(t=>`<div class="recent-trade-row"><div><strong>${esc(t.symbol||'—')}</strong><small>${esc(t.type||'—')} · ${esc(t.date||'')}</small></div><span class="recent-trade-result ${Number(t.pnl)>=0?'positive':'negative'}">${money(Number(t.pnl)||0)}</span></div>`).join('')}</div>` : '<div class="dashboard-empty">No trades yet. Your first logged trade will appear here.</div>'}
+      <div class="dashboard-section-head"><div><span class="uppercase-label">TRADE OUTCOMES</span><h3 class="section-title">Winning & Losing Trades</h3></div><button class="btn-secondary btn-small" data-action="set-tab" data-tab="history">Open History</button></div>
+      <div class="dashboard-outcome-grid">
+        <div class="dashboard-outcome-card winning"><span>🏆 Winning Trades</span><strong>${wins}</strong><small>${total ? Math.round(wins/total*100) : 0}% of all trades</small></div>
+        <div class="dashboard-outcome-card losing"><span>📉 Losing Trades</span><strong>${losses}</strong><small>${total ? Math.round(losses/total*100) : 0}% of all trades</small></div>
+      </div>
+      <div class="dashboard-winloss-list">
+        <div><span class="uppercase-label">RECENT WINS</span>${trades.filter(t=>Number(t.pnl)>0).slice(-3).reverse().map(t=>`<div class="dashboard-mini-trade"><strong>${esc(t.symbol||'—')}</strong><span class="positive">${money(Number(t.pnl)||0)}</span></div>`).join('') || '<div class="dashboard-empty">No winning trades yet.</div>'}</div>
+        <div><span class="uppercase-label">RECENT LOSSES</span>${trades.filter(t=>Number(t.pnl)<0).slice(-3).reverse().map(t=>`<div class="dashboard-mini-trade"><strong>${esc(t.symbol||'—')}</strong><span class="negative">${money(Number(t.pnl)||0)}</span></div>`).join('') || '<div class="dashboard-empty">No losing trades yet.</div>'}</div>
+      </div>
+      ${recent.length ? `<div class="recent-trades" style="margin-top:.75rem;">${recent.slice(0,4).map(t=>`<div class="recent-trade-row"><div><strong>${esc(t.symbol||'—')}</strong><small>${esc(t.type||'—')} · ${esc(emotionText(t))}</small></div><span class="recent-trade-result ${Number(t.pnl)>=0?'positive':'negative'}">${money(Number(t.pnl)||0)}</span></div>`).join('')}</div>` : '<div class="dashboard-empty">No trades yet. Your first logged trade will appear here.</div>'}
     </div>
   </div>
 
@@ -405,7 +423,7 @@ function captureLogDraft(){
     symbol:get('log-symbol'), type:get('log-type') || 'LONG', qty:get('log-qty'), entry:get('log-entry'), exit:get('log-exit'), sl:get('log-sl'),
     strategy:get('log-strategy-select'), plannedEntry:get('log-planned-entry'), plannedSL:get('log-planned-sl'), plannedTP:get('log-planned-tp'),
     imageUrl:get('log-image-url'), mistake:get('log-mistake'), quality:get('log-quality'), exitReason:get('log-exit-reason'), notes:get('log-notes'),
-    location:get('log-location-select'), customEmotion:get('log-custom-emotion')
+    location:get('log-location-select'), customEmotion:get('log-custom-emotion'), emotions:[...STATE.logEmotions]
   };
 }
 function restoreLogDraft(draft){
@@ -414,12 +432,13 @@ function restoreLogDraft(draft){
   set('log-symbol',draft.symbol); set('log-type',draft.type); set('log-qty',draft.qty); set('log-entry',draft.entry); set('log-exit',draft.exit); set('log-sl',draft.sl);
   set('log-strategy-select',draft.strategy); set('log-planned-entry',draft.plannedEntry); set('log-planned-sl',draft.plannedSL); set('log-planned-tp',draft.plannedTP);
   set('log-image-url',draft.imageUrl); set('log-mistake',draft.mistake); set('log-quality',draft.quality); set('log-exit-reason',draft.exitReason); set('log-notes',draft.notes); set('log-location-select',draft.location); set('log-custom-emotion',draft.customEmotion);
+  if (Array.isArray(draft.emotions)) STATE.logEmotions = [...draft.emotions];
 }
 function renderLogImagePreview(){
   const box = $('#log-image-preview');
   if (!box) return;
   const images = currentLogImages();
-  box.innerHTML = images.length ? `<div class="multi-image-grid">${images.map((src,i)=>`<div class="multi-image-item"><img src="${esc(src)}" data-action="view-image" data-src="${esc(src)}" data-image-kind="log" data-image-index="${i}"><div class="multi-image-actions"><button type="button" data-action="annotate-log-image" data-index="${i}">✏️ Draw</button><button type="button" data-action="remove-log-image-index" data-index="${i}">×</button></div><span>Image ${i+1}</span></div>`).join('')}</div><div class="image-count">📸 ${images.length} image${images.length===1?'':'s'} attached · Image par <strong>Draw</strong> karke annotate karo</div>` : '<div class="shot-empty">No images added yet</div>';
+  box.innerHTML = images.length ? `<div class="multi-image-grid">${images.map((src,i)=>`<div class="multi-image-item"><img src="${esc(src)}" data-action="view-image" data-src="${esc(src)}"><button type="button" data-action="remove-log-image-index" data-index="${i}">×</button><span>Image ${i+1}</span></div>`).join('')}</div><div class="image-count">📸 ${images.length} image${images.length===1?'':'s'} attached</div>` : '<div class="shot-empty">No images added yet</div>';
 }
 function addLogImages(images){
   const arr=currentLogImages();
@@ -442,26 +461,8 @@ function renderLogTab(){
     </div>
 
     <form id="log-form">
-      <div class="log-step log-strategy-top">
-        <div class="log-step-title"><span>1</span><strong>Strategy &amp; trade type</strong></div>
-        <div class="strategy-top-grid">
-          <div class="field strategy-select-field log-strategy-top-field">
-            <label>🎯 Strategy</label>
-            <select id="log-strategy-select" ${allStrategies().length ? '' : 'disabled'}>${allStrategies().length ? strategyOptions : '<option>No strategy yet — Notes → ADD STRATEGY</option>'}</select>
-            <p class="card-sub">Strategy ko trade ke bilkul upar rakha gaya hai, taaki har setup ka journal clear rahe.</p>
-          </div>
-          <div>
-            <label class="strategy-type-label">Trade Type</label>
-            <div class="toggle-group log-setup-toggle">
-              <button type="button" class="toggle-btn ${STATE.logFormIsSetup?'active-green':''}" data-action="set-log-setup" data-value="true">🎯 Setup Trade</button>
-              <button type="button" class="toggle-btn ${!STATE.logFormIsSetup?'active-red':''}" data-action="set-log-setup" data-value="false">⚡ Quick Trade</button>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <div class="log-step">
-        <div class="log-step-title"><span>2</span><strong>Trade basics</strong></div>
+        <div class="log-step-title"><span>1</span><strong>Trade basics</strong></div>
         <div class="field grid-3 log-basic-grid">
           <div><label>Symbol</label><input type="text" id="log-symbol" value="BTC/USDT" placeholder="XAUUSD, NIFTY..."></div>
           <div><label>Direction</label><select id="log-type"><option value="LONG">LONG</option><option value="SHORT">SHORT</option></select></div>
@@ -478,15 +479,27 @@ function renderLogTab(){
         </div>
 
         <div class="fast-journal-emotion">
-          <div class="log-emotion-head"><div><div class="log-emotion-title">🧠 Emotion <span>* Required</span></div><div class="log-emotion-sub">Trade ke waqt actual state choose karo.</div></div>${STATE.logEmotion ? `<span class="emotion-selected-badge">✓ ${esc(STATE.logEmotion)}</span>` : '<span class="emotion-selected-badge empty">Select one</span>'}</div>
-          <div class="emotion-pills">${[['Calm','😌'],['Confident','💪'],['Neutral','😐'],['Anxious','😰'],['FOMO','🔥'],['Revenge / Tilt','😡'],['Overexcited','🚀'],['Tired','😴']].map(([name,emoji]) => `<button type="button" class="emotion-pill ${STATE.logEmotion===name?'selected':''}" data-action="set-log-emotion" data-value="${esc(name)}">${emoji} ${esc(name)}</button>`).join('')}</div>
-          <div class="custom-emotion-row"><label for="log-custom-emotion">Custom emotion <span>optional</span></label><input type="text" id="log-custom-emotion" value="${esc(STATE.logCustomEmotion)}" placeholder="e.g. bored, impatient..." maxlength="40">${STATE.logCustomEmotion ? `<button type="button" class="use-custom-emotion ${STATE.logEmotion===STATE.logCustomEmotion?'active':''}" data-action="use-custom-emotion">Use Custom</button>` : ''}</div>
+          <div class="log-emotion-head"><div><div class="log-emotion-title">🧠 Emotion <span>* Required · Multiple allowed</span></div><div class="log-emotion-sub">Ek trade mein multiple emotions select kar sakte ho.</div></div>${STATE.logEmotions.length ? `<span class="emotion-selected-badge">✓ ${esc(STATE.logEmotions.join(' · '))}</span>` : '<span class="emotion-selected-badge empty">Select emotion(s)</span>'}</div>
+          <div class="emotion-pills">${[['Calm','😌'],['Confident','💪'],['Neutral','😐'],['Anxious','😰'],['FOMO','🔥'],['Revenge / Tilt','😡'],['Overexcited','🚀'],['Tired','😴']].map(([name,emoji]) => `<button type="button" class="emotion-pill ${STATE.logEmotions.includes(name)?'selected':''}" data-action="set-log-emotion" data-value="${esc(name)}">${emoji} ${esc(name)}</button>`).join('')}</div>
+          <div class="custom-emotion-row"><label for="log-custom-emotion">Custom emotion <span>optional</span></label><input type="text" id="log-custom-emotion" value="${esc(STATE.logCustomEmotion)}" placeholder="e.g. bored, impatient..." maxlength="40">${STATE.logCustomEmotion ? `<button type="button" class="use-custom-emotion ${STATE.logEmotions.includes(STATE.logCustomEmotion)?'active':''}" data-action="use-custom-emotion">Use Custom</button>` : ''}</div>
         </div>
 
         <div class="fast-journal-screenshots"><div class="fast-shot-head"><div><strong>📸 Before & After</strong><span>Optional — chart screenshots</span></div></div><div class="before-after-grid">
-          <label class="shot-upload-card ${STATE.logFormBeforeImage?'has-image':''}"><div class="shot-label">BEFORE ENTRY</div>${STATE.logFormBeforeImage ? `<img src="${esc(STATE.logFormBeforeImage)}" alt="Before entry" data-action="view-image" data-src="${esc(STATE.logFormBeforeImage)}" data-image-kind="log" data-image-index="0">` : `<div class="shot-placeholder">＋<small>Upload before entry</small></div>`}<input type="file" id="log-before-image-file" accept="image/*" style="display:none;"></label>
-          <label class="shot-upload-card ${STATE.logFormAfterImage?'has-image':''}"><div class="shot-label">AFTER EXIT</div>${STATE.logFormAfterImage ? `<img src="${esc(STATE.logFormAfterImage)}" alt="After exit" data-action="view-image" data-src="${esc(STATE.logFormAfterImage)}" data-image-kind="log" data-image-index="1">` : `<div class="shot-placeholder">＋<small>Upload after exit</small></div>`}<input type="file" id="log-after-image-file" accept="image/*" style="display:none;"></label>
+          <label class="shot-upload-card ${STATE.logFormBeforeImage?'has-image':''}"><div class="shot-label">BEFORE ENTRY</div>${STATE.logFormBeforeImage ? `<img src="${esc(STATE.logFormBeforeImage)}" alt="Before entry">` : `<div class="shot-placeholder">＋<small>Upload before entry</small></div>`}<input type="file" id="log-before-image-file" accept="image/*" style="display:none;"></label>
+          <label class="shot-upload-card ${STATE.logFormAfterImage?'has-image':''}"><div class="shot-label">AFTER EXIT</div>${STATE.logFormAfterImage ? `<img src="${esc(STATE.logFormAfterImage)}" alt="After exit">` : `<div class="shot-placeholder">＋<small>Upload after exit</small></div>`}<input type="file" id="log-after-image-file" accept="image/*" style="display:none;"></label>
         </div><div class="image-url-add-row fast-extra-image"><input type="url" id="log-image-url" placeholder="Optional: paste another image URL..."><button type="button" class="btn-secondary" data-action="add-log-image-url">+ Add</button></div><div id="log-image-preview"></div></div>
+      </div>
+
+      <div class="log-step">
+        <div class="log-step-title"><span>2</span><strong>Was this a setup?</strong></div>
+        <div class="toggle-group log-setup-toggle">
+          <button type="button" class="toggle-btn ${STATE.logFormIsSetup?'active-green':''}" data-action="set-log-setup" data-value="true">🎯 Yes, setup trade</button>
+          <button type="button" class="toggle-btn ${!STATE.logFormIsSetup?'active-red':''}" data-action="set-log-setup" data-value="false">⚡ Quick trade</button>
+        </div>
+        ${STATE.logFormIsSetup ? `<div class="field strategy-select-field log-strategy-mini">
+          <label>🎯 Strategy</label>
+          <select id="log-strategy-select" ${allStrategies().length ? '' : 'disabled'}>${allStrategies().length ? strategyOptions : '<option>No strategy yet</option>'}</select>
+        </div>` : ''}
       </div>
 
       <details class="log-advanced">
@@ -581,7 +594,7 @@ function renderNotesTab(){
     <article class="note-reading-paper">
       <div class="note-reading-topline">
         <div>
-          <div class="note-reading-meta">${esc(active.symbol || 'General')}${active.strategy ? ` <span>•</span> ${esc(active.strategy)}` : ''}</div>
+          <div class="note-reading-meta">${esc(active.symbol || 'General')}${active.concept ? ` <span>•</span> <strong>${esc(active.customConcept || active.concept)}</strong>` : ''}${active.strategy ? ` <span>•</span> ${esc(active.strategy)}` : ''}</div>
           <h2>${esc(active.title || active.symbol || 'Trading Note')}</h2>
           <div class="note-reading-date">${new Date(active.date).toLocaleDateString(undefined,{day:'numeric',month:'long',year:'numeric'})}</div>
         </div>
@@ -589,7 +602,6 @@ function renderNotesTab(){
       </div>
 
       ${active.image ? `<figure class="note-reading-image"><img src="${active.image}" data-action="view-image" data-src="${active.image}"><figcaption>Chart attached to this note</figcaption></figure>` : ''}
-      ${active.handwriting ? `<figure class="note-reading-image note-handwriting-reading"><img src="${active.handwriting}" data-action="view-image" data-src="${active.handwriting}"><figcaption>✍️ Handwritten note</figcaption></figure>` : ''}
 
       ${(active.entryCriteria||active.exitCriteria) ? `<div class="note-reading-rules">
         ${active.entryCriteria ? `<div><span>ENTRY CRITERIA</span><p>${esc(active.entryCriteria)}</p></div>` : ''}
@@ -621,30 +633,15 @@ function renderNotesTab(){
       <form id="notes-form">
         <div class="field"><label>Title / Symbol / Tag</label><input type="text" id="note-symbol" placeholder="e.g. XAUUSD — London Liquidity Review"></div>
 
-        <div class="note-mode-switch" role="tablist" aria-label="Note writing mode">
-          <button type="button" class="toggle-btn ${STATE.noteWritingMode==='typed'?'active':''}" data-action="note-writing-mode" data-mode="typed">⌨️ Typed</button>
-          <button type="button" class="toggle-btn ${STATE.noteWritingMode==='handwriting'?'active':''}" data-action="note-writing-mode" data-mode="handwriting">✍️ Handwriting</button>
-        </div>
-
-        <div id="handwriting-note-panel" class="handwriting-note-panel" style="display:${STATE.noteWritingMode==='handwriting'?'block':'none'};">
-          <div class="handwriting-toolbar">
-            <div><strong>✍️ Handwriting Note</strong><span>Pen se likhiye — mouse, touch ya stylus supported.</span></div>
-            <div class="handwriting-tools">
-              <label>Size <input id="handwriting-size" type="range" min="1" max="12" value="3"></label>
-              <button type="button" class="toggle-btn" data-action="handwriting-undo">↶ Undo</button>
-              <button type="button" class="toggle-btn" data-action="handwriting-redo">↷ Redo</button>
-              <button type="button" class="toggle-btn" data-action="handwriting-clear">Clear</button>
-              <button type="button" class="btn-primary btn-small" data-action="handwriting-save">✓ Keep Handwriting</button>
-            </div>
-          </div>
-          <div class="handwriting-paper-wrap"><canvas id="handwriting-canvas" width="1400" height="820"></canvas></div>
-          <p class="card-sub handwriting-hint">Tip: tablet/pen use kar rahe hain to seedha canvas par likhiye. Note save hone par handwriting reading room mein image ki tarah dikhegi.</p>
-        </div>
-
         <div class="field">
           <label>Strategy</label>
           <select id="note-strategy-select" ${strategyObjects.length ? '' : 'disabled'}>${strategyObjects.length ? strategyOptions : '<option>No custom strategies yet</option>'}</select>
           <p class="card-sub" style="margin:.4rem 0 0;">New strategy banane ke liye upar <strong>ADD STRATEGY</strong> use karein.</p>
+        </div>
+
+        <div class="field grid-2">
+          <div><label>Note Concept</label><select id="note-concept-select">${NOTE_CONCEPTS.map(c=>`<option value="${esc(c)}" ${STATE.noteFormConcept===c?'selected':''}>${esc(c)}</option>`).join('')}<option value="__custom__" ${STATE.noteFormConcept==='__custom__'?'selected':''}>＋ Custom Concept</option></select></div>
+          <div id="note-custom-concept-row" style="display:${STATE.noteFormConcept==='__custom__'?'block':'none'};"><label>Custom Concept</label><input id="note-custom-concept" value="${esc(STATE.noteFormCustomConcept)}" placeholder="e.g. Liquidity, BOS, Psychology..." maxlength="50"></div>
         </div>
 
         <div class="field grid-3" style="grid-template-columns:1fr 1fr;">
@@ -682,7 +679,7 @@ function renderNotesTab(){
         <div class="notes-library-title">Saved Notes</div>
         ${notes.length ? notes.map(n => `
           <button type="button" class="note-library-row ${n.id===STATE.activeNoteId?'active':''}" data-action="select-note" data-id="${n.id}">
-            <span class="note-library-symbol">${esc(n.symbol || 'General')}</span>
+            <span class="note-library-symbol">${esc(n.symbol || 'General')} · ${esc(n.customConcept || n.concept || 'General')}</span>
             <span class="note-library-preview">${esc((n.learning || n.analysis || n.entryCriteria || 'No summary yet').replace(/\s+/g,' ').slice(0,90))}</span>
             <span class="note-library-date">${new Date(n.date).toLocaleDateString(undefined,{day:'2-digit',month:'short'})}</span>
           </button>`).join('') : `<div class="notes-library-empty">Abhi koi note saved nahi hai.</div>`}
@@ -727,10 +724,10 @@ function renderTradeView(t, mode){
   const pnl=Number(t.pnl)||0, rr=t.rr ?? '—';
   const resultClass=pnl>=0?'positive':'negative';
   const meta=`${esc(t.symbol||'—')} • ${esc(t.type||'—')}`;
-  const chips=`<div class="history-chips"><span class="journal-chip">🧠 ${esc(t.emotion||'—')}</span><span class="journal-chip">📝 ${esc(mistakeLabel(t.mistake||'none'))}</span><span class="journal-chip">⭐ ${t.quality||3}/5</span></div>`;
+  const chips=`<div class="history-chips"><span class="journal-chip">🧠 ${esc(emotionText(t))}</span><span class="journal-chip">📝 ${esc(mistakeLabel(t.mistake||'none'))}</span><span class="journal-chip">⭐ ${t.quality||3}/5</span></div>`;
   const actions=`<button type="button" class="btn-secondary trade-edit-btn" data-action="edit-trade" data-id="${esc(t.id)}">✏️ Edit</button>`;
   const shots = imgs.length ? `<div class="history-images">${imgs.map((src,i)=>`<div class="history-image"><img src="${esc(src)}" data-action="view-image" data-src="${esc(src)}"><span>${i===0?'Before':i===1?'After':`Image ${i+1}`}</span></div>`).join('')}</div>` : `<div class="history-no-images">🖼 No screenshots</div>`;
-  if(mode==='list') return `<div class="history-list-row"><div class="history-list-main"><div class="history-symbol">${meta}</div><span class="history-date">${esc(t.date||t.createdAt||'')}</span></div><div class="history-list-stat">${pv.pe??'—'} → ${t.exitPrice??'—'}</div><div class="history-list-stat">${esc(t.emotion||'—')}</div><div class="history-list-stat ${resultClass} mono">${money(pnl)}</div><div>${actions}</div></div>`;
+  if(mode==='list') return `<div class="history-list-row"><div class="history-list-main"><div class="history-symbol">${meta}</div><span class="history-date">${esc(t.date||t.createdAt||'')}</span></div><div class="history-list-stat">${pv.pe??'—'} → ${t.exitPrice??'—'}</div><div class="history-list-stat">${esc(emotionText(t))}</div><div class="history-list-stat ${resultClass} mono">${money(pnl)}</div><div>${actions}</div></div>`;
   if(mode==='detailed') return `<article class="history-detail-card"><div class="history-detail-head"><div><span class="history-kicker">TRADE JOURNAL</span><h3>${meta}</h3><p>${esc(t.date||t.createdAt||'')}</p></div><div class="history-detail-result ${resultClass}">${money(pnl)}<small>${esc(String(rr))} R</small></div>${actions}</div>${chips}<div class="history-detail-grid"><div><span>PLANNED</span><strong>Entry ${pv.pe??'—'} • SL ${pv.ps??'—'} • Target ${pv.pt??'—'} • R:R ${pv.prr??'—'}</strong></div><div><span>ACTUAL</span><strong>Entry ${t.entryPrice??'—'} • SL ${t.stopLoss??'—'} • Exit ${t.exitPrice??'—'}</strong></div><div><span>EXIT REASON</span><strong>${esc(t.exitReason||'—')}</strong></div><div><span>QUANTITY</span><strong>${esc(t.quantity??'—')}</strong></div></div><p class="history-note">${esc(t.notes||'No notes added.')}</p>${shots}</article>`;
   if(mode==='gallery') return `<article class="history-gallery-card"><div class="history-gallery-head"><div><h3>${meta}</h3><p>${esc(t.date||t.createdAt||'')}</p></div><div class="history-detail-result ${resultClass}">${money(pnl)}<small>${esc(String(rr))} R</small></div>${actions}</div>${shots}<div class="history-gallery-meta">${chips}</div></article>`;
   return `<article class="history-grid-card"><div class="history-grid-media">${imgs[0]?`<img src="${esc(imgs[0])}" data-action="view-image" data-src="${esc(imgs[0])}">`:`<div class="history-grid-placeholder">📈</div>`}<span class="${t.type==='LONG'?'badge-long':'badge-short'}">${esc(t.type||'—')}</span></div><div class="history-grid-body"><div class="history-grid-top"><div><h3>${esc(t.symbol||'—')}</h3><p>${esc(tradeStrategyName(t)||'No strategy')}</p></div><div class="history-detail-result ${resultClass}">${money(pnl)}<small>${esc(String(rr))} R</small></div></div>${chips}<div class="history-mini-stats"><span>Entry <b>${t.entryPrice??'—'}</b></span><span>Exit <b>${t.exitPrice??'—'}</b></span><span>Qty <b>${t.quantity??'—'}</b></span></div><div class="history-card-actions">${actions}</div></div></article>`;
@@ -780,7 +777,7 @@ function renderEditTradeModal(id){
     <div class="edit-modal-head"><div><span class="uppercase-label">UPDATE TRADE</span><h2 class="section-title">✏️ Edit ${esc(t.symbol)}</h2><p class="card-sub">Jo field change karna hai karo, phir Update Trade.</p></div><button type="button" class="modal-x" data-action="cancel-edit-trade">×</button></div>
     <div class="field grid-3"><div><label>Symbol</label><input id="edit-symbol" value="${esc(t.symbol)}"></div><div><label>Direction</label><select id="edit-type"><option ${t.type==='LONG'?'selected':''}>LONG</option><option ${t.type==='SHORT'?'selected':''}>SHORT</option></select></div><div><label>Quantity</label><input type="number" step="any" id="edit-qty" value="${t.quantity??''}"></div></div>
     <div class="field grid-3"><div><label>Entry</label><input type="number" step="any" id="edit-entry" value="${t.entryPrice??''}"></div><div><label>Exit</label><input type="number" step="any" id="edit-exit" value="${t.exitPrice??''}"></div><div><label>SL</label><input type="number" step="any" id="edit-sl" value="${t.stopLoss??''}"></div></div>
-    <div class="field"><label>Emotion</label><select id="edit-emotion">${presets.map(x=>`<option ${t.emotion===x?'selected':''}>${x}</option>`).join('')}<option ${!presets.includes(t.emotion)?'selected':''}>${esc(t.emotion||'Custom')}</option></select></div>
+    <div class="field"><label>Emotion(s)</label><div class="emotion-pills edit-emotions">${presets.map(x=>`<button type="button" class="emotion-pill ${(tradeEmotions(t).includes(x))?'selected':''}" data-action="toggle-edit-emotion" data-value="${esc(x)}">${esc(x)}</button>`).join('')}</div><input type="text" id="edit-custom-emotion" value="${esc(tradeEmotions(t).filter(x=>!presets.includes(x)).join(', '))}" placeholder="Custom emotions, comma separated"></div>
     <div class="field grid-2"><div><label>Exit Reason</label><input id="edit-exit-reason" value="${esc(t.exitReason||'')}" placeholder="Target / SL / manual / time..."></div><div><label>Images</label><div class="edit-images-list" id="edit-images-list">${imgs.map((src,i)=>`<div class="edit-image-item"><img src="${esc(src)}" data-src="${esc(src)}"><button type="button" data-action="remove-edit-image" data-index="${i}">×</button></div>`).join('')}<label class="edit-add-image">+ Add<input type="file" id="edit-multi-image-file" accept="image/*" multiple style="display:none"></label></div></div></div>
     <div class="edit-modal-actions"><button type="button" class="btn-secondary" data-action="cancel-edit-trade">Cancel</button><button type="button" class="btn-primary" data-action="update-trade" data-id="${esc(id)}">💾 Update Trade</button></div>
   </div></div>`;
@@ -793,14 +790,14 @@ function render(){
   const content = $('#tab-content');
   if (STATE.activeTab==='copilot') content.innerHTML = renderCopilotTab();
   else if (STATE.activeTab==='log') { content.innerHTML = renderLogTab(); renderLogImagePreview(); updateLogPreview(); }
-  else if (STATE.activeTab==='notes') { content.innerHTML = renderNotesTab(); renderNoteImagePreview(); if (STATE.noteWritingMode==='handwriting') initHandwritingCanvas(); }
+  else if (STATE.activeTab==='notes') { content.innerHTML = renderNotesTab(); renderNoteImagePreview(); }
   else if (STATE.activeTab==='history') content.innerHTML = renderHistoryTab();
 }
 function renderTabOnly(){ // re-render just the active tab (after in-tab interactions)
   const content = $('#tab-content');
   if (STATE.activeTab==='copilot') content.innerHTML = renderCopilotTab();
   else if (STATE.activeTab==='log') { content.innerHTML = renderLogTab(); renderLogImagePreview(); updateLogPreview(); }
-  else if (STATE.activeTab==='notes') { content.innerHTML = renderNotesTab(); renderNoteImagePreview(); if (STATE.noteWritingMode==='handwriting') initHandwritingCanvas(); }
+  else if (STATE.activeTab==='notes') { content.innerHTML = renderNotesTab(); renderNoteImagePreview(); }
   else if (STATE.activeTab==='history') content.innerHTML = renderHistoryTab();
   renderTabNav();
 }
@@ -825,8 +822,9 @@ document.addEventListener('click', async (e) => {
   }
   else if (action==='record-state') { alert(`Mindset saved: ${findMindset(STATE.selectedMindsetId).name} (+20 XP)`); }
   else if (action==='set-log-setup') { const draft=captureLogDraft(); STATE.logFormIsSetup = btn.dataset.value==='true'; renderTabOnly(); restoreLogDraft(draft); updateLogPreview(); }
-  else if (action==='set-log-emotion') { const draft=captureLogDraft(); STATE.logEmotion = btn.dataset.value; STATE.logCustomEmotion = ''; renderTabOnly(); restoreLogDraft(draft); }
-  else if (action==='use-custom-emotion') { const draft=captureLogDraft(); const v = $('#log-custom-emotion')?.value.trim(); if (v) { STATE.logEmotion = v; STATE.logCustomEmotion = v; renderTabOnly(); restoreLogDraft(draft); } }
+  else if (action==='set-log-emotion') { const draft=captureLogDraft(); const value=btn.dataset.value; STATE.logEmotions = STATE.logEmotions.includes(value) ? STATE.logEmotions.filter(x=>x!==value) : [...STATE.logEmotions, value]; STATE.logCustomEmotion = ''; renderTabOnly(); restoreLogDraft(draft); }
+  else if (action==='toggle-edit-emotion') { btn.classList.toggle('selected'); }
+  else if (action==='use-custom-emotion') { const draft=captureLogDraft(); const v = $('#log-custom-emotion')?.value.trim(); if (v) { STATE.logEmotions = STATE.logEmotions.filter(x=>x!==STATE.logCustomEmotion); STATE.logEmotions.push(v); STATE.logCustomEmotion = v; renderTabOnly(); restoreLogDraft(draft); } }
   else if (action==='set-log-device') { const draft=captureLogDraft(); STATE.logFormDevice = btn.dataset.value; renderTabOnly(); restoreLogDraft(draft); }
   else if (action==='remove-log-image') { STATE.logFormImage=''; STATE.logFormBeforeImage=''; STATE.logFormAfterImage=''; STATE.logFormImages=[]; renderLogImagePreview(); updateLogPreview(); }
   else if (action==='remove-log-image-index') { const i=Number(btn.dataset.index); const arr=currentLogImages(); arr.splice(i,1); STATE.logFormImages=arr; STATE.logFormBeforeImage=arr[0]||''; STATE.logFormAfterImage=arr[1]||''; renderLogImagePreview(); updateLogPreview(); }
@@ -836,21 +834,7 @@ document.addEventListener('click', async (e) => {
   else if (action==='update-trade') { await updateExistingTrade(btn.dataset.id); }
   else if (action==='remove-edit-image') { const item=btn.closest('.edit-image-item'); item?.remove(); }
   else if (action==='remove-note-image') { STATE.noteFormImage=''; renderNoteImagePreview(); }
-  else if (action==='annotate-log-image') { const i=Number(btn.dataset.index); const src=currentLogImages()[i]; if(src) openImageEditor(src,{kind:'log',index:i}); }
-  else if (action==='image-annotate-toggle') { toggleImageAnnotationMode(); }
-  else if (action==='image-tool') { setImageTool(btn.dataset.tool); }
-  else if (action==='image-color') { setImageColor(btn.dataset.color); }
-  else if (action==='image-undo') { imageUndo(); }
-  else if (action==='image-redo') { imageRedo(); }
-  else if (action==='image-clear') { imageClear(); }
-  else if (action==='image-annotation-save') { saveImageAnnotation(); }
-  else if (action==='image-editor-download') { downloadCurrentImage(); }
-  else if (action==='note-writing-mode') { STATE.noteWritingMode = btn.dataset.mode === 'handwriting' ? 'handwriting' : 'typed'; renderTabOnly(); initHandwritingCanvas(); }
-  else if (action==='handwriting-save') { saveHandwritingCanvas(); }
-  else if (action==='handwriting-clear') { clearHandwritingCanvas(); }
-  else if (action==='handwriting-undo') { undoHandwriting(); }
-  else if (action==='handwriting-redo') { redoHandwriting(); }
-  else if (action==='view-image') { const kind=btn.dataset.imageKind, index=Number(btn.dataset.imageIndex); openImageViewer(btn.dataset.src, kind ? {kind,index} : null); }
+  else if (action==='view-image') { $('#modal-image').src = btn.dataset.src; $('#image-modal').style.display='flex'; }
   else if (action==='toggle-strategy-builder') {
     const form = $('#strategy-builder-form');
     if (form) form.style.display = form.style.display === 'none' ? 'block' : 'none';
@@ -904,10 +888,8 @@ document.addEventListener('click', async (e) => {
   }
 });
 
-$('#modal-close').addEventListener('click', closeImageViewer);
-$('#image-modal').addEventListener('click', (e) => { if (e.target.id==='image-modal') closeImageViewer(); });
-document.addEventListener('keydown', (e) => { if (e.key==='Escape' && $('#image-modal')?.style.display==='flex') closeImageViewer(); });
-document.addEventListener('keydown', e => { if (e.key==='Escape') closeImageViewer(); });
+$('#modal-close').addEventListener('click', () => $('#image-modal').style.display='none');
+$('#image-modal').addEventListener('click', (e) => { if (e.target.id==='image-modal') $('#image-modal').style.display='none'; });
 
 document.addEventListener('input', (e) => {
   if (e.target.id==='energy-slider') { STATE.energyLevel = Number(e.target.value); $('#energy-val').textContent = STATE.energyLevel+'%'; refreshBatteryOnly(); }
@@ -916,9 +898,8 @@ document.addEventListener('input', (e) => {
   else if (e.target.id==='log-before-image-url') { STATE.logFormBeforeImage = e.target.value; renderLogImagePreview(); updateLogPreview(); }
   else if (e.target.id==='log-after-image-url') { STATE.logFormAfterImage = e.target.value; renderLogImagePreview(); updateLogPreview(); }
   else if (e.target.id==='log-custom-emotion') { STATE.logCustomEmotion = e.target.value; }
-  else if (e.target.id==='edit-confidence') { const box=e.target.closest('.edit-confidence'); const v=box?.querySelector('strong'); if(v) v.textContent=Number(e.target.value)+'/100'; }
   else if (e.target.id==='note-image-url') { STATE.noteFormImage = e.target.value; renderNoteImagePreview(); }
-  else if (e.target.id==='image-pen-size') { setImageSize(e.target.value); }
+  else if (e.target.id==='note-custom-concept') { STATE.noteFormCustomConcept = e.target.value; }
 });
 
 function refreshBatteryOnly(){
@@ -943,6 +924,11 @@ document.addEventListener('change', (e) => {
     const row = $('#note-custom-strategy-row');
     if (e.target.value==='__custom__') { row.style.display='flex'; }
     else { row.style.display='none'; STATE.noteFormStrategy = e.target.value; }
+  }
+  else if (e.target.id==='note-concept-select') {
+    STATE.noteFormConcept = e.target.value;
+    const row = $('#note-custom-concept-row');
+    if (row) row.style.display = e.target.value==='__custom__' ? 'block' : 'none';
   }
   else if (e.target.id==='log-multi-image-file') {
     const files=[...e.target.files]; if(!files.length) return;
@@ -981,13 +967,15 @@ async function updateExistingTrade(id){
   const symbol=$('#edit-symbol')?.value.trim() || t.symbol;
   const qty=parseFloat($('#edit-qty')?.value), entry=parseFloat($('#edit-entry')?.value), exit=parseFloat($('#edit-exit')?.value), sl=parseFloat($('#edit-sl')?.value);
   const type=$('#edit-type')?.value || t.type;
-  const emotion=$('#edit-emotion')?.value || t.emotion;
-  const confidence=Number($('#edit-confidence')?.value || t.confidence || 70);
+  const selectedEdit = [...document.querySelectorAll('[data-action="toggle-edit-emotion"].selected')].map(x=>x.dataset.value);
+  const customEdit = $('#edit-custom-emotion')?.value.split(',').map(x=>x.trim()).filter(Boolean) || [];
+  const emotions = [...new Set([...selectedEdit, ...customEdit])];
+  const emotion = emotions.join(' · ') || t.emotion || ''; 
   const images=[...document.querySelectorAll('#edit-images-list img')].map(x=>x.dataset.src).filter(Boolean);
   const pnl=(entry&&exit&&qty)?Math.round((type==='LONG'?(exit-entry)*qty:(entry-exit)*qty)*100)/100:(t.pnl||0);
   const rr=(sl&&entry&&exit&&entry!==sl)?Math.round(((type==='LONG'?exit-entry:entry-exit)/Math.abs(entry-sl))*100)/100:(t.rr||0);
   const snapshot = JSON.parse(JSON.stringify(t));
-  Object.assign(t,{symbol:symbol.toUpperCase(),type,quantity:Number.isFinite(qty)?qty:t.quantity,entryPrice:Number.isFinite(entry)?entry:null,exitPrice:Number.isFinite(exit)?exit:null,stopLoss:Number.isFinite(sl)?sl:null,emotion,confidence,exitReason:$('#edit-exit-reason')?.value.trim()||'',images,beforeImage:images[0]||null,afterImage:images[1]||null,image:images[0]||null,pnl,rr});
+  Object.assign(t,{symbol:symbol.toUpperCase(),type,emotions,quantity:Number.isFinite(qty)?qty:t.quantity,entryPrice:Number.isFinite(entry)?entry:null,exitPrice:Number.isFinite(exit)?exit:null,stopLoss:Number.isFinite(sl)?sl:null,emotion,exitReason:$('#edit-exit-reason')?.value.trim()||'',images,beforeImage:images[0]||null,afterImage:images[1]||null,image:images[0]||null,pnl,rr});
   const saved = await saveUserData();
   if (!saved) { Object.assign(t, snapshot); return; }
   STATE.editingTradeId=null; render();
@@ -1000,8 +988,8 @@ document.addEventListener('submit', async (e) => {
     const entry = $('#log-entry').value, exit = $('#log-exit').value, qty = $('#log-qty').value;
     if (!symbol || !qty) { alert('Please fill out Symbol and Quantity. Entry, Exit and SL are optional.'); return; }
     const customEmotion = $('#log-custom-emotion')?.value.trim() || '';
-    const finalEmotion = STATE.logEmotion || customEmotion;
-    if (!finalEmotion) { alert('Please select an emotion or enter your custom emotion.'); return; }
+    const finalEmotions = [...new Set([...(STATE.logEmotions||[]), ...(customEmotion ? [customEmotion] : [])].filter(Boolean))];
+    if (!finalEmotions.length) { alert('Please select an emotion or enter your custom emotion.'); return; }
     const p = computeLogPreview();
     const plannedEntry = parseFloat($('#log-planned-entry')?.value) || (entry ? parseFloat(entry) : null);
     const plannedSL = parseFloat($('#log-planned-sl')?.value) || ($('#log-sl').value ? parseFloat($('#log-sl').value) : null);
@@ -1014,7 +1002,7 @@ document.addEventListener('submit', async (e) => {
       id:`t-${Date.now()}`, symbol: symbol.toUpperCase(), type: $('#log-type').value, isSetupTrade: STATE.logFormIsSetup,
       entryPrice: entry === '' ? null : parseFloat(entry), exitPrice: exit === '' ? null : parseFloat(exit), quantity: parseFloat(qty),
       stopLoss: $('#log-sl').value ? parseFloat($('#log-sl').value) : null, takeProfit: null,
-      strategy: strategyName, emotion: finalEmotion, emotionPreset: MINDSET_ARCHETYPES.find(m=>m.name===finalEmotion)?.name || null, device: STATE.logFormDevice, location: STATE.logFormLocation,
+      strategy: strategyName, emotions: finalEmotions, emotion: finalEmotions.join(' · '), emotionPreset: null, device: STATE.logFormDevice, location: STATE.logFormLocation,
       notes: $('#log-notes')?.value || '', exitReason: $('#log-exit-reason')?.value.trim() || '', image: currentLogImages()[0] || null, beforeImage: currentLogImages()[0] || null, afterImage: currentLogImages()[1] || null, images: currentLogImages(),
       plannedEntry, plannedSL, plannedTP, plannedRR, mistake: $('#log-mistake').value, quality: Number($('#log-quality').value), followedPlan: STATE.logFormIsSetup && $('#log-mistake').value==='none',
       date: new Date().toISOString(), pnl: p.pnl, rr: p.rr, xpEarned: p.xp
@@ -1022,7 +1010,7 @@ document.addEventListener('submit', async (e) => {
     STATE.trades.unshift(newTrade);
     const saved = await saveUserData();
     if (!saved) { STATE.trades = STATE.trades.filter(t => t.id !== newTrade.id); return; }
-    STATE.logFormImage = ''; STATE.logFormBeforeImage = ''; STATE.logFormAfterImage = ''; STATE.logFormImages = []; STATE.logEmotion = ''; STATE.logCustomEmotion = '';
+    STATE.logFormImage = ''; STATE.logFormBeforeImage = ''; STATE.logFormAfterImage = ''; STATE.logFormImages = []; STATE.logEmotions = []; STATE.logCustomEmotion = '';
     STATE.activeTab = 'history';
     render();
   }
@@ -1032,64 +1020,15 @@ document.addEventListener('submit', async (e) => {
     if (!analysis && !learning) { alert('Please add at least an analysis or a learning/summary!'); return; }
     STATE.notes.unshift({
       id:`n-${Date.now()}`, symbol: $('#note-symbol').value.trim() || 'General', image: STATE.noteFormImage || null,
-      strategy: STATE.noteFormStrategy, entryCriteria: $('#note-entry').value.trim(), exitCriteria: $('#note-exit').value.trim(),
-      analysis, learning, handwriting: STATE.noteFormHandwriting || null, date: new Date().toISOString()
+      strategy: STATE.noteFormStrategy, concept: STATE.noteFormConcept === '__custom__' ? (STATE.noteFormCustomConcept.trim() || 'Custom') : STATE.noteFormConcept, customConcept: STATE.noteFormConcept === '__custom__' ? (STATE.noteFormCustomConcept.trim() || 'Custom') : '', entryCriteria: $('#note-entry').value.trim(), exitCriteria: $('#note-exit').value.trim(),
+      analysis, learning, date: new Date().toISOString()
     });
     STATE.activeNoteId = STATE.notes[0]?.id || null;
-    STATE.noteFormImage = '';
-    STATE.noteFormHandwriting = '';
-    STATE.noteWritingMode = 'typed';
+    STATE.noteFormImage = ''; STATE.noteFormConcept = 'General'; STATE.noteFormCustomConcept = '';
     await saveUserData();
     renderTabOnly();
   }
 });
-
-/* ---------------- Handwriting + full-screen image viewer ---------------- */
-let handwritingHistory = [], handwritingFuture = [], handwritingDrawing = false, handwritingLast = null;
-function getHandwritingCanvas(){ return $('#handwriting-canvas'); }
-function initHandwritingCanvas(){
-  const c=getHandwritingCanvas(); if(!c) return;
-  const ctx=c.getContext('2d');
-  ctx.lineCap='round'; ctx.lineJoin='round';
-  if(STATE.noteFormHandwriting){
-    const img=new Image(); img.onload=()=>{ctx.clearRect(0,0,c.width,c.height); ctx.drawImage(img,0,0,c.width,c.height);}; img.src=STATE.noteFormHandwriting;
-  } else { ctx.clearRect(0,0,c.width,c.height); ctx.fillStyle='#fff'; ctx.fillRect(0,0,c.width,c.height); }
-  handwritingHistory=[c.toDataURL('image/webp',.65)]; handwritingFuture=[];
-  c.onpointerdown=(e)=>{ handwritingDrawing=true; c.setPointerCapture?.(e.pointerId); handwritingLast=canvasPoint(c,e); };
-  c.onpointermove=(e)=>{ if(!handwritingDrawing) return; const p=canvasPoint(c,e), ctx=c.getContext('2d'); const size=Number($('#handwriting-size')?.value||3); const pressure=e.pressure&&e.pressure>0?e.pressure:1; ctx.strokeStyle='#111827'; ctx.lineWidth=Math.max(1,size*(.65+.7*pressure)); ctx.beginPath(); ctx.moveTo(handwritingLast.x,handwritingLast.y); ctx.lineTo(p.x,p.y); ctx.stroke(); handwritingLast=p; };
-  c.onpointerup=()=>{ if(handwritingDrawing) saveHandwritingSnapshot(); handwritingDrawing=false; handwritingLast=null; };
-  c.onpointercancel=()=>{ handwritingDrawing=false; handwritingLast=null; };
-}
-function canvasPoint(c,e){ const r=c.getBoundingClientRect(); return {x:(e.clientX-r.left)*(c.width/r.width),y:(e.clientY-r.top)*(c.height/r.height)}; }
-function saveHandwritingSnapshot(){ const c=getHandwritingCanvas(); if(!c) return; const snap=c.toDataURL('image/webp',.65); if(handwritingHistory.at(-1)!==snap) handwritingHistory.push(snap); if(handwritingHistory.length>25) handwritingHistory.shift(); handwritingFuture=[]; }
-function restoreCanvasData(src){ const c=getHandwritingCanvas(); if(!c) return; const ctx=c.getContext('2d'), img=new Image(); img.onload=()=>{ctx.clearRect(0,0,c.width,c.height);ctx.drawImage(img,0,0,c.width,c.height);}; img.src=src; }
-function undoHandwriting(){ if(handwritingHistory.length<=1)return; const current=handwritingHistory.pop(); handwritingFuture.push(current); restoreCanvasData(handwritingHistory.at(-1)); }
-function redoHandwriting(){ const next=handwritingFuture.pop(); if(!next)return; handwritingHistory.push(next); restoreCanvasData(next); }
-function clearHandwritingCanvas(){ const c=getHandwritingCanvas(); if(!c)return; const ctx=c.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,c.width,c.height);saveHandwritingSnapshot(); }
-function saveHandwritingCanvas(){ const c=getHandwritingCanvas(); if(!c)return; STATE.noteFormHandwriting=c.toDataURL('image/webp',.68); alert('✍️ Handwriting note attached. Ab Save Note dabaiye.'); }
-let imageEditor = { src:'', context:null, drawing:false, last:null, tool:'pen', color:'#111827', size:5, history:[], future:[] };
-function imageCanvas(){ return $('#image-draw-canvas'); }
-function imageStage(){ return $('#image-editor-stage'); }
-function openImageViewer(src,context=null){ if(!src)return; imageEditor={...imageEditor,src,context,tool:'pen',color:'#111827',size:5,history:[],future:[],drawing:false,last:null}; $('#modal-image').src=src; $('#image-modal').style.display='flex'; document.body.classList.add('image-viewer-open'); resetImageEditorUI(); }
-function openImageEditor(src,context){ if(!src)return; imageEditor={...imageEditor,src,context,tool:'pen',color:'#111827',size:5,history:[],future:[],drawing:false,last:null}; $('#modal-image').src=src; $('#image-modal').style.display='flex'; document.body.classList.add('image-viewer-open'); resetImageEditorUI(); enableImageAnnotationMode(true); }
-function closeImageViewer(){ $('#image-modal').style.display='none'; $('#modal-image').src=''; const c=imageCanvas(); if(c)c.getContext('2d').clearRect(0,0,c.width,c.height); document.body.classList.remove('image-viewer-open'); imageEditor.context=null; }
-function resetImageEditorUI(){ const toolbar=$('#image-editor-toolbar'); if(toolbar)toolbar.style.display='none'; const save=$('#image-annotation-save'); if(save)save.style.display='none'; const toggle=$('#image-annotate-toggle'); if(toggle){toggle.textContent='✏️ Draw';toggle.classList.remove('active');} }
-function enableImageAnnotationMode(force=false){ const toolbar=$('#image-editor-toolbar');const save=$('#image-annotation-save');const toggle=$('#image-annotate-toggle');if(!toolbar)return;const active=force||toolbar.style.display==='none';toolbar.style.display=active?'flex':'none';if(save)save.style.display=active?'inline-flex':'none';if(toggle){toggle.textContent=active?'✕ Stop Drawing':'✏️ Draw';toggle.classList.toggle('active',active);}if(active)setupImageCanvas();}
-function toggleImageAnnotationMode(){ enableImageAnnotationMode(false); }
-function setupImageCanvas(){ const img=$('#modal-image'),c=imageCanvas(),stage=imageStage();if(!img||!c||!stage)return;const fit=()=>{if(!img.naturalWidth)return;const maxW=Math.max(280,window.innerWidth-24),maxH=Math.max(220,window.innerHeight-155),scale=Math.min(maxW/img.naturalWidth,maxH/img.naturalHeight,1),w=Math.max(1,Math.round(img.naturalWidth*scale)),h=Math.max(1,Math.round(img.naturalHeight*scale));stage.style.width=w+'px';stage.style.height=h+'px';c.width=w;c.height=h;c.style.width=w+'px';c.style.height=h+'px';c.getContext('2d').clearRect(0,0,w,h);imageEditor.history=[c.toDataURL('image/png')];imageEditor.future=[];bindImageDrawing(c);};if(img.complete&&img.naturalWidth)fit();else img.onload=fit;}
-function bindImageDrawing(c){c.onpointerdown=(e)=>{imageEditor.drawing=true;c.setPointerCapture?.(e.pointerId);imageEditor.last=canvasPoint(c,e);};c.onpointermove=(e)=>{if(!imageEditor.drawing)return;const p=canvasPoint(c,e),ctx=c.getContext('2d'),pressure=e.pressure&&e.pressure>0?e.pressure:1,size=Math.max(1,imageEditor.size*(.7+.6*pressure));ctx.save();ctx.lineCap='round';ctx.lineJoin='round';ctx.lineWidth=size;ctx.globalCompositeOperation=imageEditor.tool==='eraser'?'destination-out':'source-over';ctx.strokeStyle=imageEditor.color;ctx.beginPath();ctx.moveTo(imageEditor.last.x,imageEditor.last.y);ctx.lineTo(p.x,p.y);ctx.stroke();ctx.restore();imageEditor.last=p;};c.onpointerup=(e)=>{if(imageEditor.drawing){imageEditor.drawing=false;imageEditor.last=null;saveImageSnapshot();}c.releasePointerCapture?.(e.pointerId);};c.onpointercancel=()=>{imageEditor.drawing=false;imageEditor.last=null;};}
-function saveImageSnapshot(){const c=imageCanvas();if(!c)return;const snap=c.toDataURL('image/png');if(imageEditor.history.at(-1)!==snap)imageEditor.history.push(snap);if(imageEditor.history.length>30)imageEditor.history.shift();imageEditor.future=[];}
-function restoreImageSnapshot(src){const c=imageCanvas();if(!c)return;const img=new Image();img.onload=()=>{const ctx=c.getContext('2d');ctx.clearRect(0,0,c.width,c.height);ctx.drawImage(img,0,0,c.width,c.height);};img.src=src;}
-function imageUndo(){if(imageEditor.history.length<=1)return;const cur=imageEditor.history.pop();imageEditor.future.push(cur);restoreImageSnapshot(imageEditor.history.at(-1));}
-function imageRedo(){const next=imageEditor.future.pop();if(!next)return;imageEditor.history.push(next);restoreImageSnapshot(next);}
-function imageClear(){const c=imageCanvas();if(!c)return;c.getContext('2d').clearRect(0,0,c.width,c.height);saveImageSnapshot();}
-function setImageTool(tool){imageEditor.tool=tool;$$('#image-editor-toolbar [data-action="image-tool"]').forEach(b=>b.classList.toggle('active',b.dataset.tool===tool));}
-function setImageColor(color){imageEditor.color=color;setImageTool('pen');$$('#image-editor-toolbar .image-color').forEach(b=>b.classList.toggle('active',b.dataset.color===color));}
-function setImageSize(value){imageEditor.size=Number(value)||5;const out=$('#image-pen-size-value');if(out)out.textContent=imageEditor.size+'px';}
-function composeAnnotatedImage(){const base=$('#modal-image'),overlay=imageCanvas();if(!base?.naturalWidth||!overlay)return null;const max=1600,scale=Math.min(1,max/Math.max(base.naturalWidth,base.naturalHeight)),w=Math.round(base.naturalWidth*scale),h=Math.round(base.naturalHeight*scale),out=document.createElement('canvas');out.width=w;out.height=h;const ctx=out.getContext('2d');ctx.drawImage(base,0,0,w,h);ctx.drawImage(overlay,0,0,w,h);return out.toDataURL('image/jpeg',.78);}
-function saveImageAnnotation(){const result=composeAnnotatedImage();if(!result)return;const ctx=imageEditor.context;if(ctx?.kind==='log'){const arr=currentLogImages();if(arr[ctx.index]){arr[ctx.index]=result;STATE.logFormImages=arr;STATE.logFormBeforeImage=arr[0]||'';STATE.logFormAfterImage=arr[1]||'';STATE.logFormImage=arr[0]||'';renderLogImagePreview();updateLogPreview();}}else if(ctx?.kind==='trade'){const t=STATE.trades.find(x=>x.id===ctx.id);if(t){const arr=Array.isArray(t.images)&&t.images.length?t.images.slice():[t.beforeImage,t.afterImage,t.image].filter(Boolean);arr[ctx.index]=result;t.images=arr;t.beforeImage=arr[0]||null;t.afterImage=arr[1]||null;t.image=arr[0]||null;saveUserData();renderTabOnly();}}else if(ctx?.kind==='note'&&ctx.field==='image'){STATE.noteFormImage=result;renderNoteImagePreview();}imageEditor.src=result;$('#modal-image').src=result;alert('🖊️ Annotation save ho gayi.');enableImageAnnotationMode(true);}
-function downloadCurrentImage(){const src=composeAnnotatedImage()||imageEditor.src;if(!src)return;const a=document.createElement('a');a.href=src;a.download='trader-copilot-annotated-chart.jpg';document.body.appendChild(a);a.click();a.remove();}
-
 
 /* ---------------- PWA install ---------------- */
 let deferredInstallPrompt = null;
