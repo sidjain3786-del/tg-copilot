@@ -653,3 +653,21 @@ button, input, select, textarea { touch-action: manipulation; }
   .samsung-note-page{min-height:12rem}
   .samsung-note-image-block .note-live-image-wrap img{max-height:55vh}
 }
+
+/* Rich text controls for continuous Samsung-style notes */
+.note-text-toolbar{display:flex;align-items:center;gap:.3rem;min-height:32px;margin:.15rem 0 .1rem;opacity:.82}
+.note-format-btn{height:30px;min-width:30px;padding:0 .5rem;border:1px solid var(--slate-200);background:#fff;border-radius:.55rem;color:var(--slate-700);cursor:pointer;font-size:.78rem;font-weight:700}
+.note-format-btn:hover{background:var(--slate-50);border-color:#c7d2fe}
+.note-highlight-btn{font-size:.82rem}
+.note-font-size{height:30px;border:1px solid var(--slate-200);background:#fff;border-radius:.55rem;padding:0 .4rem;color:var(--slate-700);font-size:.72rem;font-weight:700;cursor:pointer}
+.note-live-editor-text{width:100%;min-height:34px;height:auto;box-sizing:border-box;padding:.22rem .15rem .4rem;border:0;border-left:0;background:transparent;outline:none;color:var(--slate-800);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:16px;line-height:1.65;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere}
+.note-live-editor-text:empty:before{content:attr(data-placeholder);color:#94a3b8;pointer-events:none}
+.note-live-editor-text:focus{background:#fafaff;border-bottom:1px solid #c7d2fe}
+.note-live-editor-text mark{background:#fff59d;padding:0 .08em;border-radius:.12em}
+.samsung-note-text-block{padding:.05rem 0 .35rem;position:relative}
+.samsung-note-text-block .note-text-remove{top:34px}
+@media(max-width:700px){
+  .note-text-toolbar{overflow-x:auto;max-width:100%;padding:.1rem 0}
+  .note-format-btn,.note-font-size{height:34px;min-height:34px}
+  .note-live-editor-text{font-size:16px;line-height:1.7}
+}

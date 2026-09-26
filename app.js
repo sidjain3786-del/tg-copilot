@@ -74,20 +74,24 @@ function tradeEmotions(t){
   return t?.emotion ? [t.emotion] : [];
 }
 function emotionText(t){ return tradeEmotions(t).join(' · ') || '—'; }
+function sanitizeNoteHtml(html){
+  const tpl=document.createElement('template'); tpl.innerHTML=String(html||'');
+  const allowed=new Set(['B','STRONG','I','EM','U','MARK','BR','SPAN','DIV','P','FONT']);
+  const walk=node=>{ [...node.childNodes].forEach(child=>{ if(child.nodeType!==Node.ELEMENT_NODE) return;
+    if(!allowed.has(child.tagName)){ while(child.firstChild) child.parentNode.insertBefore(child.firstChild,child); child.remove(); return; }
+    [...child.attributes].forEach(a=>{ if(a.name!=='style' && !(child.tagName==='FONT'&&a.name==='size')) child.removeAttribute(a.name); });
+    if(child.hasAttribute('style')){ const st=child.getAttribute('style'); const bg=(st.match(/background-color\s*:\s*([^;]+)/i)||[])[1]; const fs=(st.match(/font-size\s*:\s*([^;]+)/i)||[])[1]; child.removeAttribute('style'); if(bg) child.style.backgroundColor=bg.trim(); if(fs) child.style.fontSize=fs.trim(); }
+    walk(child);
+  });}; walk(tpl.content); return tpl.innerHTML;
+}
+function noteTextFromHtml(html){ const d=document.createElement('div'); d.innerHTML=sanitizeNoteHtml(html); return (d.textContent||'').replace(/\u00a0/g,' '); }
 function normalizeNoteBlocks(note){
-  let raw = Array.isArray(note?.blocks) ? note.blocks : [];
-  let blocks = raw.filter(b => b && (b.type==='image' || b.type==='text')).map(b =>
-    b.type==='image' ? {type:'image', src:b.src||''} : {type:'text', text:String(b.text||'')}
-  ).filter(b => b.type==='image' ? !!b.src : true);
-  if (!blocks.length && note?.image) blocks.push({type:'image', src:note.image});
-  if (!blocks.length) return [{type:'text', text:''}];
-  const out=[];
-  blocks.forEach((b, i) => {
-    out.push(b);
-    if (b.type==='image' && blocks[i+1]?.type !== 'text') out.push({type:'text', text:''});
-  });
-  if (out[out.length-1]?.type !== 'text') out.push({type:'text', text:''});
-  return out;
+  let raw=Array.isArray(note?.blocks)?note.blocks:[];
+  let blocks=raw.filter(b=>b&&(b.type==='image'||b.type==='text')).map(b=>b.type==='image'?{type:'image',src:b.src||''}:{type:'text',text:String(b.text||''),html:sanitizeNoteHtml(b.html || (b.text?esc(b.text).replace(/\n/g,'<br>'):''))}).filter(b=>b.type==='image'?!!b.src:true);
+  if(!blocks.length&&note?.image) blocks.push({type:'image',src:note.image});
+  if(!blocks.length) return [{type:'text',text:'',html:''}];
+  const out=[]; blocks.forEach((b,i)=>{out.push(b);if(b.type==='image'&&blocks[i+1]?.type!=='text')out.push({type:'text',text:'',html:''});});
+  if(out[out.length-1]?.type!=='text')out.push({type:'text',text:'',html:''}); return out;
 }
 function noteBlocksForForm(){ return (STATE.noteFormBlocks||[]).filter(b => b && (b.type==='image' ? !!b.src : !!String(b.text||'').trim())); }
 function renderNoteBlocksEditor(){
@@ -691,7 +695,13 @@ function renderNotesTab(){
             </div>
           </div>` : `
           <div class="note-live-block text samsung-note-text-block">
-            <textarea data-live-note-text="${active.id}" data-index="${i}" placeholder="Write something…">${esc(b.text)}</textarea>
+            <div class="note-text-toolbar" role="toolbar" aria-label="Text formatting">
+              <button type="button" class="note-format-btn" data-note-format="bold" title="Bold"><strong>B</strong></button>
+              <select class="note-font-size" data-note-font-size aria-label="Text size"><option value="14px">14</option><option value="16px" selected>16</option><option value="18px">18</option><option value="22px">22</option><option value="28px">28</option></select>
+              <button type="button" class="note-format-btn note-highlight-btn" data-note-format="highlight" title="Highlight selected text">🖍️</button>
+              <button type="button" class="note-format-btn" data-note-format="clear-format" title="Clear formatting">Tx</button>
+            </div>
+            <div class="note-live-editor-text" contenteditable="true" spellcheck="true" data-live-note-text="${active.id}" data-index="${i}" data-placeholder="Write something…">${b.html||''}</div>
             <button type="button" class="note-text-remove" data-action="remove-live-note-block" data-note-id="${active.id}" data-index="${i}" title="Remove text">×</button>
           </div>`).join('')}
         ${!normalizeNoteBlocks(active).length ? `<div class="samsung-note-empty-page">Yahan seedha likhna shuru karein, ya <strong>＋</strong> se image/text add karein.</div>` : ''}
@@ -925,7 +935,7 @@ document.addEventListener('click', async (e) => {
     if (!note) return;
     note.blocks = normalizeNoteBlocks(note);
     const at = Number.isInteger(STATE.noteInsertIndex) ? Math.min(STATE.noteInsertIndex + 1, note.blocks.length) : note.blocks.length;
-    note.blocks.splice(at, 0, {type:'text', text:''});
+    note.blocks.splice(at, 0, {type:'text', text:'', html:''});
     STATE.noteInsertIndex = at;
     const menu = $('#note-plus-menu'); if (menu) menu.style.display='none';
     renderTabOnly();
@@ -1002,8 +1012,18 @@ $('#annotator-canvas')?.addEventListener('pointercancel', endAnnotator);
 window.addEventListener('resize', () => { if ($('#image-modal')?.style.display==='flex') setupAnnotatorCanvas(); });
 
 document.addEventListener('focusin', (e) => {
-  if (e.target.matches('[data-live-note-text]')) STATE.noteInsertIndex = Number(e.target.dataset.index);
+  if (e.target.matches('[data-live-note-text]')) { STATE.noteInsertIndex=Number(e.target.dataset.index); noteSelectionStore(e.target); autoGrowNoteEditor(e.target); }
 });
+
+function noteSelectionStore(el){ if(!el||!el.isContentEditable)return; const sel=window.getSelection(); if(sel&&sel.rangeCount){const r=sel.getRangeAt(0);if(el.contains(r.commonAncestorContainer))el._savedRange=r.cloneRange();} }
+function noteRestoreSelection(el){if(!el?._savedRange)return false;const sel=window.getSelection();sel.removeAllRanges();sel.addRange(el._savedRange);return true;}
+function autoGrowNoteEditor(el){if(!el)return;el.style.height='auto';el.style.height=Math.max(34,el.scrollHeight)+'px';}
+function applyNoteFormat(el,type,value){if(!el)return;el.focus();noteRestoreSelection(el);if(type==='bold')document.execCommand('bold',false,null);else if(type==='highlight'){try{document.execCommand('hiliteColor',false,'#fff59d');}catch(_){document.execCommand('backColor',false,'#fff59d');}}else if(type==='clear-format')document.execCommand('removeFormat',false,null);else if(type==='font-size'){document.execCommand('fontSize',false,'7');el.querySelectorAll('font[size="7"]').forEach(f=>{const span=document.createElement('span');span.style.fontSize=String(value||'16px');span.innerHTML=f.innerHTML;f.replaceWith(span);});}noteSelectionStore(el);el.dispatchEvent(new Event('input',{bubbles:true}));}
+document.addEventListener('mousedown',e=>{const btn=e.target.closest('[data-note-format],[data-note-font-size]');if(!btn)return;const el=btn.closest('.samsung-note-text-block')?.querySelector('[data-live-note-text]');if(el)noteSelectionStore(el);if(btn.tagName==='BUTTON')e.preventDefault();});
+document.addEventListener('click',e=>{const btn=e.target.closest('[data-note-format]');if(!btn)return;const el=btn.closest('.samsung-note-text-block')?.querySelector('[data-live-note-text]');if(el)applyNoteFormat(el,btn.dataset.noteFormat);});
+document.addEventListener('change',e=>{if(!e.target.matches('[data-note-font-size]'))return;const el=e.target.closest('.samsung-note-text-block')?.querySelector('[data-live-note-text]');if(el)applyNoteFormat(el,'font-size',e.target.value);});
+document.addEventListener('keyup',e=>{if(e.target.matches('[data-live-note-text]'))noteSelectionStore(e.target);});
+document.addEventListener('mouseup',e=>{if(e.target.matches('[data-live-note-text]'))noteSelectionStore(e.target);});
 
 document.addEventListener('input', (e) => {
   if (e.target.id==='energy-slider') { STATE.energyLevel = Number(e.target.value); $('#energy-val').textContent = STATE.energyLevel+'%'; refreshBatteryOnly(); }
@@ -1016,8 +1036,8 @@ document.addEventListener('input', (e) => {
   else if (e.target.id==='note-custom-concept') { STATE.noteFormCustomConcept = e.target.value; }
   else if (e.target.matches('[data-note-editor-title]')) { const note=STATE.notes.find(n=>n.id===e.target.dataset.noteEditorTitle); if(note){ note.title=e.target.value; note.symbol=e.target.value; scheduleNoteAutoSave(note.id); } }
   else if (e.target.matches('[data-live-note-text]')) {
-    const note = STATE.notes.find(n=>n.id===e.target.dataset.liveNoteText); const i=Number(e.target.dataset.index);
-    if(note){ note.blocks=normalizeNoteBlocks(note); if(note.blocks[i]) note.blocks[i].text=e.target.value; scheduleNoteAutoSave(note.id); }
+    const note=STATE.notes.find(n=>n.id===e.target.dataset.liveNoteText); const i=Number(e.target.dataset.index);
+    if(note){ note.blocks=normalizeNoteBlocks(note); if(note.blocks[i]){ note.blocks[i].html=sanitizeNoteHtml(e.target.innerHTML); note.blocks[i].text=noteTextFromHtml(note.blocks[i].html); } scheduleNoteAutoSave(note.id); autoGrowNoteEditor(e.target); }
   }
   else if (e.target.matches('[data-note-editor-entry]')) updateActiveNoteField(e.target.dataset.noteEditorEntry,'entryCriteria',e.target.value);
   else if (e.target.matches('[data-note-editor-exit]')) updateActiveNoteField(e.target.dataset.noteEditorExit,'exitCriteria',e.target.value);
@@ -1076,7 +1096,7 @@ document.addEventListener('change', (e) => {
       srcs.forEach(src=>{
         note.blocks.splice(at, 0, {type:'image', src});
         at += 1;
-        if (note.blocks[at]?.type !== 'text') note.blocks.splice(at, 0, {type:'text', text:''});
+        if (note.blocks[at]?.type !== 'text') note.blocks.splice(at, 0, {type:'text', text:'', html:''});
         at += 1;
       });
       note.image=note.blocks.find(b=>b.type==='image')?.src || null;
