@@ -40,7 +40,7 @@ const STATE = {
   logEmotions: [], logCustomEmotion: '', editingTradeId: null,
   noteFormStrategy: '', noteFormConcept: 'General', noteFormCustomConcept: '', noteFormImage: '', noteFormBlocks: [], activeNoteId: null, editingNoteId: null, noteConceptFilter: 'ALL',
   annotator: {src:'', noteId:null, blockIndex:null, drawing:false, mode:'pen', color:'#ef4444', size:4, history:[]},
-  noteAutoSaveTimer: null, noteAutoSaveBusy: false,
+  noteAutoSaveTimer: null, noteAutoSaveBusy: false, noteInsertIndex: null,
   historyStrategyFilter: 'ALL', historyMistakeFilter: 'ALL', historyView: localStorage.getItem('tc_history_view') || 'grid'
 };
 
@@ -75,10 +75,19 @@ function tradeEmotions(t){
 }
 function emotionText(t){ return tradeEmotions(t).join(' · ') || '—'; }
 function normalizeNoteBlocks(note){
-  if (Array.isArray(note?.blocks) && note.blocks.length) return note.blocks.filter(b => b && (b.type==='image' || b.type==='text')).map(b => b.type==='image' ? {type:'image', src:b.src||''} : {type:'text', text:b.text||''}).filter(b => b.type==='text' ? b.text.trim() : b.src);
-  const blocks=[];
-  if (note?.image) blocks.push({type:'image', src:note.image});
-  return blocks;
+  let raw = Array.isArray(note?.blocks) ? note.blocks : [];
+  let blocks = raw.filter(b => b && (b.type==='image' || b.type==='text')).map(b =>
+    b.type==='image' ? {type:'image', src:b.src||''} : {type:'text', text:String(b.text||'')}
+  ).filter(b => b.type==='image' ? !!b.src : true);
+  if (!blocks.length && note?.image) blocks.push({type:'image', src:note.image});
+  if (!blocks.length) return [{type:'text', text:''}];
+  const out=[];
+  blocks.forEach((b, i) => {
+    out.push(b);
+    if (b.type==='image' && blocks[i+1]?.type !== 'text') out.push({type:'text', text:''});
+  });
+  if (out[out.length-1]?.type !== 'text') out.push({type:'text', text:''});
+  return out;
 }
 function noteBlocksForForm(){ return (STATE.noteFormBlocks||[]).filter(b => b && (b.type==='image' ? !!b.src : !!String(b.text||'').trim())); }
 function renderNoteBlocksEditor(){
@@ -899,7 +908,7 @@ document.addEventListener('click', async (e) => {
   }
   else if (action==='create-note') {
     const id = `n-${Date.now()}`;
-    const note = { id, title:'Untitled Note', symbol:'General', concept:STATE.noteConceptFilter==='ALL'||STATE.noteConceptFilter==='__custom__'?'General':STATE.noteConceptFilter, customConcept:'', strategy:'', blocks:[], image:null, entryCriteria:'', exitCriteria:'', analysis:'', learning:'', date:new Date().toISOString(), updatedAt:new Date().toISOString() };
+    const note = { id, title:'Untitled Note', symbol:'General', concept:STATE.noteConceptFilter==='ALL'||STATE.noteConceptFilter==='__custom__'?'General':STATE.noteConceptFilter, customConcept:'', strategy:'', blocks:[{type:'text',text:''}], image:null, entryCriteria:'', exitCriteria:'', analysis:'', learning:'', date:new Date().toISOString(), updatedAt:new Date().toISOString() };
     STATE.notes.unshift(note);
     STATE.activeNoteId=id;
     STATE.noteConceptFilter='ALL';
@@ -915,11 +924,13 @@ document.addEventListener('click', async (e) => {
     const note = STATE.notes.find(n => n.id === STATE.activeNoteId);
     if (!note) return;
     note.blocks = normalizeNoteBlocks(note);
-    note.blocks.push({type:'text', text:''});
+    const at = Number.isInteger(STATE.noteInsertIndex) ? Math.min(STATE.noteInsertIndex + 1, note.blocks.length) : note.blocks.length;
+    note.blocks.splice(at, 0, {type:'text', text:''});
+    STATE.noteInsertIndex = at;
     const menu = $('#note-plus-menu'); if (menu) menu.style.display='none';
     renderTabOnly();
     scheduleNoteAutoSave(note.id);
-    setTimeout(() => { const fields = $$(`[data-live-note-text=\"${note.id}\"]`); fields.at(-1)?.focus(); }, 30);
+    setTimeout(() => { const fields = $$(`[data-live-note-text=\"${note.id}\"]`); fields[at]?.focus(); }, 30);
   }
   else if (action==='trigger-live-image') {
     $('#live-note-image-file')?.click();
@@ -931,6 +942,7 @@ document.addEventListener('click', async (e) => {
     note.blocks = normalizeNoteBlocks(note);
     note.blocks.splice(i,1);
     note.image = note.blocks.find(b=>b.type==='image')?.src || null;
+    STATE.noteInsertIndex = Math.max(0, Math.min(i-1, note.blocks.length-1));
     renderTabOnly();
     scheduleNoteAutoSave(note.id);
   }
@@ -988,6 +1000,10 @@ $('#annotator-canvas')?.addEventListener('pointermove', moveAnnotator);
 $('#annotator-canvas')?.addEventListener('pointerup', endAnnotator);
 $('#annotator-canvas')?.addEventListener('pointercancel', endAnnotator);
 window.addEventListener('resize', () => { if ($('#image-modal')?.style.display==='flex') setupAnnotatorCanvas(); });
+
+document.addEventListener('focusin', (e) => {
+  if (e.target.matches('[data-live-note-text]')) STATE.noteInsertIndex = Number(e.target.dataset.index);
+});
 
 document.addEventListener('input', (e) => {
   if (e.target.id==='energy-slider') { STATE.energyLevel = Number(e.target.value); $('#energy-val').textContent = STATE.energyLevel+'%'; refreshBatteryOnly(); }
@@ -1056,10 +1072,18 @@ document.addEventListener('change', (e) => {
     if(!files.length || !note) return;
     Promise.all(files.map(readAndCompressImage)).then(srcs=>{
       note.blocks=normalizeNoteBlocks(note);
-      srcs.forEach(src=>note.blocks.push({type:'image',src}));
+      let at = Number.isInteger(STATE.noteInsertIndex) ? Math.min(STATE.noteInsertIndex + 1, note.blocks.length) : note.blocks.length;
+      srcs.forEach(src=>{
+        note.blocks.splice(at, 0, {type:'image', src});
+        at += 1;
+        if (note.blocks[at]?.type !== 'text') note.blocks.splice(at, 0, {type:'text', text:''});
+        at += 1;
+      });
       note.image=note.blocks.find(b=>b.type==='image')?.src || null;
+      STATE.noteInsertIndex = Math.max(0, at-1);
       renderTabOnly();
       scheduleNoteAutoSave(note.id);
+      setTimeout(() => { const fields = $$(`[data-live-note-text=\"${note.id}\"]`); fields[Math.min(at-1, fields.length-1)]?.focus(); }, 30);
     }).catch(err=>alert(err.message||'Image upload failed.'));
     e.target.value='';
   }
