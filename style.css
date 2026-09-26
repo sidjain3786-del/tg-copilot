@@ -501,3 +501,8 @@ button, input, select, textarea { touch-action: manipulation; }
 .dashboard-mini-trade strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .dashboard-mini-trade .positive,.dashboard-mini-trade .negative { font-weight:800; }
 @media (max-width: 640px) { .dashboard-winloss-list { grid-template-columns:1fr; } }
+
+/* Trade history actions */
+.trade-actions{display:flex;gap:.45rem;align-items:center;flex-wrap:wrap;}
+.trade-delete-btn{border:1px solid #fecaca;background:#fff1f2;color:#be123c;border-radius:.65rem;padding:.5rem .7rem;font-weight:800;cursor:pointer;}
+.trade-delete-btn:hover{background:#ffe4e6;border-color:#fda4af;}

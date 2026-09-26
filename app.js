@@ -420,7 +420,7 @@ function currentLogImages(){
 function captureLogDraft(){
   const get = id => $('#'+id)?.value ?? '';
   return {
-    symbol:get('log-symbol'), type:get('log-type') || 'LONG', qty:get('log-qty'), entry:get('log-entry'), exit:get('log-exit'), sl:get('log-sl'),
+    symbol:(get('log-symbol') === 'OTHER' ? get('log-custom-symbol') : get('log-symbol')), symbolChoice:get('log-symbol'), customSymbol:get('log-custom-symbol'), type:get('log-type') || 'LONG', qty:get('log-qty'), entry:get('log-entry'), exit:get('log-exit'), sl:get('log-sl'),
     strategy:get('log-strategy-select'), plannedEntry:get('log-planned-entry'), plannedSL:get('log-planned-sl'), plannedTP:get('log-planned-tp'),
     imageUrl:get('log-image-url'), mistake:get('log-mistake'), quality:get('log-quality'), exitReason:get('log-exit-reason'), notes:get('log-notes'),
     location:get('log-location-select'), customEmotion:get('log-custom-emotion'), emotions:[...STATE.logEmotions]
@@ -429,7 +429,7 @@ function captureLogDraft(){
 function restoreLogDraft(draft){
   if(!draft) return;
   const set=(id,val)=>{ const el=$('#'+id); if(el && val!==undefined && val!==null) el.value=val; };
-  set('log-symbol',draft.symbol); set('log-type',draft.type); set('log-qty',draft.qty); set('log-entry',draft.entry); set('log-exit',draft.exit); set('log-sl',draft.sl);
+  set('log-symbol',draft.symbolChoice || draft.symbol || 'XAUUSD'); set('log-custom-symbol',draft.customSymbol || (draft.symbolChoice==='OTHER' ? draft.symbol : '')); set('log-type',draft.type); set('log-qty',draft.qty); set('log-entry',draft.entry); set('log-exit',draft.exit); set('log-sl',draft.sl);
   set('log-strategy-select',draft.strategy); set('log-planned-entry',draft.plannedEntry); set('log-planned-sl',draft.plannedSL); set('log-planned-tp',draft.plannedTP);
   set('log-image-url',draft.imageUrl); set('log-mistake',draft.mistake); set('log-quality',draft.quality); set('log-exit-reason',draft.exitReason); set('log-notes',draft.notes); set('log-location-select',draft.location); set('log-custom-emotion',draft.customEmotion);
   if (Array.isArray(draft.emotions)) STATE.logEmotions = [...draft.emotions];
@@ -725,12 +725,12 @@ function renderTradeView(t, mode){
   const resultClass=pnl>=0?'positive':'negative';
   const meta=`${esc(t.symbol||'—')} • ${esc(t.type||'—')}`;
   const chips=`<div class="history-chips"><span class="journal-chip">🧠 ${esc(emotionText(t))}</span><span class="journal-chip">📝 ${esc(mistakeLabel(t.mistake||'none'))}</span><span class="journal-chip">⭐ ${t.quality||3}/5</span></div>`;
-  const actions=`<button type="button" class="btn-secondary trade-edit-btn" data-action="edit-trade" data-id="${esc(t.id)}">✏️ Edit</button>`;
+  const actions=`<div class="trade-actions"><button type="button" class="btn-secondary trade-edit-btn" data-action="edit-trade" data-id="${esc(t.id)}">✏️ Edit</button><button type="button" class="btn-danger trade-delete-btn" data-action="delete-trade" data-id="${esc(t.id)}" title="Delete trade">🗑️ Delete</button></div>`;
   const shots = imgs.length ? `<div class="history-images">${imgs.map((src,i)=>`<div class="history-image"><img src="${esc(src)}" data-action="view-image" data-src="${esc(src)}"><span>${i===0?'Before':i===1?'After':`Image ${i+1}`}</span></div>`).join('')}</div>` : `<div class="history-no-images">🖼 No screenshots</div>`;
   if(mode==='list') return `<div class="history-list-row"><div class="history-list-main"><div class="history-symbol">${meta}</div><span class="history-date">${esc(t.date||t.createdAt||'')}</span></div><div class="history-list-stat">${pv.pe??'—'} → ${t.exitPrice??'—'}</div><div class="history-list-stat">${esc(emotionText(t))}</div><div class="history-list-stat ${resultClass} mono">${money(pnl)}</div><div>${actions}</div></div>`;
-  if(mode==='detailed') return `<article class="history-detail-card"><div class="history-detail-head"><div><span class="history-kicker">TRADE JOURNAL</span><h3>${meta}</h3><p>${esc(t.date||t.createdAt||'')}</p></div><div class="history-detail-result ${resultClass}">${money(pnl)}<small>${esc(String(rr))} R</small></div>${actions}</div>${chips}<div class="history-detail-grid"><div><span>PLANNED</span><strong>Entry ${pv.pe??'—'} • SL ${pv.ps??'—'} • Target ${pv.pt??'—'} • R:R ${pv.prr??'—'}</strong></div><div><span>ACTUAL</span><strong>Entry ${t.entryPrice??'—'} • SL ${t.stopLoss??'—'} • Exit ${t.exitPrice??'—'}</strong></div><div><span>EXIT REASON</span><strong>${esc(t.exitReason||'—')}</strong></div><div><span>QUANTITY</span><strong>${esc(t.quantity??'—')}</strong></div></div><p class="history-note">${esc(t.notes||'No notes added.')}</p>${shots}</article>`;
+  if(mode==='detailed') return `<article class="history-detail-card"><div class="history-detail-head"><div><span class="history-kicker">TRADE JOURNAL</span><h3>${meta}</h3><p>${esc(t.date||t.createdAt||'')}</p></div><div class="history-detail-result ${resultClass}">${money(pnl)}<small>${esc(String(rr))} R</small></div>${actions}</div>${chips}<div class="history-detail-grid"><div><span>PLANNED</span><strong>Entry ${pv.pe??'—'} • SL ${pv.ps??'—'} • Target ${pv.pt??'—'} • R:R ${pv.prr??'—'}</strong></div><div><span>ACTUAL</span><strong>Entry ${t.entryPrice??'—'} • SL ${t.stopLoss??'—'} • Exit ${t.exitPrice??'—'}</strong></div><div><span>EXIT REASON</span><strong>${esc(t.exitReason||'—')}</strong></div><div><span>LOT SIZE</span><strong>${esc(t.quantity??'—')}</strong></div></div><p class="history-note">${esc(t.notes||'No notes added.')}</p>${shots}</article>`;
   if(mode==='gallery') return `<article class="history-gallery-card"><div class="history-gallery-head"><div><h3>${meta}</h3><p>${esc(t.date||t.createdAt||'')}</p></div><div class="history-detail-result ${resultClass}">${money(pnl)}<small>${esc(String(rr))} R</small></div>${actions}</div>${shots}<div class="history-gallery-meta">${chips}</div></article>`;
-  return `<article class="history-grid-card"><div class="history-grid-media">${imgs[0]?`<img src="${esc(imgs[0])}" data-action="view-image" data-src="${esc(imgs[0])}">`:`<div class="history-grid-placeholder">📈</div>`}<span class="${t.type==='LONG'?'badge-long':'badge-short'}">${esc(t.type||'—')}</span></div><div class="history-grid-body"><div class="history-grid-top"><div><h3>${esc(t.symbol||'—')}</h3><p>${esc(tradeStrategyName(t)||'No strategy')}</p></div><div class="history-detail-result ${resultClass}">${money(pnl)}<small>${esc(String(rr))} R</small></div></div>${chips}<div class="history-mini-stats"><span>Entry <b>${t.entryPrice??'—'}</b></span><span>Exit <b>${t.exitPrice??'—'}</b></span><span>Qty <b>${t.quantity??'—'}</b></span></div><div class="history-card-actions">${actions}</div></div></article>`;
+  return `<article class="history-grid-card"><div class="history-grid-media">${imgs[0]?`<img src="${esc(imgs[0])}" data-action="view-image" data-src="${esc(imgs[0])}">`:`<div class="history-grid-placeholder">📈</div>`}<span class="${t.type==='LONG'?'badge-long':'badge-short'}">${esc(t.type||'—')}</span></div><div class="history-grid-body"><div class="history-grid-top"><div><h3>${esc(t.symbol||'—')}</h3><p>${esc(tradeStrategyName(t)||'No strategy')}</p></div><div class="history-detail-result ${resultClass}">${money(pnl)}<small>${esc(String(rr))} R</small></div></div>${chips}<div class="history-mini-stats"><span>Entry <b>${t.entryPrice??'—'}</b></span><span>Exit <b>${t.exitPrice??'—'}</b></span><span>Lot Size <b>${t.quantity??'—'}</b></span></div><div class="history-card-actions">${actions}</div></div></article>`;
 }
 function renderHistoryTab(){
   const all = STATE.trades;
@@ -822,7 +822,21 @@ document.addEventListener('click', async (e) => {
   }
   else if (action==='record-state') { alert(`Mindset saved: ${findMindset(STATE.selectedMindsetId).name} (+20 XP)`); }
   else if (action==='set-log-setup') { const draft=captureLogDraft(); STATE.logFormIsSetup = btn.dataset.value==='true'; renderTabOnly(); restoreLogDraft(draft); updateLogPreview(); }
-  else if (action==='set-log-emotion') { const draft=captureLogDraft(); const value=btn.dataset.value; STATE.logEmotions = STATE.logEmotions.includes(value) ? STATE.logEmotions.filter(x=>x!==value) : [...STATE.logEmotions, value]; STATE.logCustomEmotion = ''; renderTabOnly(); restoreLogDraft(draft); }
+  else if (action==='set-log-emotion') {
+    const value = btn.dataset.value;
+    STATE.logEmotions = STATE.logEmotions.includes(value)
+      ? STATE.logEmotions.filter(x => x !== value)
+      : [...STATE.logEmotions, value];
+    // Do not re-render the whole form here. Re-rendering was restoring the
+    // previous draft and made multi-select appear to lose selections.
+    STATE.logCustomEmotion = '';
+    btn.classList.toggle('selected', STATE.logEmotions.includes(value));
+    const badge = document.querySelector('.emotion-selected-badge');
+    if (badge) {
+      badge.textContent = STATE.logEmotions.length ? `✓ ${STATE.logEmotions.join(' · ')}` : 'Select emotion(s)';
+      badge.classList.toggle('empty', !STATE.logEmotions.length);
+    }
+  }
   else if (action==='toggle-edit-emotion') { btn.classList.toggle('selected'); }
   else if (action==='use-custom-emotion') { const draft=captureLogDraft(); const v = $('#log-custom-emotion')?.value.trim(); if (v) { STATE.logEmotions = STATE.logEmotions.filter(x=>x!==STATE.logCustomEmotion); STATE.logEmotions.push(v); STATE.logCustomEmotion = v; renderTabOnly(); restoreLogDraft(draft); } }
   else if (action==='set-log-device') { const draft=captureLogDraft(); STATE.logFormDevice = btn.dataset.value; renderTabOnly(); restoreLogDraft(draft); }
@@ -830,6 +844,7 @@ document.addEventListener('click', async (e) => {
   else if (action==='remove-log-image-index') { const i=Number(btn.dataset.index); const arr=currentLogImages(); arr.splice(i,1); STATE.logFormImages=arr; STATE.logFormBeforeImage=arr[0]||''; STATE.logFormAfterImage=arr[1]||''; renderLogImagePreview(); updateLogPreview(); }
   else if (action==='add-log-image-url') { const v=$('#log-image-url')?.value.trim(); if(v){ addLogImages([v]); $('#log-image-url').value=''; } }
   else if (action==='edit-trade') { STATE.editingTradeId=btn.dataset.id; render(); }
+  else if (action==='delete-trade') { await deleteTrade(btn.dataset.id); }
   else if (action==='cancel-edit-trade') { STATE.editingTradeId=null; render(); }
   else if (action==='update-trade') { await updateExistingTrade(btn.dataset.id); }
   else if (action==='remove-edit-image') { const item=btn.closest('.edit-image-item'); item?.remove(); }
@@ -962,6 +977,22 @@ document.addEventListener('change', (e) => {
   }
 });
 
+async function deleteTrade(id){
+  const index = STATE.trades.findIndex(t => t.id === id);
+  if (index < 0) return;
+  const trade = STATE.trades[index];
+  const label = `${trade.symbol || 'this trade'}${trade.pnl !== undefined ? ` (${money(Number(trade.pnl)||0)})` : ''}`;
+  if (!confirm(`Delete ${label}?\n\nThis trade will be removed from your journal.`)) return;
+  STATE.trades.splice(index, 1);
+  const saved = await saveUserData();
+  if (!saved) {
+    STATE.trades.splice(index, 0, trade);
+    return;
+  }
+  if (STATE.editingTradeId === id) STATE.editingTradeId = null;
+  render();
+}
+
 async function updateExistingTrade(id){
   const t=STATE.trades.find(x=>x.id===id); if(!t) return;
   const symbol=$('#edit-symbol')?.value.trim() || t.symbol;
@@ -986,7 +1017,7 @@ document.addEventListener('submit', async (e) => {
     e.preventDefault();
     const symbol = $('#log-symbol').value.trim();
     const entry = $('#log-entry').value, exit = $('#log-exit').value, qty = $('#log-qty').value;
-    if (!symbol || !qty) { alert('Please fill out Symbol and Quantity. Entry, Exit and SL are optional.'); return; }
+    if (!symbol || !qty) { alert('Please fill out Trading Pair and Lot Size. Entry, Exit and SL are optional.'); return; }
     const customEmotion = $('#log-custom-emotion')?.value.trim() || '';
     const finalEmotions = [...new Set([...(STATE.logEmotions||[]), ...(customEmotion ? [customEmotion] : [])].filter(Boolean))];
     if (!finalEmotions.length) { alert('Please select an emotion or enter your custom emotion.'); return; }
