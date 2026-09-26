@@ -40,6 +40,7 @@ const STATE = {
   logEmotions: [], logCustomEmotion: '', editingTradeId: null,
   noteFormStrategy: '', noteFormConcept: 'General', noteFormCustomConcept: '', noteFormImage: '', noteFormBlocks: [], activeNoteId: null, editingNoteId: null, noteConceptFilter: 'ALL',
   annotator: {src:'', noteId:null, blockIndex:null, drawing:false, mode:'pen', color:'#ef4444', size:4, history:[]},
+  noteAutoSaveTimer: null, noteAutoSaveBusy: false,
   historyStrategyFilter: 'ALL', historyMistakeFilter: 'ALL', historyView: localStorage.getItem('tc_history_view') || 'grid'
 };
 
@@ -169,6 +170,39 @@ async function saveUserData(){
     alert(`Trade save nahi hua. ${e.message || 'Please try again.'}`);
     return false;
   }
+}
+
+async function autoSaveNote(noteId){
+  const note = STATE.notes.find(n => n.id === noteId);
+  const status = document.querySelector('[data-note-save-status]');
+  if (!note) return;
+  if (status) status.textContent = 'Saving…';
+  STATE.noteAutoSaveBusy = true;
+  try {
+    const ok = await api('/api/data', 'POST', { trades: STATE.trades, notes: STATE.notes, customStrategies: STATE.customStrategies });
+    if (ok) {
+      note.updatedAt = new Date().toISOString();
+      if (status) status.textContent = '✓ Saved';
+    }
+  } catch (e) {
+    console.error('Note auto-save failed:', e);
+    if (status) status.textContent = '⚠ Save failed — retrying…';
+  } finally {
+    STATE.noteAutoSaveBusy = false;
+  }
+}
+function scheduleNoteAutoSave(noteId){
+  clearTimeout(STATE.noteAutoSaveTimer);
+  const status = document.querySelector('[data-note-save-status]');
+  if (status) status.textContent = 'Unsaved changes…';
+  STATE.noteAutoSaveTimer = setTimeout(() => autoSaveNote(noteId), 800);
+}
+function updateActiveNoteField(noteId, field, value){
+  const note = STATE.notes.find(n => n.id === noteId);
+  if (!note) return;
+  note[field] = value;
+  if (field === 'symbol') note.title = value;
+  scheduleNoteAutoSave(noteId);
 }
 
 function readAndCompressImage(file){
@@ -615,30 +649,65 @@ function renderNotesTab(){
   ];
 
   const renderReading = () => active ? `
-    <article class="note-reading-paper">
+    <article class="note-reading-paper note-live-editor">
       <div class="note-reading-topline">
-        <div>
-          <div class="note-reading-meta">${esc(active.symbol || 'General')}${active.concept ? ` <span>•</span> <strong>${esc(active.customConcept || active.concept)}</strong>` : ''}${active.strategy ? ` <span>•</span> ${esc(active.strategy)}` : ''}</div>
-          <h2>${esc(active.title || active.symbol || 'Trading Note')}</h2>
+        <div class="note-live-title-wrap">
+          <div class="note-reading-meta">${esc(active.customConcept || active.concept || 'General')}${active.strategy ? ` <span>•</span> ${esc(active.strategy)}` : ''}</div>
+          <input class="note-live-title" data-note-editor-title="${active.id}" value="${esc(active.title || active.symbol || 'Trading Note')}" placeholder="Note title…">
           <div class="note-reading-date">${new Date(active.date).toLocaleDateString(undefined,{day:'numeric',month:'long',year:'numeric'})}</div>
         </div>
-        <div style="display:flex; gap:.4rem; align-items:center;"><button type="button" class="btn-secondary" data-action="edit-note" data-id="${active.id}" title="Edit note">✏️ Edit</button><button class="item-delete note-reading-delete" data-action="delete-note" data-id="${active.id}" title="Delete note">🗑️</button></div>
+        <div class="note-live-actions">
+          <span class="note-save-status" data-note-save-status>✓ Saved</span>
+          <button type="button" class="note-plus-btn" data-action="toggle-note-plus" title="Add to note">＋</button>
+          <button class="item-delete note-reading-delete" data-action="delete-note" data-id="${active.id}" title="Delete note">🗑️</button>
+        </div>
       </div>
 
-      ${normalizeNoteBlocks(active).map((b,i)=> b.type==='image' ? `<figure class="note-reading-image note-block-image"><img src="${esc(b.src)}" data-action="open-note-block-annotator" data-note-id="${active.id}" data-index="${i}"><figcaption>Chart screenshot • click to open & draw</figcaption></figure>` : `<section class="note-inline-text"><p>${esc(b.text)}</p></section>`).join('')}
+      <div class="note-plus-menu" id="note-plus-menu" style="display:none">
+        <button type="button" class="btn-secondary" data-action="add-live-text-block">＋ Text</button>
+        <button type="button" class="btn-secondary" data-action="trigger-live-image">🖼️ Image</button>
+        <input type="file" id="live-note-image-file" accept="image/*" multiple hidden>
+      </div>
 
-      ${(active.entryCriteria||active.exitCriteria) ? `<div class="note-reading-rules">
-        ${active.entryCriteria ? `<div><span>ENTRY CRITERIA</span><p>${esc(active.entryCriteria)}</p></div>` : ''}
-        ${active.exitCriteria ? `<div><span>EXIT / INVALIDATION</span><p>${esc(active.exitCriteria)}</p></div>` : ''}
-      </div>` : ''}
+      <div class="note-live-meta-grid">
+        <label><span>CONCEPT</span><select data-note-editor-concept="${active.id}">${NOTE_CONCEPTS.map(c=>`<option value="${esc(c)}" ${(active.concept||'General')===c && !active.customConcept?'selected':''}>${esc(c)}</option>`).join('')}<option value="__custom__" ${active.customConcept?'selected':''}>Custom</option></select></label>
+        <label><span>STRATEGY</span><input data-note-editor-strategy="${active.id}" value="${esc(active.strategy||'')}" placeholder="Strategy…"></label>
+      </div>
 
-      ${active.analysis ? `<section class="note-reading-section"><div class="note-reading-label">MY ANALYSIS</div><p>${esc(active.analysis)}</p></section>` : ''}
-      ${active.learning ? `<section class="note-reading-learning"><div class="note-reading-label">✦ WHAT I LEARNED</div><p>${esc(active.learning)}</p></section>` : ''}
+      <div class="note-live-blocks">
+        ${normalizeNoteBlocks(active).map((b,i)=> b.type==='image' ? `
+          <div class="note-live-block image">
+            <div class="note-live-image-wrap">
+              <img src="${esc(b.src)}" data-action="open-note-block-annotator" data-note-id="${active.id}" data-index="${i}" alt="Note image">
+              <button type="button" class="note-block-remove-floating" data-action="remove-live-note-block" data-note-id="${active.id}" data-index="${i}" title="Remove image">×</button>
+              <button type="button" class="note-draw-floating" data-action="open-note-block-annotator" data-note-id="${active.id}" data-index="${i}">✍️ Draw</button>
+            </div>
+          </div>` : `
+          <div class="note-live-block text">
+            <textarea data-live-note-text="${active.id}" data-index="${i}" placeholder="Write something…">${esc(b.text)}</textarea>
+            <button type="button" class="note-text-remove" data-action="remove-live-note-block" data-note-id="${active.id}" data-index="${i}" title="Remove text">×</button>
+          </div>`).join('')}
+      </div>
+
+      <div class="note-live-add-hint">＋ Press <strong>+</strong> to keep adding text, screenshots or chart annotations. Changes save automatically.</div>
+
+      <div class="note-live-section">
+        <label>ENTRY CRITERIA</label><textarea data-note-editor-entry="${active.id}" placeholder="Entry conditions…">${esc(active.entryCriteria||'')}</textarea>
+      </div>
+      <div class="note-live-section">
+        <label>EXIT / INVALIDATION</label><textarea data-note-editor-exit="${active.id}" placeholder="Exit / invalidation…">${esc(active.exitCriteria||'')}</textarea>
+      </div>
+      <div class="note-live-section">
+        <label>MY ANALYSIS</label><textarea data-note-editor-analysis="${active.id}" placeholder="Apni analysis likhte raho…">${esc(active.analysis||'')}</textarea>
+      </div>
+      <div class="note-live-section learning">
+        <label>✦ WHAT I LEARNED</label><textarea data-note-editor-learning="${active.id}" placeholder="Jo seekha, yahan likho…">${esc(active.learning||'')}</textarea>
+      </div>
     </article>` : `
     <div class="note-reading-empty">
       <div class="note-reading-empty-icon">📝</div>
       <h3>Your reading space</h3>
-      <p>Save a note and it will appear here in a calm, distraction-free format.</p>
+      <p>Left side se note kholo. Phir ye bilkul notes app ki tarah editable rahega.</p>
     </div>`;
 
   return `
@@ -930,6 +999,33 @@ document.addEventListener('click', async (e) => {
     await saveUserData();
     renderTabOnly();
   }
+  else if (action==='toggle-note-plus') {
+    const menu = $('#note-plus-menu');
+    if (menu) menu.style.display = menu.style.display === 'none' ? 'flex' : 'none';
+  }
+  else if (action==='add-live-text-block') {
+    const note = STATE.notes.find(n => n.id === STATE.activeNoteId);
+    if (!note) return;
+    note.blocks = normalizeNoteBlocks(note);
+    note.blocks.push({type:'text', text:''});
+    const menu = $('#note-plus-menu'); if (menu) menu.style.display='none';
+    renderTabOnly();
+    scheduleNoteAutoSave(note.id);
+    setTimeout(() => { const fields = $$(`[data-live-note-text=\"${note.id}\"]`); fields.at(-1)?.focus(); }, 30);
+  }
+  else if (action==='trigger-live-image') {
+    $('#live-note-image-file')?.click();
+  }
+  else if (action==='remove-live-note-block') {
+    const note = STATE.notes.find(n => n.id === btn.dataset.noteId);
+    const i = Number(btn.dataset.index);
+    if (!note) return;
+    note.blocks = normalizeNoteBlocks(note);
+    note.blocks.splice(i,1);
+    note.image = note.blocks.find(b=>b.type==='image')?.src || null;
+    renderTabOnly();
+    scheduleNoteAutoSave(note.id);
+  }
   else if (action==='filter-note-concept') {
     STATE.noteConceptFilter = btn.dataset.concept || 'ALL';
     STATE.activeNoteId = null;
@@ -994,6 +1090,16 @@ document.addEventListener('input', (e) => {
   else if (e.target.id==='log-custom-emotion') { STATE.logCustomEmotion = e.target.value; }
   else if (e.target.id==='note-image-url') { /* added via action button */ }
   else if (e.target.id==='note-custom-concept') { STATE.noteFormCustomConcept = e.target.value; }
+  else if (e.target.matches('[data-note-editor-title]')) { updateActiveNoteField(e.target.dataset.noteEditorTitle, 'symbol', e.target.value); }
+  else if (e.target.matches('[data-live-note-text]')) {
+    const note = STATE.notes.find(n=>n.id===e.target.dataset.liveNoteText); const i=Number(e.target.dataset.index);
+    if(note){ note.blocks=normalizeNoteBlocks(note); if(note.blocks[i]) note.blocks[i].text=e.target.value; scheduleNoteAutoSave(note.id); }
+  }
+  else if (e.target.matches('[data-note-editor-entry]')) updateActiveNoteField(e.target.dataset.noteEditorEntry,'entryCriteria',e.target.value);
+  else if (e.target.matches('[data-note-editor-exit]')) updateActiveNoteField(e.target.dataset.noteEditorExit,'exitCriteria',e.target.value);
+  else if (e.target.matches('[data-note-editor-analysis]')) updateActiveNoteField(e.target.dataset.noteEditorAnalysis,'analysis',e.target.value);
+  else if (e.target.matches('[data-note-editor-learning]')) updateActiveNoteField(e.target.dataset.noteEditorLearning,'learning',e.target.value);
+  else if (e.target.matches('[data-note-editor-strategy]')) updateActiveNoteField(e.target.dataset.noteEditorStrategy,'strategy',e.target.value);
   else if (e.target.matches('[data-note-block-text]')) { const i=Number(e.target.dataset.noteBlockText); if(STATE.noteFormBlocks[i]) STATE.noteFormBlocks[i].text=e.target.value; }
 });
 
@@ -1024,6 +1130,30 @@ document.addEventListener('change', (e) => {
     STATE.noteFormConcept = e.target.value;
     const row = $('#note-custom-concept-row');
     if (row) row.style.display = e.target.value==='__custom__' ? 'block' : 'none';
+  }
+  else if (e.target.matches('[data-note-editor-concept]')) {
+    const note = STATE.notes.find(n=>n.id===e.target.dataset.noteEditorConcept);
+    if(note){
+      if(e.target.value==='__custom__'){
+        const custom = prompt('Custom concept ka naam?');
+        if(custom && custom.trim()){ note.concept='Custom'; note.customConcept=custom.trim(); }
+        else { renderTabOnly(); return; }
+      } else { note.concept=e.target.value; note.customConcept=''; }
+      renderTabOnly();
+      scheduleNoteAutoSave(note.id);
+    }
+  }
+  else if (e.target.id==='live-note-image-file') {
+    const files=[...e.target.files]; const note=STATE.notes.find(n=>n.id===STATE.activeNoteId);
+    if(!files.length || !note) return;
+    Promise.all(files.map(readAndCompressImage)).then(srcs=>{
+      note.blocks=normalizeNoteBlocks(note);
+      srcs.forEach(src=>note.blocks.push({type:'image',src}));
+      note.image=note.blocks.find(b=>b.type==='image')?.src || null;
+      renderTabOnly();
+      scheduleNoteAutoSave(note.id);
+    }).catch(err=>alert(err.message||'Image upload failed.'));
+    e.target.value='';
   }
   else if (e.target.id==='log-multi-image-file') {
     const files=[...e.target.files]; if(!files.length) return;
