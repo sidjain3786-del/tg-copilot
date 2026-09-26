@@ -1,11 +1,6 @@
-# Trader Co-Pilot — Trade Log Upgrade
+# Trader Co-Pilot Updates
 
-Included:
-- Entry, Exit and SL are optional when logging a trade.
-- Exit Reason field.
-- Required emotion selection plus custom emotion.
-- Confidence slider from 1–100.
-- Multiple screenshots/images per trade (multi-file upload + image URL).
-- Edit / Update Trade from Trade History.
-- Update modal supports changing core fields, emotion, confidence, exit reason, and adding/removing images.
-- Existing D1 schema remains compatible; new fields are stored in the existing trades JSON.
+- Fixed Trade History rendering regression in the rich-text Notes build.
+- Restored history view helper and trade card renderer that were missing after the Notes editor refactor.
+- Trade History now renders Grid/List/Detailed/Gallery views again.
+- Existing filters, Edit, Delete, screenshots, emotions, P&L and Reality Check remain connected to STATE.trades.
