@@ -39,7 +39,7 @@ const STATE = {
   logFormIsSetup: true, logFormDevice: 'Laptop', logFormLocation: 'Desk', logFormImage: '', logFormBeforeImage: '', logFormAfterImage: '', logFormImages: [],
   logEmotions: [], logCustomEmotion: '', editingTradeId: null,
   noteFormStrategy: '', noteFormConcept: 'General', noteFormCustomConcept: '', noteFormImage: '', noteFormBlocks: [], activeNoteId: null, editingNoteId: null, noteConceptFilter: 'ALL',
-  annotator: {src:'', noteId:null, blockIndex:null, drawing:false, mode:'pen', color:'#ef4444', size:4, history:[]},
+  annotator: {src:'', baseSrc:'', noteId:null, blockIndex:null, drawing:false, mode:'pen', color:'#ef4444', size:4, pressure:false, strokes:[], history:[], redo:[], activeStroke:null},
   noteAutoSaveTimer: null, noteAutoSaveBusy: false, noteInsertIndex: null,
   historyStrategyFilter: 'ALL', historyMistakeFilter: 'ALL', historyDateFilter: '', analysisDateFilter: '', historyView: localStorage.getItem('tc_history_view') || 'grid'
 };
@@ -87,7 +87,7 @@ function sanitizeNoteHtml(html){
 function noteTextFromHtml(html){ const d=document.createElement('div'); d.innerHTML=sanitizeNoteHtml(html); return (d.textContent||'').replace(/\u00a0/g,' '); }
 function normalizeNoteBlocks(note){
   let raw=Array.isArray(note?.blocks)?note.blocks:[];
-  let blocks=raw.filter(b=>b&&(b.type==='image'||b.type==='text')).map(b=>b.type==='image'?{type:'image',src:b.src||''}:{type:'text',text:String(b.text||''),html:sanitizeNoteHtml(b.html || (b.text?esc(b.text).replace(/\n/g,'<br>'):''))}).filter(b=>b.type==='image'?!!b.src:true);
+  let blocks=raw.filter(b=>b&&(b.type==='image'||b.type==='text')).map(b=>b.type==='image'?{type:'image',src:b.src||'',baseSrc:b.baseSrc||b.src||'',drawingStrokes:Array.isArray(b.drawingStrokes)?b.drawingStrokes:[]}:{type:'text',text:String(b.text||''),html:sanitizeNoteHtml(b.html || (b.text?esc(b.text).replace(/\n/g,'<br>'):''))}).filter(b=>b.type==='image'?!!b.src:true);
   if(!blocks.length&&note?.image) blocks.push({type:'image',src:note.image});
   if(!blocks.length) return [{type:'text',text:'',html:''}];
   const out=[]; blocks.forEach((b,i)=>{out.push(b);if(b.type==='image'&&blocks[i+1]?.type!=='text')out.push({type:'text',text:'',html:''});});
@@ -1080,17 +1080,20 @@ document.addEventListener('click', async (e) => {
 
 $('#modal-close').addEventListener('click', closeAnnotator);
 $('#image-modal').addEventListener('click', (e) => { if (e.target.id==='image-modal') closeAnnotator(); });
-$('#annotator-pen')?.addEventListener('click', () => { STATE.annotator.mode='pen'; $('#annotator-pen').classList.add('active'); $('#annotator-eraser')?.classList.remove('active'); });
-$('#annotator-eraser')?.addEventListener('click', () => { STATE.annotator.mode='eraser'; $('#annotator-eraser').classList.add('active'); $('#annotator-pen')?.classList.remove('active'); });
-$('#annotator-color')?.addEventListener('input', e => { STATE.annotator.color=e.target.value; STATE.annotator.mode='pen'; $('#annotator-pen')?.classList.add('active'); $('#annotator-eraser')?.classList.remove('active'); });
+$('#annotator-pen')?.addEventListener('click', () => setAnnotatorMode('pen'));
+$('#annotator-eraser')?.addEventListener('click', () => setAnnotatorMode('eraser'));
+$('#annotator-color')?.addEventListener('input', e => { STATE.annotator.color=e.target.value; setAnnotatorMode('pen'); });
 $('#annotator-size')?.addEventListener('input', e => STATE.annotator.size=Number(e.target.value));
+$('#annotator-pressure')?.addEventListener('change', e => STATE.annotator.pressure=!!e.target.checked);
 $('#annotator-undo')?.addEventListener('click', undoAnnotator);
+$('#annotator-redo')?.addEventListener('click', redoAnnotator);
 $('#annotator-clear')?.addEventListener('click', clearAnnotator);
 $('#annotator-save')?.addEventListener('click', saveAnnotatedImage);
 $('#annotator-canvas')?.addEventListener('pointerdown', startAnnotator);
 $('#annotator-canvas')?.addEventListener('pointermove', moveAnnotator);
 $('#annotator-canvas')?.addEventListener('pointerup', endAnnotator);
 $('#annotator-canvas')?.addEventListener('pointercancel', endAnnotator);
+$('#annotator-canvas')?.addEventListener('pointerleave', e => { if(STATE.annotator.drawing) moveAnnotator(e); });
 window.addEventListener('resize', () => { if ($('#image-modal')?.style.display==='flex') setupAnnotatorCanvas(); });
 
 document.addEventListener('focusin', (e) => {
@@ -1222,27 +1225,84 @@ document.addEventListener('change', (e) => {
   }
 });
 
+function setAnnotatorMode(mode){
+  STATE.annotator.mode=mode;
+  $('#annotator-pen')?.classList.toggle('active', mode==='pen');
+  $('#annotator-eraser')?.classList.toggle('active', mode==='eraser');
+}
 function openAnnotator(src,noteId=null,blockIndex=null){
-  const modal=$('#image-modal'); const img=$('#modal-image'); const canvas=$('#annotator-canvas'); if(!modal||!img||!canvas) return;
-  STATE.annotator={src,noteId,blockIndex,drawing:false,mode:'pen',color:$('#annotator-color')?.value||'#ef4444',size:Number($('#annotator-size')?.value)||4,history:[]};
-  img.src=src; modal.style.display='flex';
+  const modal=$('#image-modal'), img=$('#modal-image'), canvas=$('#annotator-canvas');
+  if(!modal||!img||!canvas) return;
+  let baseSrc=src||''; let strokes=[];
+  const block = noteId ? (STATE.notes.find(n=>n.id===noteId)?.blocks?.[blockIndex]) : STATE.noteFormBlocks?.[blockIndex];
+  if(block?.type==='image'){
+    baseSrc=block.baseSrc || block.src || baseSrc;
+    strokes=Array.isArray(block.drawingStrokes)?structuredClone(block.drawingStrokes):[];
+  }
+  STATE.annotator={src:src||baseSrc,baseSrc,noteId,blockIndex,drawing:false,mode:'pen',color:$('#annotator-color')?.value||'#ef4444',size:Number($('#annotator-size')?.value)||4,pressure:!!$('#annotator-pressure')?.checked,strokes,history:[strokes.map(cloneStroke)],redo:[],activeStroke:null};
+  setAnnotatorMode('pen');
+  img.src=baseSrc; modal.style.display='flex';
   img.onload=()=>setupAnnotatorCanvas();
   if(img.complete) setupAnnotatorCanvas();
 }
+function cloneStroke(stroke){ return {mode:stroke.mode||'pen',color:stroke.color||'#ef4444',size:Number(stroke.size)||4,points:(stroke.points||[]).map(p=>({x:Number(p.x),y:Number(p.y),pressure:Number.isFinite(p.pressure)?p.pressure:0.5}))}; }
 function setupAnnotatorCanvas(){
   const img=$('#modal-image'), canvas=$('#annotator-canvas'); if(!img||!canvas||!img.naturalWidth) return;
-  const rect=img.getBoundingClientRect(); canvas.width=img.naturalWidth; canvas.height=img.naturalHeight; canvas.style.width=rect.width+'px'; canvas.style.height=rect.height+'px';
-  const ctx=canvas.getContext('2d'); ctx.clearRect(0,0,canvas.width,canvas.height); STATE.annotator.history=[ctx.getImageData(0,0,canvas.width,canvas.height)];
+  const rect=img.getBoundingClientRect();
+  canvas.width=img.naturalWidth; canvas.height=img.naturalHeight; canvas.style.width=rect.width+'px'; canvas.style.height=rect.height+'px';
+  renderAnnotator();
 }
-function annotatorPoint(e){ const c=$('#annotator-canvas'), r=c.getBoundingClientRect(); return {x:(e.clientX-r.left)*(c.width/r.width),y:(e.clientY-r.top)*(c.height/r.height)}; }
-function startAnnotator(e){ const c=$('#annotator-canvas'); if(!c||!STATE.annotator.src) return; e.preventDefault(); STATE.annotator.drawing=true; c.setPointerCapture?.(e.pointerId); const p=annotatorPoint(e),ctx=c.getContext('2d'); ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineCap='round'; ctx.lineJoin='round'; ctx.lineWidth=STATE.annotator.size; ctx.strokeStyle=STATE.annotator.color; ctx.globalCompositeOperation=STATE.annotator.mode==='eraser'?'destination-out':'source-over'; ctx.lineTo(p.x+.1,p.y+.1); ctx.stroke(); }
-function moveAnnotator(e){ if(!STATE.annotator.drawing) return; e.preventDefault(); const c=$('#annotator-canvas'),ctx=c.getContext('2d'),p=annotatorPoint(e); ctx.lineTo(p.x,p.y); ctx.stroke(); }
-function endAnnotator(){ if(!STATE.annotator.drawing) return; STATE.annotator.drawing=false; const c=$('#annotator-canvas'),ctx=c.getContext('2d'); STATE.annotator.history.push(ctx.getImageData(0,0,c.width,c.height)); if(STATE.annotator.history.length>30) STATE.annotator.history.shift(); }
-function undoAnnotator(){ const c=$('#annotator-canvas'),ctx=c?.getContext('2d'); if(!c||STATE.annotator.history.length<2) return; STATE.annotator.history.pop(); ctx.putImageData(STATE.annotator.history.at(-1),0,0); }
-function clearAnnotator(){ const c=$('#annotator-canvas'),ctx=c?.getContext('2d'); if(!c) return; ctx.clearRect(0,0,c.width,c.height); STATE.annotator.history=[ctx.getImageData(0,0,c.width,c.height)]; }
-function saveAnnotatedImage(){ const img=$('#modal-image'),overlay=$('#annotator-canvas'); if(!img||!overlay||!img.naturalWidth) return; const out=document.createElement('canvas'); out.width=img.naturalWidth; out.height=img.naturalHeight; const ctx=out.getContext('2d'); ctx.drawImage(img,0,0,out.width,out.height); ctx.drawImage(overlay,0,0); const src=out.toDataURL('image/jpeg',.82);
-  if(STATE.annotator.noteId){ const note=STATE.notes.find(n=>n.id===STATE.annotator.noteId); if(note){ note.blocks=normalizeNoteBlocks(note); if(note.blocks[STATE.annotator.blockIndex]) note.blocks[STATE.annotator.blockIndex]={type:'image',src}; note.image=note.blocks.find(b=>b.type==='image')?.src||null; saveUserData(); renderTabOnly(); } }
-  else if(STATE.annotator.blockIndex!==null && STATE.noteFormBlocks[STATE.annotator.blockIndex]) { STATE.noteFormBlocks[STATE.annotator.blockIndex].src=src; renderNoteBlocksEditor(); }
+function annotatorPoint(e){ const c=$('#annotator-canvas'),r=c.getBoundingClientRect(); return {x:(e.clientX-r.left)*(c.width/r.width),y:(e.clientY-r.top)*(c.height/r.height),pressure:Number.isFinite(e.pressure)&&e.pressure>0?e.pressure:.5}; }
+function strokeWidth(stroke,p){ return Math.max(.75, stroke.size*(STATE.annotator.pressure ? (.55 + (p.pressure||.5)*.9) : 1)); }
+function drawSmoothStroke(ctx,stroke){
+  const pts=stroke.points||[]; if(!pts.length)return;
+  ctx.save(); ctx.lineCap='round'; ctx.lineJoin='round'; ctx.globalCompositeOperation=stroke.mode==='eraser'?'destination-out':'source-over'; ctx.strokeStyle=stroke.color||'#ef4444';
+  if(pts.length===1){ctx.beginPath();ctx.arc(pts[0].x,pts[0].y,strokeWidth(stroke,pts[0])/2,0,Math.PI*2);ctx.fillStyle=stroke.color||'#ef4444'; if(stroke.mode==='eraser')ctx.globalCompositeOperation='destination-out';ctx.fill();ctx.restore();return;}
+  ctx.beginPath(); ctx.moveTo(pts[0].x,pts[0].y);
+  for(let i=1;i<pts.length-1;i++){
+    const p=pts[i], n=pts[i+1]; ctx.lineWidth=strokeWidth(stroke,p); ctx.quadraticCurveTo(p.x,p.y,(p.x+n.x)/2,(p.y+n.y)/2); ctx.stroke(); ctx.beginPath(); ctx.moveTo((p.x+n.x)/2,(p.y+n.y)/2);
+  }
+  const last=pts[pts.length-1], prev=pts[pts.length-2]; ctx.lineWidth=strokeWidth(stroke,last); ctx.quadraticCurveTo(prev.x,prev.y,last.x,last.y); ctx.stroke(); ctx.restore();
+}
+function renderAnnotator(){
+  const c=$('#annotator-canvas'); if(!c)return; const ctx=c.getContext('2d'); ctx.clearRect(0,0,c.width,c.height); (STATE.annotator.strokes||[]).forEach(st=>drawSmoothStroke(ctx,st)); if(STATE.annotator.activeStroke) drawSmoothStroke(ctx,STATE.annotator.activeStroke);
+}
+function snapshotAnnotator(){ return (STATE.annotator.strokes||[]).map(cloneStroke); }
+function startAnnotator(e){
+  const c=$('#annotator-canvas'); if(!c||!STATE.annotator.baseSrc)return; e.preventDefault(); c.setPointerCapture?.(e.pointerId); STATE.annotator.drawing=true;
+  const p=annotatorPoint(e); STATE.annotator.activeStroke={mode:STATE.annotator.mode,color:STATE.annotator.color,size:STATE.annotator.size,points:[p]}; renderAnnotator();
+}
+function moveAnnotator(e){
+  if(!STATE.annotator.drawing||!STATE.annotator.activeStroke)return; e.preventDefault();
+  const events=e.getCoalescedEvents?e.getCoalescedEvents():[e]; for(const ev of events){ const p=annotatorPoint(ev); const pts=STATE.annotator.activeStroke.points; const last=pts[pts.length-1]; if(!last||Math.hypot(p.x-last.x,p.y-last.y)>=.35)pts.push(p); }
+  renderAnnotator();
+}
+function endAnnotator(){
+  if(!STATE.annotator.drawing)return; STATE.annotator.drawing=false;
+  if(STATE.annotator.activeStroke?.points?.length){ STATE.annotator.strokes.push(cloneStroke(STATE.annotator.activeStroke)); STATE.annotator.history.push(snapshotAnnotator()); STATE.annotator.redo=[]; if(STATE.annotator.history.length>80)STATE.annotator.history.shift(); }
+  STATE.annotator.activeStroke=null; renderAnnotator();
+}
+function undoAnnotator(){
+  if(STATE.annotator.drawing)return; const h=STATE.annotator.history; if(h.length<=1)return; const current=h.pop(); STATE.annotator.redo.push(current.map(cloneStroke)); STATE.annotator.strokes=h[h.length-1].map(cloneStroke); renderAnnotator();
+}
+function redoAnnotator(){
+  if(STATE.annotator.drawing||!STATE.annotator.redo.length)return; const next=STATE.annotator.redo.pop(); STATE.annotator.strokes=next.map(cloneStroke); STATE.annotator.history.push(snapshotAnnotator()); if(STATE.annotator.history.length>80)STATE.annotator.history.shift(); renderAnnotator();
+}
+function clearAnnotator(){
+  if(!STATE.annotator.strokes.length)return; STATE.annotator.redo.push(snapshotAnnotator()); STATE.annotator.strokes=[]; STATE.annotator.history.push([]); if(STATE.annotator.history.length>80)STATE.annotator.history.shift(); renderAnnotator();
+}
+function compositeAnnotatedImage(){
+  const img=$('#modal-image'); if(!img||!img.naturalWidth)return Promise.resolve('');
+  const out=document.createElement('canvas'); out.width=img.naturalWidth; out.height=img.naturalHeight; const ctx=out.getContext('2d'); ctx.drawImage(img,0,0,out.width,out.height); (STATE.annotator.strokes||[]).forEach(st=>drawSmoothStroke(ctx,st)); return Promise.resolve(out.toDataURL('image/webp',.9));
+}
+async function saveAnnotatedImage(){
+  const img=$('#modal-image'); if(!img||!img.naturalWidth)return;
+  const src=await compositeAnnotatedImage();
+  const payload={type:'image',src,baseSrc:STATE.annotator.baseSrc,drawingStrokes:snapshotAnnotator()};
+  if(STATE.annotator.noteId){
+    const note=STATE.notes.find(n=>n.id===STATE.annotator.noteId);
+    if(note){ note.blocks=normalizeNoteBlocks(note); if(note.blocks[STATE.annotator.blockIndex])note.blocks[STATE.annotator.blockIndex]=payload; note.image=note.blocks.find(b=>b.type==='image')?.src||null; scheduleNoteAutoSave(note.id); renderTabOnly(); }
+  } else if(STATE.annotator.blockIndex!==null && STATE.noteFormBlocks[STATE.annotator.blockIndex]) { STATE.noteFormBlocks[STATE.annotator.blockIndex]=payload; renderNoteBlocksEditor(); }
   closeAnnotator();
 }
 function closeAnnotator(){ const modal=$('#image-modal'); if(modal) modal.style.display='none'; const canvas=$('#annotator-canvas'); canvas?.getContext('2d')?.clearRect(0,0,canvas.width,canvas.height); }

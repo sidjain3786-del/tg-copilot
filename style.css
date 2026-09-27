@@ -542,6 +542,7 @@ button, input, select, textarea { touch-action: manipulation; }
 .annotator-color-wrap,.annotator-size-wrap{display:flex;align-items:center;gap:.35rem;font-size:.62rem;font-weight:800;color:var(--slate-500);border:1px solid var(--slate-200);border-radius:.65rem;padding:.4rem .5rem}
 .annotator-color-wrap input{width:2rem;height:1.6rem;padding:0;border:0;background:transparent}
 .annotator-size-wrap input{width:5rem}
+.annotator-pressure-wrap{display:flex;align-items:center;gap:.3rem;font-size:.62rem;font-weight:800;color:var(--slate-500);border:1px solid var(--slate-200);border-radius:.65rem;padding:.42rem .55rem;cursor:pointer;white-space:nowrap}
 .annotator-save{margin-left:auto!important;padding:.5rem .75rem!important;font-size:.65rem!important}
 .annotator-stage{overflow:auto!important;background:#111827!important;display:flex;align-items:center;justify-content:center;padding:1rem!important;min-height:0}
 .annotator-canvas-wrap{position:relative;display:inline-block;line-height:0;max-width:100%}
