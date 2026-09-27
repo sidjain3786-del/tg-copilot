@@ -41,7 +41,8 @@ const STATE = {
   noteFormStrategy: '', noteFormConcept: 'General', noteFormCustomConcept: '', noteFormImage: '', noteFormBlocks: [], activeNoteId: null, editingNoteId: null, noteConceptFilter: 'ALL',
   annotator: {src:'', baseSrc:'', noteId:null, blockIndex:null, drawing:false, mode:'pen', color:'#ef4444', size:4, pressure:false, strokes:[], history:[], redo:[], activeStroke:null},
   noteAutoSaveTimer: null, noteAutoSaveBusy: false, noteInsertIndex: null,
-  historyStrategyFilter: 'ALL', historyMistakeFilter: 'ALL', historyDateFilter: '', analysisDateFilter: '', historyView: localStorage.getItem('tc_history_view') || 'grid'
+  historyStrategyFilter: 'ALL', historyMistakeFilter: 'ALL', historyDateFilter: '', analysisDateFilter: '', historyView: localStorage.getItem('tc_history_view') || 'grid',
+  riskSettings: JSON.parse(localStorage.getItem('tc_risk_settings') || '{"account":100000,"riskPct":1,"dailyLossPct":2,"weeklyLossPct":5,"maxTrades":5,"maxLossStreak":3,"minRR":2}')
 };
 
 /* ---------------- utils ---------------- */
@@ -318,6 +319,72 @@ function renderDailySessionAnalysis(){
 function renderAnalysisTab(){
   return `<div class="analysis-page">${renderDailySessionAnalysis()}</div>`;
 }
+/* ---------------- Risk Center ---------------- */
+function riskSaveSettings(){ localStorage.setItem('tc_risk_settings', JSON.stringify(STATE.riskSettings)); }
+function riskNum(id, fallback=0){ const v=Number($(id)?.value); return Number.isFinite(v)?v:fallback; }
+function currentRiskStats(){
+  const today=new Date().toISOString().slice(0,10);
+  const weekStart=new Date(); weekStart.setHours(0,0,0,0); weekStart.setDate(weekStart.getDate()-((weekStart.getDay()+6)%7));
+  const weekKey=weekStart.toISOString().slice(0,10);
+  const trades=STATE.trades||[];
+  const localDate=t=>tradeLocalDate(t);
+  const todayTrades=trades.filter(t=>localDate(t)===today);
+  const weekTrades=trades.filter(t=>localDate(t)>=weekKey && localDate(t)<=today);
+  const pnl=arr=>arr.reduce((a,t)=>a+(Number(t.pnl)||0),0);
+  const todayPnl=pnl(todayTrades), weekPnl=pnl(weekTrades);
+  const dailyLimit=Number(STATE.riskSettings.account||0)*Number(STATE.riskSettings.dailyLossPct||0)/100;
+  const weeklyLimit=Number(STATE.riskSettings.account||0)*Number(STATE.riskSettings.weeklyLossPct||0)/100;
+  let streak=0;
+  for(const t of [...trades].sort((a,b)=>new Date(b.createdAt||b.date||0)-new Date(a.createdAt||a.date||0))){ const x=Number(t.pnl)||0; if(x<0) streak++; else if(x>0) break; }
+  return {todayTrades,weekTrades,todayPnl,weekPnl,dailyLimit,weeklyLimit,streak};
+}
+function renderRiskCenter(){
+  const r=STATE.riskSettings, s=currentRiskStats();
+  const riskUsed=Math.max(0,-s.todayPnl), dailyPct=s.dailyLimit?Math.min(100,riskUsed/s.dailyLimit*100):0;
+  const weeklyUsed=Math.max(0,-s.weekPnl), weeklyPct=s.weeklyLimit?Math.min(100,weeklyUsed/s.weeklyLimit*100):0;
+  return `<div class="risk-page">
+    <div class="risk-hero card"><div><span class="uppercase-label">RISK & MONEY MANAGEMENT</span><h2 class="section-title">🛡️ Risk Center</h2><p class="card-sub">Trade se pehle risk calculate karo, daily limits dekho aur position size discipline ke saath set karo.</p></div><div class="risk-status-pill ${s.streak>=Number(r.maxLossStreak||3)?'danger':s.todayPnl<0?'warn':'safe'}">${s.streak>=Number(r.maxLossStreak||3)?'🛑 STOP RULE':'🟢 RISK CONTROLLED'}</div></div>
+
+    <div class="risk-dashboard-grid">
+      <div class="risk-limit-card card"><div class="risk-card-head"><div><span class="uppercase-label">TODAY'S RISK</span><strong>${money(s.todayPnl)}</strong></div><span>${Math.round(dailyPct)}%</span></div><div class="risk-progress"><i style="width:${dailyPct}%"></i></div><small>Loss budget: ${money(-s.dailyLimit)} · Remaining: ${money(Math.max(0,s.dailyLimit-riskUsed))}</small></div>
+      <div class="risk-limit-card card"><div class="risk-card-head"><div><span class="uppercase-label">WEEKLY RISK</span><strong>${money(s.weekPnl)}</strong></div><span>${Math.round(weeklyPct)}%</span></div><div class="risk-progress"><i style="width:${weeklyPct}%"></i></div><small>Weekly budget: ${money(-s.weeklyLimit)} · ${s.weekTrades.length} trades</small></div>
+      <div class="risk-limit-card card"><div class="risk-card-head"><div><span class="uppercase-label">LOSS STREAK</span><strong>${s.streak}</strong></div><span>Max ${r.maxLossStreak}</span></div><div class="risk-streak-dots">${Array.from({length:Math.max(3,Number(r.maxLossStreak)||3)},(_,i)=>`<b class="${i<s.streak?'hit':''}"></b>`).join('')}</div><small>${s.streak>=Number(r.maxLossStreak||3)?'Configured stop rule reached.':'Consecutive losses before cooldown.'}</small></div>
+    </div>
+
+    <div class="risk-main-grid">
+      <section class="card risk-calculator-card"><div class="risk-section-head"><div><span class="uppercase-label">POSITION SIZING</span><h3 class="section-title">🎯 Can I Take This Trade?</h3><p class="card-sub">Entry, stop aur target se size + risk automatically calculate hoga.</p></div><span class="risk-live">LIVE</span></div>
+        <div class="risk-input-grid"><div><label>Account Balance</label><input type="number" id="risk-account-calc" value="${r.account}" min="0" step="any"></div><div><label>Risk %</label><input type="number" id="risk-pct-calc" value="${r.riskPct}" min="0.01" max="100" step="0.1"></div><div><label>Entry</label><input type="number" id="risk-entry" placeholder="e.g. 2500" step="any"></div><div><label>Stop Loss</label><input type="number" id="risk-sl" placeholder="e.g. 2480" step="any"></div><div><label>Target</label><input type="number" id="risk-target" placeholder="e.g. 2540" step="any"></div><div><label>Point/Unit Value</label><input type="number" id="risk-point-value" value="1" min="0.000001" step="any"><small>₹ per 1 price move</small></div></div>
+        <div class="risk-result-grid"><div><span>Max Risk</span><strong id="risk-max-loss">—</strong></div><div><span>Risk / Unit</span><strong id="risk-per-unit">—</strong></div><div><span>Position Size</span><strong id="risk-position-size">—</strong></div><div><span>Potential Profit</span><strong id="risk-profit">—</strong></div><div><span>R : R</span><strong id="risk-rr">—</strong></div></div><div id="risk-calc-message" class="risk-calc-message">Entry + SL + Target bharo — calculator ready hai.</div></section>
+
+      <section class="card risk-rules-card"><div class="risk-section-head"><div><span class="uppercase-label">YOUR RULES</span><h3 class="section-title">⚙️ Money Management</h3><p class="card-sub">Ye limits device par automatically remember hongi.</p></div></div>
+        <div class="risk-settings-grid"><label>Default Account <input type="number" id="risk-setting-account" value="${r.account}" min="0" step="any"></label><label>Risk / Trade % <input type="number" id="risk-setting-risk" value="${r.riskPct}" min="0.01" step="0.1"></label><label>Max Daily Loss % <input type="number" id="risk-setting-daily" value="${r.dailyLossPct}" min="0.1" step="0.1"></label><label>Max Weekly Loss % <input type="number" id="risk-setting-weekly" value="${r.weeklyLossPct}" min="0.1" step="0.1"></label><label>Max Trades / Day <input type="number" id="risk-setting-trades" value="${r.maxTrades}" min="1" step="1"></label><label>Max Loss Streak <input type="number" id="risk-setting-streak" value="${r.maxLossStreak}" min="1" step="1"></label><label>Minimum R:R <input type="number" id="risk-setting-rr" value="${r.minRR}" min="0.1" step="0.1"></label></div>
+        <div class="risk-rule-summary"><div>Risk / trade <strong>${money(Number(r.account)*Number(r.riskPct)/100)}</strong></div><div>Daily stop <strong>${money(-Number(r.account)*Number(r.dailyLossPct)/100)}</strong></div><div>Weekly stop <strong>${money(-Number(r.account)*Number(r.weeklyLossPct)/100)}</strong></div></div>
+      </section>
+    </div>
+
+    <section class="card risk-checklist-card"><div class="risk-section-head"><div><span class="uppercase-label">PRE-TRADE GATE</span><h3 class="section-title">🚦 Before You Click Buy / Sell</h3><p class="card-sub">Aapke current rules ke against quick safety check.</p></div></div><div class="risk-gate-grid">
+      <div class="risk-gate-item ${s.todayTrades.length>=Number(r.maxTrades)?'bad':'good'}"><span>${s.todayTrades.length>=Number(r.maxTrades)?'🔴':'🟢'}</span><div><strong>Daily trade count</strong><small>${s.todayTrades.length} / ${r.maxTrades} used</small></div></div>
+      <div class="risk-gate-item ${s.streak>=Number(r.maxLossStreak)?'bad':'good'}"><span>${s.streak>=Number(r.maxLossStreak)?'🔴':'🟢'}</span><div><strong>Loss streak</strong><small>${s.streak} / ${r.maxLossStreak}</small></div></div>
+      <div class="risk-gate-item ${riskUsed>=s.dailyLimit?'bad':'good'}"><span>${riskUsed>=s.dailyLimit?'🔴':'🟢'}</span><div><strong>Daily loss budget</strong><small>${money(-riskUsed)} / ${money(-s.dailyLimit)}</small></div></div>
+      <div class="risk-gate-item good"><span>🟢</span><div><strong>Stop Loss</strong><small>Calculator mein SL define karo</small></div></div>
+    </div></section>
+
+    <section class="card r-multiple-card"><div class="risk-section-head"><div><span class="uppercase-label">PERFORMANCE IN R</span><h3 class="section-title">📈 Think in R, Not Just Rupees</h3><p class="card-sub">1R = aapka planned risk. Isse strategy ka real performance samajhna easy hota hai.</p></div></div><div class="r-metrics"><div><span>1R</span><strong>${money(Number(r.account)*Number(r.riskPct)/100)}</strong><small>Planned loss</small></div><div><span>2R</span><strong>${money(Number(r.account)*Number(r.riskPct)*2/100)}</strong><small>2R winner</small></div><div><span>3R</span><strong>${money(Number(r.account)*Number(r.riskPct)*3/100)}</strong><small>3R winner</small></div><div><span>−3R</span><strong>${money(-Number(r.account)*Number(r.riskPct)*3/100)}</strong><small>3 losses worth</small></div></div></section>
+  </div>`;
+}
+function updateRiskCalculator(){
+  const account=riskNum('#risk-account-calc',Number(STATE.riskSettings.account)||0), pct=riskNum('#risk-pct-calc',Number(STATE.riskSettings.riskPct)||1), entry=riskNum('#risk-entry',NaN), sl=riskNum('#risk-sl',NaN), target=riskNum('#risk-target',NaN), pv=riskNum('#risk-point-value',1)||1;
+  const maxRisk=account*pct/100, riskPerUnit=Math.abs(entry-sl)*pv, size=riskPerUnit>0?maxRisk/riskPerUnit:NaN, profit=(Number.isFinite(target)&&Number.isFinite(entry))?Math.abs(target-entry)*pv*size:NaN, rr=(Number.isFinite(target)&&riskPerUnit>0)?Math.abs(target-entry)*pv/riskPerUnit:NaN;
+  const set=(id,v)=>{const el=$(id);if(el)el.textContent=v;};
+  set('#risk-max-loss',Number.isFinite(maxRisk)?money(-maxRisk):'—'); set('#risk-per-unit',Number.isFinite(riskPerUnit)?money(-riskPerUnit):'—'); set('#risk-position-size',Number.isFinite(size)?size.toFixed(2):'—'); set('#risk-profit',Number.isFinite(profit)?money(profit):'—'); set('#risk-rr',Number.isFinite(rr)?`1 : ${rr.toFixed(2)}`:'—');
+  const msg=$('#risk-calc-message'); if(msg){ msg.className='risk-calc-message'; if(!Number.isFinite(entry)||!Number.isFinite(sl)||entry===sl){msg.textContent='Entry + SL + Target bharo — calculator ready hai.';} else if(Number.isFinite(rr) && rr<Number(STATE.riskSettings.minRR||2)){msg.classList.add('warn');msg.textContent=`⚠️ R:R ${rr.toFixed(2)} hai — aapka minimum rule 1:${STATE.riskSettings.minRR} hai.`;} else {msg.classList.add('good');msg.textContent=`🟢 Within calculator rules — max loss ${money(-maxRisk)} ke andar position size ${size.toFixed(2)}.`;}}
+}
+function bindRiskSettings(){
+  const map={ '#risk-setting-account':'account','#risk-setting-risk':'riskPct','#risk-setting-daily':'dailyLossPct','#risk-setting-weekly':'weeklyLossPct','#risk-setting-trades':'maxTrades','#risk-setting-streak':'maxLossStreak','#risk-setting-rr':'minRR' };
+  Object.entries(map).forEach(([sel,key])=>{const el=$(sel);if(el)el.addEventListener('input',()=>{const v=Number(el.value);if(Number.isFinite(v)&&v>0){STATE.riskSettings[key]=v;riskSaveSettings();}});});
+  ['#risk-account-calc','#risk-pct-calc','#risk-entry','#risk-sl','#risk-target','#risk-point-value'].forEach(sel=>$(sel)?.addEventListener('input',updateRiskCalculator));
+}
+
 function filteredHistoryTrades(){
   return STATE.trades.filter(t =>
     (STATE.historyStrategyFilter==='ALL' || tradeStrategyName(t)===STATE.historyStrategyFilter) &&
@@ -399,14 +466,15 @@ const TABS = [
   {id:'log', label:'📝 Log Trade & Chart Screenshot'},
   {id:'notes', label:'🧾 Notes & Learnings'},
   {id:'history', label:'📜 Trade History Log'},
-  {id:'analysis', label:'📊 Daily & Session Analysis'}
+  {id:'analysis', label:'📊 Daily & Session Analysis'},
+  {id:'risk', label:'🛡️ Risk Center'}
 ];
 function renderTabNav(){
   $('#tab-nav').innerHTML = TABS.map(t =>
     `<button class="tab-btn ${STATE.activeTab===t.id?'active':''}" data-action="set-tab" data-tab="${t.id}">${t.label}</button>`
   ).join('');
-  const mobileIcons = {copilot:'⚡',log:'➕',notes:'🧠',history:'📜',analysis:'📊'};
-  const mobileLabels = {copilot:'Co-Pilot',log:'Log Trade',notes:'Notes',history:'History',analysis:'Analysis'};
+  const mobileIcons = {copilot:'⚡',log:'➕',notes:'🧠',history:'📜',analysis:'📊',risk:'🛡️'};
+  const mobileLabels = {copilot:'Co-Pilot',log:'Log Trade',notes:'Notes',history:'History',analysis:'Analysis',risk:'Risk'};
   const mobile = $('#mobile-tab-nav');
   if (mobile) mobile.innerHTML = TABS.map(t =>
     `<button class="mobile-tab-btn ${STATE.activeTab===t.id?'active':''}" data-action="set-tab" data-tab="${t.id}"><span class="mobile-tab-icon">${mobileIcons[t.id]}</span><span>${mobileLabels[t.id]}</span></button>`
@@ -596,7 +664,7 @@ function renderLogTab(){
         <div class="fast-journal-emotion">
           <div class="log-emotion-head"><div><div class="log-emotion-title">🧠 Emotion <span>* Required · Multiple allowed</span></div><div class="log-emotion-sub">Ek trade mein multiple emotions select kar sakte ho.</div></div>${STATE.logEmotions.length ? `<span class="emotion-selected-badge">✓ ${esc(STATE.logEmotions.join(' · '))}</span>` : '<span class="emotion-selected-badge empty">Select emotion(s)</span>'}</div>
           <div class="emotion-pills">${[['Calm','😌'],['Confident','💪'],['Neutral','😐'],['Anxious','😰'],['FOMO','🔥'],['Revenge / Tilt','😡'],['Overexcited','🚀'],['Tired','😴']].map(([name,emoji]) => `<button type="button" class="emotion-pill ${STATE.logEmotions.includes(name)?'selected':''}" data-action="set-log-emotion" data-value="${esc(name)}">${emoji} ${esc(name)}</button>`).join('')}</div>
-          <div class="custom-emotion-row"><label for="log-custom-emotion">Custom emotion <span>optional</span></label><input type="text" id="log-custom-emotion" value="${esc(STATE.logCustomEmotion)}" placeholder="e.g. bored, impatient..." maxlength="40">${STATE.logCustomEmotion ? `<button type="button" class="use-custom-emotion ${STATE.logEmotions.includes(STATE.logCustomEmotion)?'active':''}" data-action="use-custom-emotion">Use Custom</button>` : ''}</div>
+          <div class="custom-emotion-row"><label for="log-custom-emotion">Custom emotion <span>optional</span></label><input type="text" id="log-custom-emotion" value="${esc(STATE.logCustomEmotion)}" placeholder="e.g. bored, impatient..." maxlength="40"><button type="button" aria-label="Add custom emotion" title="Add custom emotion" class="use-custom-emotion ${STATE.logCustomEmotion && STATE.logEmotions.includes(STATE.logCustomEmotion)?'active':''}" data-action="use-custom-emotion">＋</button></div>
         </div>
 
         <div class="fast-journal-screenshots"><div class="fast-shot-head"><div><strong>📸 Before & After</strong><span>Optional — chart screenshots</span></div></div><div class="before-after-grid">
@@ -890,6 +958,7 @@ function render(){
   else if (STATE.activeTab==='notes') { content.innerHTML = renderNotesTab(); renderNoteImagePreview(); renderNoteBlocksEditor(); }
   else if (STATE.activeTab==='history') content.innerHTML = renderHistoryTab();
   else if (STATE.activeTab==='analysis') content.innerHTML = renderAnalysisTab();
+  else if (STATE.activeTab==='risk') { content.innerHTML = renderRiskCenter(); bindRiskSettings(); updateRiskCalculator(); }
 }
 function renderTabOnly(){ // re-render just the active tab (after in-tab interactions)
   const content = $('#tab-content');
@@ -898,6 +967,7 @@ function renderTabOnly(){ // re-render just the active tab (after in-tab interac
   else if (STATE.activeTab==='notes') { content.innerHTML = renderNotesTab(); renderNoteImagePreview(); renderNoteBlocksEditor(); }
   else if (STATE.activeTab==='history') content.innerHTML = renderHistoryTab();
   else if (STATE.activeTab==='analysis') content.innerHTML = renderAnalysisTab();
+  else if (STATE.activeTab==='risk') { content.innerHTML = renderRiskCenter(); bindRiskSettings(); updateRiskCalculator(); }
   renderTabNav();
 }
 
@@ -941,7 +1011,18 @@ document.addEventListener('click', async (e) => {
     }
   }
   else if (action==='toggle-edit-emotion') { btn.classList.toggle('selected'); }
-  else if (action==='use-custom-emotion') { const draft=captureLogDraft(); const v = $('#log-custom-emotion')?.value.trim(); if (v) { STATE.logEmotions = STATE.logEmotions.filter(x=>x!==STATE.logCustomEmotion); STATE.logEmotions.push(v); STATE.logCustomEmotion = v; renderTabOnly(); restoreLogDraft(draft); } }
+  else if (action==='use-custom-emotion') {
+    const draft=captureLogDraft();
+    const v = $('#log-custom-emotion')?.value.trim();
+    if (v) {
+      STATE.logEmotions = STATE.logEmotions.includes(v) ? STATE.logEmotions : [...STATE.logEmotions, v];
+      STATE.logCustomEmotion = v;
+      renderTabOnly();
+      restoreLogDraft(draft);
+      const input = $('#log-custom-emotion');
+      if (input) input.focus();
+    }
+  }
   else if (action==='set-log-device') { const draft=captureLogDraft(); STATE.logFormDevice = btn.dataset.value; renderTabOnly(); restoreLogDraft(draft); }
   else if (action==='remove-log-image') { STATE.logFormImage=''; STATE.logFormBeforeImage=''; STATE.logFormAfterImage=''; STATE.logFormImages=[]; renderLogImagePreview(); updateLogPreview(); }
   else if (action==='remove-log-image-index') { const i=Number(btn.dataset.index); const arr=currentLogImages(); arr.splice(i,1); STATE.logFormImages=arr; STATE.logFormBeforeImage=arr[0]||''; STATE.logFormAfterImage=arr[1]||''; renderLogImagePreview(); updateLogPreview(); }
@@ -1098,6 +1179,17 @@ window.addEventListener('resize', () => { if ($('#image-modal')?.style.display==
 
 document.addEventListener('focusin', (e) => {
   if (e.target.matches('[data-live-note-text]')) { STATE.noteInsertIndex=Number(e.target.dataset.index); noteSelectionStore(e.target); autoGrowNoteEditor(e.target); }
+});
+
+// Custom emotion is a text field inside the trade form. Enter should add the
+// emotion, not submit/save the entire trade. The explicit ＋ button does the
+// same thing for mouse/touch users.
+document.addEventListener('keydown', (e) => {
+  if (e.target?.id === 'log-custom-emotion' && e.key === 'Enter') {
+    e.preventDefault();
+    e.stopPropagation();
+    document.querySelector('[data-action="use-custom-emotion"]')?.click();
+  }
 });
 
 function noteSelectionStore(el){ if(!el||!el.isContentEditable)return; const sel=window.getSelection(); if(sel&&sel.rangeCount){const r=sel.getRangeAt(0);if(el.contains(r.commonAncestorContainer))el._savedRange=r.cloneRange();} }
