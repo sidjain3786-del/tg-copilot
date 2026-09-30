@@ -19,13 +19,17 @@ export async function onRequestGet({ request, env }) {
   const user = await getUserFromRequest(request, env);
   if (!user) return json({ error: 'Not authenticated' }, { status: 401 });
 
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS user_session_notes (user_id TEXT PRIMARY KEY, notes TEXT NOT NULL DEFAULT '{}', updated_at TEXT NOT NULL, FOREIGN KEY (user_id) REFERENCES users(id))`).run();
   const row = await env.DB.prepare(
     'SELECT trades, notes, custom_strategies FROM user_data WHERE user_id = ?'
   ).bind(user.id).first();
+  const sessionRow = await env.DB.prepare('SELECT notes FROM user_session_notes WHERE user_id = ?').bind(user.id).first();
 
   const trades = row ? JSON.parse(row.trades) : [];
   const notes = row ? JSON.parse(row.notes) : [];
   const customStrategies = cleanStrategies(row?.custom_strategies);
+  let sessionNotes = {};
+  try { sessionNotes = JSON.parse(sessionRow?.notes || '{}'); } catch { sessionNotes = {}; }
 
   // Clean legacy demo/default strategies from D1 as well, while preserving
   // every user-created strategy.
@@ -34,15 +38,16 @@ export async function onRequestGet({ request, env }) {
       .bind(JSON.stringify(customStrategies), new Date().toISOString(), user.id).run();
   }
 
-  return json({ trades, notes, customStrategies });
+  return json({ trades, notes, customStrategies, sessionNotes });
 }
 
 export async function onRequestPost({ request, env }) {
   const user = await getUserFromRequest(request, env);
   if (!user) return json({ error: 'Not authenticated' }, { status: 401 });
 
-  const { trades, notes, customStrategies } = await request.json();
+  const { trades, notes, customStrategies, sessionNotes } = await request.json();
   const updatedAt = new Date().toISOString();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS user_session_notes (user_id TEXT PRIMARY KEY, notes TEXT NOT NULL DEFAULT '{}', updated_at TEXT NOT NULL, FOREIGN KEY (user_id) REFERENCES users(id))`).run();
 
   await env.DB.prepare(`
     INSERT INTO user_data (user_id, trades, notes, custom_strategies, updated_at)
@@ -59,6 +64,8 @@ export async function onRequestPost({ request, env }) {
     JSON.stringify(customStrategies || []),
     updatedAt
   ).run();
+
+  await env.DB.prepare(`INSERT INTO user_session_notes (user_id, notes, updated_at) VALUES (?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET notes = excluded.notes, updated_at = excluded.updated_at`).bind(user.id, JSON.stringify(sessionNotes || {}), updatedAt).run();
 
   return json({ ok: true });
 }
