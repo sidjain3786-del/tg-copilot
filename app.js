@@ -29,7 +29,7 @@ const MINDSET_ARCHETYPES = [
 
 const STATE = {
   user: null,
-  trades: [], notes: [], customStrategies: [],
+  trades: [], notes: [], customStrategies: [], sessionNotes: {},
   activeTab: 'copilot',
   selectedPlaybookId: '',
   checkedRules: {},
@@ -165,6 +165,7 @@ async function loadUserData(){
   STATE.notes = STATE.notes.map(n => ({...n, concept: n.concept || 'General', customConcept: n.customConcept || '', blocks: normalizeNoteBlocks(n)}));
   STATE.trades = (data.trades || []).map(t => ({...t, emotions: tradeEmotions(t), emotion: emotionText(t)}));
   STATE.customStrategies = sanitizeCustomStrategies(data.customStrategies);
+  STATE.sessionNotes = (data.sessionNotes && typeof data.sessionNotes === 'object') ? data.sessionNotes : {};
   if (STATE.customStrategies.length) {
     if (!STATE.selectedPlaybookId || !allStrategies().some(s => s.id === STATE.selectedPlaybookId)) STATE.selectedPlaybookId = allStrategies()[0].id;
     if (!STATE.noteFormStrategy || !allStrategies().some(s => s.name === STATE.noteFormStrategy)) STATE.noteFormStrategy = allStrategies()[0].name;
@@ -175,7 +176,7 @@ async function loadUserData(){
 }
 
 async function saveUserData(){
-  const payload = { trades: STATE.trades, notes: STATE.notes, customStrategies: STATE.customStrategies };
+  const payload = { trades: STATE.trades, notes: STATE.notes, customStrategies: STATE.customStrategies, sessionNotes: STATE.sessionNotes };
   try {
     await api('/api/data', 'POST', payload);
     return true;
@@ -193,7 +194,7 @@ async function autoSaveNote(noteId){
   if (status) status.textContent = 'Saving…';
   STATE.noteAutoSaveBusy = true;
   try {
-    const ok = await api('/api/data', 'POST', { trades: STATE.trades, notes: STATE.notes, customStrategies: STATE.customStrategies });
+    const ok = await api('/api/data', 'POST', { trades: STATE.trades, notes: STATE.notes, customStrategies: STATE.customStrategies, sessionNotes: STATE.sessionNotes });
     if (ok) {
       note.updatedAt = new Date().toISOString();
       if (status) status.textContent = '✓ Saved';
@@ -309,12 +310,47 @@ function dailyAnalysis(date){
   return {trades,wins,losses,pnl,r,avgR:trades.length?r/trades.length:0,timed,untimed:trades.length-timed.length,hourRows,sessions:Object.values(sessions)};
 }
 function defaultAnalysisDate(){ return STATE.analysisDateFilter || STATE.trades.map(tradeLocalDate).filter(Boolean).sort().at(-1) || new Date().toISOString().slice(0,10); }
+function sessionGroupsForTrades(trades){
+  const sessions={};
+  TRADING_SESSIONS.forEach(s=>sessions[s.id]={...s,trades:0,wins:0,losses:0,pnl:0,r:0});
+  trades.filter(t=>tradeLocalHour(t)!==null).forEach(t=>tradeSessionTags(t).forEach(id=>{
+    const g=sessions[id]; if(!g)return;
+    g.trades++; g.pnl+=Number(t.pnl)||0; g.r+=Number(t.rr)||0;
+    if((Number(t.pnl)||0)>0)g.wins++; else if((Number(t.pnl)||0)<0)g.losses++;
+  }));
+  return Object.values(sessions).map(g=>({...g,winRate:g.trades?Math.round(g.wins/g.trades*100):0,avgR:g.trades?(g.r/g.trades).toFixed(2):'—'}));
+}
+function saveSessionView(id){
+  const el=$(`[data-session-note="${id}"]`); if(!el)return;
+  STATE.sessionNotes[id]=String(el.value||'').trim();
+  saveUserData().then(()=>{
+    const status=$(`[data-session-note-status="${id}"]`);
+    if(status){ status.textContent='✓ Saved'; setTimeout(()=>{if(status)status.textContent='';},1800); }
+  });
+}
 function renderDailySessionAnalysis(){
   const date=defaultAnalysisDate(), a=dailyAnalysis(date);
   const best=a.hourRows[0], worst=[...a.hourRows].sort((x,y)=>x.pnl-y.pnl)[0];
+  const allSessions=sessionGroupsForTrades(STATE.trades);
   const hourRows=a.hourRows.map(g=>`<div class="analysis-row"><div><strong>${String(g.hour).padStart(2,'0')}:00</strong><span>${g.trades} trades • ${g.wins}W / ${g.losses}L</span></div><strong class="mono ${g.pnl>=0?'positive':'negative'}">${money(g.pnl)}</strong></div>`).join('');
-  const sessionRows=a.sessions.map(g=>`<div class="session-analysis-card"><div class="session-analysis-head"><div><strong>${g.emoji} ${g.name}</strong><span>${g.utc}</span></div><strong class="mono ${g.pnl>=0?'positive':'negative'}">${money(g.pnl)}</strong></div><div class="session-analysis-stats"><span>${g.trades} trades</span><span>${g.wins}W / ${g.losses}L</span><span>${g.trades?Math.round(g.wins/g.trades*100):0}% win</span><span>Avg R ${g.trades?(g.r/g.trades).toFixed(2):'—'}</span></div></div>`).join('');
-  return `<section class="daily-session-analysis"><div class="history-heading"><div><span class="uppercase-label">TRADING ANALYSIS</span><h2 class="section-title">📅 Daily & Session Analysis</h2><p class="card-sub">Kis din, kis time aur kis global session mein aapka execution kaisa raha.</p></div><input type="date" id="analysis-date-filter" value="${esc(date)}" aria-label="Analysis date"></div><div class="grid-4 analysis-kpis"><div><span class="uppercase-label">Trades</span><strong>${a.trades.length}</strong></div><div><span class="uppercase-label">Winning</span><strong>${a.wins.length}</strong></div><div><span class="uppercase-label">Losing</span><strong>${a.losses.length}</strong></div><div><span class="uppercase-label">Net P&amp;L</span><strong class="${a.pnl>=0?'positive':'negative'}">${money(a.pnl)}</strong></div></div><div class="analysis-highlight-grid"><div class="card analysis-highlight"><span>🟢 Best trading hour</span><strong>${best?String(best.hour).padStart(2,'0')+':00 — '+money(best.pnl):'—'}</strong><small>${best?best.trades+' trades':''}</small></div><div class="card analysis-highlight"><span>🔴 Weakest trading hour</span><strong>${worst?String(worst.hour).padStart(2,'0')+':00 — '+money(worst.pnl):'—'}</strong><small>${worst?worst.trades+' trades':''}</small></div><div class="card analysis-highlight"><span>⏱️ Time captured</span><strong>${a.timed.length}/${a.trades.length}</strong><small>${a.untimed?'Add Trade Time to older trades for session analysis.':'All trades timed.'}</small></div></div><div class="analysis-columns"><div class="card"><div class="dashboard-section-head"><div><span class="uppercase-label">TIME OF DAY</span><h3 class="section-title">Hourly Performance</h3></div></div>${hourRows||'<p class="empty-msg">Is date par timed trades nahi hain.</p>'}</div><div class="card"><div class="dashboard-section-head"><div><span class="uppercase-label">GLOBAL SESSIONS</span><h3 class="section-title">Session Analysis</h3><p class="card-sub">A trade overlap mein ho to dono sessions mein count hoga.</p></div></div><div class="session-analysis-grid">${sessionRows}</div></div></div></section>`;
+  const sessionRows=a.sessions.map(g=>{
+    const all=allSessions.find(x=>x.id===g.id)||g;
+    const note=STATE.sessionNotes[g.id]||'';
+    return `<div class="session-analysis-card ${g.trades?'has-data':''} ${all.pnl<0?'session-negative':''}">
+      <div class="session-analysis-head"><div><strong>${g.emoji} ${g.name}</strong><span>${g.utc}</span></div><strong class="mono ${g.pnl>=0?'positive':'negative'}">${money(g.pnl)}</strong></div>
+      <div class="session-analysis-stats"><span>${g.trades} trades</span><span>${g.wins}W / ${g.losses}L</span><span>${g.winRate}% win</span><span>Avg R ${g.avgR}</span></div>
+      <div class="session-alltime"><span>Journal total</span><strong class="${all.pnl>=0?'positive':'negative'}">${money(all.pnl)}</strong><span>${all.trades} trades • ${all.winRate}% win • Avg R ${all.avgR}</span></div>
+      <div class="session-view-box"><div class="session-view-head"><div><span class="uppercase-label">MY SESSION VIEW</span><strong>✍️ What do I notice?</strong></div><span class="session-note-status" data-session-note-status="${g.id}"></span></div><textarea data-session-note="${g.id}" placeholder="Example: New York mein volatility zyada hoti hai...">${esc(note)}</textarea><button type="button" class="btn-secondary session-save-btn" data-action="save-session-note" data-session="${g.id}">💾 Save My View</button></div>
+    </div>`;
+  }).join('');
+  return `<section class="daily-session-analysis">
+    <div class="analysis-hero-row"><div><span class="uppercase-label">TRADING INTELLIGENCE</span><h2 class="section-title">📊 Daily & Session Analysis</h2><p class="card-sub">Apne data se dekho — kis din, kis hour aur kis global session mein aapka execution kaisa raha.</p></div><div class="analysis-date-control"><label>ANALYSIS DATE</label><input type="date" id="analysis-date-filter" value="${esc(date)}" aria-label="Analysis date"></div></div>
+    <div class="grid-4 analysis-kpis"><div><span class="uppercase-label">TRADES</span><strong>${a.trades.length}</strong><small>Selected day</small></div><div><span class="uppercase-label">WINNING</span><strong>${a.wins.length}</strong><small>${a.trades.length?Math.round(a.wins.length/a.trades.length*100):0}% win rate</small></div><div><span class="uppercase-label">LOSING</span><strong>${a.losses.length}</strong><small>Selected day</small></div><div><span class="uppercase-label">NET P&amp;L</span><strong class="${a.pnl>=0?'positive':'negative'}">${money(a.pnl)}</strong><small>Avg R ${a.avgR.toFixed(2)}</small></div></div>
+    <div class="analysis-highlight-grid"><div class="card analysis-highlight"><span>🟢 Best trading hour</span><strong>${best?String(best.hour).padStart(2,'0')+':00 — '+money(best.pnl):'—'}</strong><small>${best?best.trades+' trades':''}</small></div><div class="card analysis-highlight"><span>🔴 Weakest trading hour</span><strong>${worst?String(worst.hour).padStart(2,'0')+':00 — '+money(worst.pnl):'—'}</strong><small>${worst?worst.trades+' trades':''}</small></div><div class="card analysis-highlight"><span>⏱️ Time captured</span><strong>${a.timed.length}/${a.trades.length}</strong><small>${a.untimed?'Older trades need Trade Date & Time.':'All trades timed.'}</small></div></div>
+    <div class="analysis-section-title"><span class="uppercase-label">SESSION PERFORMANCE</span><h3 class="section-title">🌍 Where does your edge show up?</h3><p class="card-sub">Top numbers selected day ke hain; “Journal total” aapke complete trade history ka data hai. Overlapping sessions mein trade dono sessions mein count hota hai.</p></div>
+    <div class="session-analysis-grid session-analysis-grid-premium">${sessionRows}</div>
+    <div class="analysis-columns analysis-bottom-grid"><div class="card"><div class="dashboard-section-head"><div><span class="uppercase-label">TIME OF DAY</span><h3 class="section-title">Hourly Performance</h3></div></div>${hourRows||'<p class="empty-msg">Is date par timed trades nahi hain.</p>'}</div><div class="card session-coach-card"><span class="uppercase-label">YOUR SESSION PLAYBOOK</span><h3 class="section-title">🧠 Build your own session map</h3><p class="card-sub">Stats ko apne observations ke saath pair karo. Example: “London structured lagta hai”, “New York volatile hai”.</p><div class="session-coach-points"><span>📌 Observe</span><span>📊 Compare</span><span>✍️ Record</span><span>🔁 Review</span></div></div></div>
+  </section>`;
 }
 function renderAnalysisTab(){
   return `<div class="analysis-page">${renderDailySessionAnalysis()}</div>`;
@@ -981,6 +1017,9 @@ document.addEventListener('click', async (e) => {
   else if (action==='select-mindset') { STATE.selectedMindsetId = btn.dataset.id; renderTabOnly(); }
   else if (action==='toggle-rule') { const i=btn.dataset.idx; STATE.checkedRules[i]=!STATE.checkedRules[i]; renderTabOnly(); }
   else if (action==='set-inspection') { STATE.inspectionTab = btn.dataset.value; renderTabOnly(); }
+  else if (action==='save-session-note') {
+    saveSessionView(btn.dataset.session);
+  }
   else if (action==='clear-history-date') {
     STATE.historyDateFilter='';
     renderTabOnly();

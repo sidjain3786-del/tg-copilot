@@ -27,3 +27,11 @@ CREATE TABLE IF NOT EXISTS user_data (
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+
+-- Per-user session observations / personal session playbook.
+CREATE TABLE IF NOT EXISTS user_session_notes (
+  user_id TEXT PRIMARY KEY,
+  notes TEXT NOT NULL DEFAULT '{}',
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
