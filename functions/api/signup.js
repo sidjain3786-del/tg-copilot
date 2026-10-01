@@ -1,12 +1,21 @@
-import { hashPassword, createSession, sessionCookie, json } from '../_lib/auth.js';
+import { hashPassword, createSession, sessionCookie, json, readJson, EMAIL_RE } from '../_lib/auth.js';
 
 export async function onRequestPost({ request, env }) {
   try {
-    const { name, email, password } = await request.json();
-    if (!name || !email || !password || password.length < 6) {
+    const body = await readJson(request);
+    if (!body) return json({ error: 'Invalid request.' }, { status: 400 });
+    const name = String(body.name || '').trim().slice(0, 60);
+    const cleanEmail = String(body.email || '').trim().toLowerCase();
+    const password = String(body.password || '');
+    if (!name || !cleanEmail || password.length < 6) {
       return json({ error: 'Please fill name, email, and a password of at least 6 characters.' }, { status: 400 });
     }
-    const cleanEmail = String(email).trim().toLowerCase();
+    if (!EMAIL_RE.test(cleanEmail) || cleanEmail.length > 254) {
+      return json({ error: 'Please enter a valid email address.' }, { status: 400 });
+    }
+    if (password.length > 200) {
+      return json({ error: 'Password is too long (max 200 characters).' }, { status: 400 });
+    }
     const existing = await env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(cleanEmail).first();
     if (existing) {
       return json({ error: 'An account with this email already exists.' }, { status: 400 });
@@ -26,6 +35,7 @@ export async function onRequestPost({ request, env }) {
     const sessionId = await createSession(env, id);
     return json({ id, email: cleanEmail, name }, { headers: { 'Set-Cookie': sessionCookie(sessionId) } });
   } catch (e) {
-    return json({ error: e.message }, { status: 500 });
+    console.error('signup error', e);
+    return json({ error: 'Sign up failed. Please try again.' }, { status: 500 });
   }
 }
