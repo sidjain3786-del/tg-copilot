@@ -194,47 +194,61 @@ async function loadUserData(){
    which hits D1's 2 MB row limit after ~6-12 charts and then EVERY save fails.
    Now any data:image/... value is uploaded to R2 (/api/upload) before saving,
    and only the short /api/img/... URL is kept in the journal. */
-const IMAGE_URL_CACHE = new Map();
+const IMAGE_URL_CACHE = new Map(); // dataUrl -> Promise<url>
 let IMAGE_STORE_AVAILABLE = true;
 function isDataImage(v){ return typeof v==='string' && v.startsWith('data:image/'); }
-async function uploadImage(dataUrl){
-  if (IMAGE_URL_CACHE.has(dataUrl)) return IMAGE_URL_CACHE.get(dataUrl);
+async function uploadImageNow(dataUrl){
   const res = await fetch('/api/upload', { method:'POST', headers:{'Content-Type':'application/json'}, credentials:'same-origin', body: JSON.stringify({ dataUrl }) });
   if (res.status === 501) { IMAGE_STORE_AVAILABLE = false; return dataUrl; }
   const data = await res.json().catch(()=>({}));
   if (!res.ok || !data.url) throw new Error(data.error || 'Image upload failed.');
-  IMAGE_URL_CACHE.set(dataUrl, data.url);
   return data.url;
 }
+function uploadImage(dataUrl){
+  if (!IMAGE_URL_CACHE.has(dataUrl)) {
+    const p = uploadImageNow(dataUrl);
+    IMAGE_URL_CACHE.set(dataUrl, p);
+    p.catch(() => IMAGE_URL_CACHE.delete(dataUrl)); // allow retry after a failure
+  }
+  return IMAGE_URL_CACHE.get(dataUrl);
+}
+// Start uploading as soon as an image is picked/drawn, so Save doesn't wait for it.
+function preuploadImage(dataUrl){ if (IMAGE_STORE_AVAILABLE && isDataImage(dataUrl)) uploadImage(dataUrl).catch(()=>{}); return dataUrl; }
 async function offloadImagesIn(value){
   if (!IMAGE_STORE_AVAILABLE) return;
-  const stack=[value];
+  const slots=[]; const stack=[value];
   while (stack.length) {
     const node=stack.pop();
     if (!node || typeof node!=='object') continue;
     for (const key of Object.keys(node)) {
       const v=node[key];
-      if (isDataImage(v)) { node[key] = await uploadImage(v); if (!IMAGE_STORE_AVAILABLE) return; }
+      if (isDataImage(v)) slots.push([node,key,v]);
       else if (v && typeof v==='object') stack.push(v);
     }
   }
+  if (!slots.length) return;
+  const urls = await Promise.all(slots.map(([,,v]) => uploadImage(v))); // parallel, deduped
+  slots.forEach(([node,key,v],i) => { if (node[key] === v) node[key] = urls[i]; });
 }
 let SAVE_CHAIN = Promise.resolve();
-async function persistAll(){
+const ALL_PARTS = ['trades','notes','customStrategies','sessionNotes'];
+async function persistAll(parts = ALL_PARTS){
   // Serialise saves so two quick saves can't overwrite each other out of order.
+  // Only the requested parts are sent — a note save no longer uploads the whole trade journal.
   const run = async () => {
-    await offloadImagesIn(STATE.trades);
-    await offloadImagesIn(STATE.notes);
-    const payload = { trades: STATE.trades, notes: STATE.notes, customStrategies: STATE.customStrategies, sessionNotes: STATE.sessionNotes };
+    if (parts.includes('trades')) await offloadImagesIn(STATE.trades);
+    if (parts.includes('notes')) await offloadImagesIn(STATE.notes);
+    const payload = {};
+    parts.forEach(k => { payload[k] = STATE[k]; });
     return api('/api/data', 'POST', payload);
   };
   const p = SAVE_CHAIN.then(run, run);
   SAVE_CHAIN = p.catch(()=>{});
   return p;
 }
-async function saveUserData(what='Trade'){
+async function saveUserData(what='Trade', parts = ALL_PARTS){
   try {
-    await persistAll();
+    await persistAll(parts);
     return true;
   } catch (e) {
     console.error('Save failed:', e);
@@ -251,7 +265,7 @@ async function autoSaveNote(noteId, attempt=1){
   STATE.noteAutoSaveBusy = true;
   try {
     note.updatedAt = new Date().toISOString();
-    await persistAll();
+    await persistAll(['notes']);
     const st = document.querySelector('[data-note-save-status]');
     if (st) st.textContent = '✓ Saved';
   } catch (e) {
@@ -297,7 +311,7 @@ function readAndCompressImage(file){
         canvas.width = w; canvas.height = h;
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, w, h);
-        resolve(canvas.toDataURL('image/jpeg', 0.68));
+        resolve(preuploadImage(canvas.toDataURL('image/jpeg', 0.68)));
       };
       img.src = reader.result;
     };
@@ -391,7 +405,7 @@ function saveSessionView(id){
   STATE.sessionNotes[id]=String(el.value||'').trim();
   const status=$(`[data-session-note-status="${id}"]`);
   if(status) status.textContent='Saving…';
-  saveUserData('Session note').then(ok=>{
+  saveUserData('Session note', ['sessionNotes']).then(ok=>{
     const st=$(`[data-session-note-status="${id}"]`);
     if(!st) return;
     st.textContent = ok ? '✓ Saved' : '⚠ Not saved — try again';
@@ -1194,8 +1208,8 @@ document.addEventListener('click', async (e) => {
     STATE.customStrategies.push(strategy);
     STATE.noteFormStrategy = name;
     STATE.selectedPlaybookId = strategy.id;
-    await saveUserData();
     renderTabOnly();
+    saveUserData('Strategy', ['customStrategies']);
   }
   else if (action==='add-custom-strategy') {
     const val = $('#note-custom-strategy-input').value.trim();
@@ -1204,8 +1218,8 @@ document.addEventListener('click', async (e) => {
     if (!STATE.customStrategies.some(s=>normalizeCustomStrategy(s).name===val)) STATE.customStrategies.push(strategy);
     STATE.noteFormStrategy = val;
     STATE.selectedPlaybookId = strategy.id;
-    await saveUserData();
     renderTabOnly();
+    saveUserData('Strategy', ['customStrategies']);
   }
   else if (action==='create-note') {
     const id = `n-${Date.now()}`;
@@ -1213,9 +1227,9 @@ document.addEventListener('click', async (e) => {
     STATE.notes.unshift(note);
     STATE.activeNoteId=id;
     STATE.noteConceptFilter='ALL';
-    await saveUserData();
-    renderTabOnly();
+    renderTabOnly();                       // show the new note immediately
     setTimeout(()=>document.querySelector(`[data-note-editor-title=\"${id}\"]`)?.focus(),30);
+    autoSaveNote(id);                      // save in background (shows Saving… / ✓ Saved, retries on failure)
   }
   else if (action==='toggle-note-plus') {
     const menu = $('#note-plus-menu');
@@ -1282,8 +1296,8 @@ document.addEventListener('click', async (e) => {
   else if (action==='delete-note') {
     STATE.notes = STATE.notes.filter(n => n.id !== btn.dataset.id);
     if (STATE.activeNoteId === btn.dataset.id) STATE.activeNoteId = STATE.notes[0]?.id || null;
-    saveUserData();
     renderTabOnly();
+    saveUserData('Note', ['notes']);
   }
 });
 
@@ -1513,7 +1527,11 @@ function clearAnnotator(){
 }
 function compositeAnnotatedImage(){
   const img=$('#modal-image'); if(!img||!img.naturalWidth)return Promise.resolve('');
-  const out=document.createElement('canvas'); out.width=img.naturalWidth; out.height=img.naturalHeight; const ctx=out.getContext('2d'); ctx.drawImage(img,0,0,out.width,out.height); (STATE.annotator.strokes||[]).forEach(st=>drawSmoothStroke(ctx,st)); return Promise.resolve(out.toDataURL('image/webp',.9));
+  const max=1400, scale=Math.min(1, max/Math.max(img.naturalWidth,img.naturalHeight));
+  const out=document.createElement('canvas'); out.width=Math.max(1,Math.round(img.naturalWidth*scale)); out.height=Math.max(1,Math.round(img.naturalHeight*scale));
+  const ctx=out.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,out.width,out.height);
+  ctx.save(); ctx.scale(scale,scale); ctx.drawImage(img,0,0,img.naturalWidth,img.naturalHeight); (STATE.annotator.strokes||[]).forEach(st=>drawSmoothStroke(ctx,st)); ctx.restore();
+  return Promise.resolve(preuploadImage(out.toDataURL('image/jpeg',.8)));
 }
 async function saveAnnotatedImage(){
   const img=$('#modal-image'); if(!img||!img.naturalWidth)return;
@@ -1534,7 +1552,7 @@ async function deleteTrade(id){
   const label = `${trade.symbol || 'this trade'}${trade.pnl !== undefined ? ` (${money(Number(trade.pnl)||0)})` : ''}`;
   if (!confirm(`Delete ${label}?\n\nThis trade will be removed from your journal.`)) return;
   STATE.trades.splice(index, 1);
-  const saved = await saveUserData();
+  const saved = await saveUserData('Trade', ['trades']);
   if (!saved) {
     STATE.trades.splice(index, 0, trade);
     return;
@@ -1557,7 +1575,7 @@ async function updateExistingTrade(id){
   const rr=(sl&&entry&&exit&&entry!==sl)?Math.round(((type==='LONG'?exit-entry:entry-exit)/Math.abs(entry-sl))*100)/100:(t.rr||0);
   const snapshot = JSON.parse(JSON.stringify(t));
   Object.assign(t,{symbol:symbol.toUpperCase(),type,emotions,quantity:Number.isFinite(qty)?qty:t.quantity,entryPrice:Number.isFinite(entry)?entry:null,exitPrice:Number.isFinite(exit)?exit:null,stopLoss:Number.isFinite(sl)?sl:null,tradeDateTime:$('#edit-trade-datetime')?.value || t.tradeDateTime || t.date,emotion,exitReason:$('#edit-exit-reason')?.value.trim()||'',images,beforeImage:images[0]||null,afterImage:images[1]||null,image:images[0]||null,pnl,rr});
-  const saved = await saveUserData();
+  const saved = await saveUserData('Trade', ['trades']);
   if (!saved) { Object.assign(t, snapshot); return; }
   STATE.editingTradeId=null; render();
 }
@@ -1589,7 +1607,7 @@ document.addEventListener('submit', async (e) => {
       date: new Date().toISOString(), tradeDateTime: $('#log-trade-datetime')?.value || new Date().toISOString(), pnl: p.pnl, rr: p.rr, xpEarned: p.xp
     };
     STATE.trades.unshift(newTrade);
-    const saved = await saveUserData();
+    const saved = await saveUserData('Trade', ['trades']);
     if (!saved) { STATE.trades = STATE.trades.filter(t => t.id !== newTrade.id); return; }
     STATE.logFormImage = ''; STATE.logFormBeforeImage = ''; STATE.logFormAfterImage = ''; STATE.logFormImages = []; STATE.logEmotions = []; STATE.logCustomEmotion = '';
     STATE.activeTab = 'history';
@@ -1615,8 +1633,8 @@ document.addEventListener('submit', async (e) => {
     }
     STATE.editingNoteId = null;
     STATE.noteFormImage = ''; STATE.noteFormBlocks = []; STATE.noteFormConcept = 'General'; STATE.noteFormCustomConcept = '';
-    await saveUserData('Note');
     renderTabOnly();
+    saveUserData('Note', ['notes']);
   }
 });
 

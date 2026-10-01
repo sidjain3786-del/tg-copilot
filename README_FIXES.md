@@ -26,3 +26,10 @@ but large journals will hit D1's 2 MB row limit — the server now returns a cle
 - Signup validates email and name length; login rate-limited (8 failures / 15 min per email); constant-time password compare; expired sessions cleaned up; schema check runs once per worker instead of every request.
 - Note autosave really retries (2 retries); error alerts name what failed (Trade / Note / Session note); saves are queued so they can't overwrite each other out of order.
 - Service worker cache bumped to v2 so users get the new app.js.
+
+## Update 2 — Notes speed
+- **＋ New Note opens instantly** (was waiting for the full journal to save first; ~1.5 s+ on slow networks, longer with big journals). It now shows immediately and saves in the background with "Saving… / ✓ Saved" and automatic retry.
+- Saves send only what changed: a note save sends only notes, a trade save only trades, a session note only session notes (backend already supports partial updates).
+- Screenshots start uploading to R2 the moment they're picked or drawn, and multiple images upload in parallel.
+- Drawn/annotated images are now max 1400px JPEG (were full-size WEBP), roughly 3–5× smaller.
+- Adding a strategy, saving a note form and deleting a note no longer freeze the screen while saving.
