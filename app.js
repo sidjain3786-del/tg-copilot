@@ -42,8 +42,18 @@ const STATE = {
   annotator: {src:'', baseSrc:'', noteId:null, blockIndex:null, drawing:false, mode:'pen', color:'#ef4444', size:4, pressure:false, strokes:[], history:[], redo:[], activeStroke:null},
   noteAutoSaveTimer: null, noteAutoSaveBusy: false, noteInsertIndex: null,
   historyStrategyFilter: 'ALL', historyMistakeFilter: 'ALL', historyDateFilter: '', analysisDateFilter: '', historyView: localStorage.getItem('tc_history_view') || 'grid',
-  riskSettings: JSON.parse(localStorage.getItem('tc_risk_settings') || '{"account":100000,"riskPct":1,"dailyLossPct":2,"weeklyLossPct":5,"maxTrades":5,"maxLossStreak":3,"minRR":2}')
+  riskSettings: loadRiskSettings()
 };
+function loadRiskSettings(){
+  const defaults={account:100000,riskPct:1,dailyLossPct:2,weeklyLossPct:5,maxTrades:5,maxLossStreak:3,minRR:2,currency:'₹'};
+  try {
+    const saved=JSON.parse(localStorage.getItem('tc_risk_settings')||'{}');
+    return (saved && typeof saved==='object') ? {...defaults, ...saved} : defaults;
+  } catch (_) {
+    try { localStorage.removeItem('tc_risk_settings'); } catch (_) {}
+    return defaults;
+  }
+}
 
 /* ---------------- utils ---------------- */
 const $ = (sel, root=document) => root.querySelector(sel);
@@ -51,7 +61,10 @@ const $$ = (sel, root=document) => [...root.querySelectorAll(sel)];
 function esc(str){
   return String(str ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
-function money(n){ return n>=0 ? `+$${n}` : `-$${Math.abs(n)}`; }
+function currencySymbol(){ return (STATE?.riskSettings?.currency || '₹'); }
+function fmtAmount(n){ const v=Math.round(Math.abs(Number(n)||0)*100)/100; return v.toLocaleString('en-IN',{maximumFractionDigits:2}); }
+function money(n){ n=Number(n)||0; return n>=0 ? `+${currencySymbol()}${fmtAmount(n)}` : `-${currencySymbol()}${fmtAmount(n)}`; }
+function localDateKey(d=new Date()){ const p=x=>String(x).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; }
 function findMindset(id){ return MINDSET_ARCHETYPES.find(m=>m.id===id) || MINDSET_ARCHETYPES[0]; }
 function normalizeCustomStrategy(s){
   if (typeof s === 'string') return { id:`custom-${s.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')}`, name:s, entryCriteria:'', exitCriteria:'', rules:[] };
@@ -152,8 +165,8 @@ $('#auth-form').addEventListener('submit', async (e) => {
 });
 
 $('#logout-btn').addEventListener('click', async () => {
-  await api('/api/logout', 'POST');
-  STATE.user = null; STATE.trades = []; STATE.notes = []; STATE.customStrategies = [];
+  try { await api('/api/logout', 'POST'); } catch (e) { console.warn('Logout request failed', e); }
+  STATE.user = null; STATE.trades = []; STATE.notes = []; STATE.customStrategies = []; STATE.sessionNotes = {};
   setAuthMode('login');
   showAuth();
 });
@@ -166,6 +179,7 @@ async function loadUserData(){
   STATE.trades = (data.trades || []).map(t => ({...t, emotions: tradeEmotions(t), emotion: emotionText(t)}));
   STATE.customStrategies = sanitizeCustomStrategies(data.customStrategies);
   STATE.sessionNotes = (data.sessionNotes && typeof data.sessionNotes === 'object') ? data.sessionNotes : {};
+  if (Array.isArray(data.warnings) && data.warnings.length) setTimeout(()=>alert('⚠️ ' + data.warnings.join(' ') + ' Kuch purana data load nahi hua — naya trade save karne se pehle support se baat karo.'), 300);
   if (STATE.customStrategies.length) {
     if (!STATE.selectedPlaybookId || !allStrategies().some(s => s.id === STATE.selectedPlaybookId)) STATE.selectedPlaybookId = allStrategies()[0].id;
     if (!STATE.noteFormStrategy || !allStrategies().some(s => s.name === STATE.noteFormStrategy)) STATE.noteFormStrategy = allStrategies()[0].name;
@@ -175,33 +189,79 @@ async function loadUserData(){
   }
 }
 
-async function saveUserData(){
-  const payload = { trades: STATE.trades, notes: STATE.notes, customStrategies: STATE.customStrategies, sessionNotes: STATE.sessionNotes };
+/* ---------- image storage ----------
+   Screenshots used to be stored as base64 inside the single user_data row,
+   which hits D1's 2 MB row limit after ~6-12 charts and then EVERY save fails.
+   Now any data:image/... value is uploaded to R2 (/api/upload) before saving,
+   and only the short /api/img/... URL is kept in the journal. */
+const IMAGE_URL_CACHE = new Map();
+let IMAGE_STORE_AVAILABLE = true;
+function isDataImage(v){ return typeof v==='string' && v.startsWith('data:image/'); }
+async function uploadImage(dataUrl){
+  if (IMAGE_URL_CACHE.has(dataUrl)) return IMAGE_URL_CACHE.get(dataUrl);
+  const res = await fetch('/api/upload', { method:'POST', headers:{'Content-Type':'application/json'}, credentials:'same-origin', body: JSON.stringify({ dataUrl }) });
+  if (res.status === 501) { IMAGE_STORE_AVAILABLE = false; return dataUrl; }
+  const data = await res.json().catch(()=>({}));
+  if (!res.ok || !data.url) throw new Error(data.error || 'Image upload failed.');
+  IMAGE_URL_CACHE.set(dataUrl, data.url);
+  return data.url;
+}
+async function offloadImagesIn(value){
+  if (!IMAGE_STORE_AVAILABLE) return;
+  const stack=[value];
+  while (stack.length) {
+    const node=stack.pop();
+    if (!node || typeof node!=='object') continue;
+    for (const key of Object.keys(node)) {
+      const v=node[key];
+      if (isDataImage(v)) { node[key] = await uploadImage(v); if (!IMAGE_STORE_AVAILABLE) return; }
+      else if (v && typeof v==='object') stack.push(v);
+    }
+  }
+}
+let SAVE_CHAIN = Promise.resolve();
+async function persistAll(){
+  // Serialise saves so two quick saves can't overwrite each other out of order.
+  const run = async () => {
+    await offloadImagesIn(STATE.trades);
+    await offloadImagesIn(STATE.notes);
+    const payload = { trades: STATE.trades, notes: STATE.notes, customStrategies: STATE.customStrategies, sessionNotes: STATE.sessionNotes };
+    return api('/api/data', 'POST', payload);
+  };
+  const p = SAVE_CHAIN.then(run, run);
+  SAVE_CHAIN = p.catch(()=>{});
+  return p;
+}
+async function saveUserData(what='Trade'){
   try {
-    await api('/api/data', 'POST', payload);
+    await persistAll();
     return true;
   } catch (e) {
     console.error('Save failed:', e);
-    alert(`Trade save nahi hua. ${e.message || 'Please try again.'}`);
+    alert(`${what} save nahi hua. ${e.message || 'Please try again.'}`);
     return false;
   }
 }
 
-async function autoSaveNote(noteId){
+async function autoSaveNote(noteId, attempt=1){
   const note = STATE.notes.find(n => n.id === noteId);
   const status = document.querySelector('[data-note-save-status]');
   if (!note) return;
   if (status) status.textContent = 'Saving…';
   STATE.noteAutoSaveBusy = true;
   try {
-    const ok = await api('/api/data', 'POST', { trades: STATE.trades, notes: STATE.notes, customStrategies: STATE.customStrategies, sessionNotes: STATE.sessionNotes });
-    if (ok) {
-      note.updatedAt = new Date().toISOString();
-      if (status) status.textContent = '✓ Saved';
-    }
+    note.updatedAt = new Date().toISOString();
+    await persistAll();
+    const st = document.querySelector('[data-note-save-status]');
+    if (st) st.textContent = '✓ Saved';
   } catch (e) {
     console.error('Note auto-save failed:', e);
-    if (status) status.textContent = '⚠ Save failed — retrying…';
+    const st = document.querySelector('[data-note-save-status]');
+    if (attempt < 3) {
+      if (st) st.textContent = `⚠ Save failed — retrying (${attempt}/2)…`;
+      clearTimeout(STATE.noteAutoSaveTimer);
+      STATE.noteAutoSaveTimer = setTimeout(() => autoSaveNote(noteId, attempt+1), 2000*attempt);
+    } else if (st) st.textContent = `⚠ Save failed — ${e.message || 'check connection'}`;
   } finally {
     STATE.noteAutoSaveBusy = false;
   }
@@ -279,8 +339,13 @@ function tradeLocalDate(t){
   const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
   return `${y}-${m}-${day}`;
 }
+// A trade only has a real time if tradeDateTime (or a full timestamp) was logged.
+// Date-only values like "2026-09-29" must not be treated as 05:30 IST / 00:00 UTC.
+function hasTradeTime(t){ const raw=String(tradeDateTimeRaw(t)||''); return !!raw && !/^\d{4}-\d{2}-\d{2}$/.test(raw.trim()); }
+function tradeSortTime(t){ const d=new Date(tradeDateTimeRaw(t)); return Number.isNaN(d.getTime()) ? 0 : d.getTime(); }
 function tradeLocalHour(t){
-  const raw=tradeDateTimeRaw(t); if(!raw) return null;
+  if(!hasTradeTime(t)) return null;
+  const raw=tradeDateTimeRaw(t);
   const d=new Date(raw); if(Number.isNaN(d.getTime())) return null;
   return d.getHours();
 }
@@ -292,7 +357,8 @@ const TRADING_SESSIONS = [
 ];
 function hourInSession(hour, session){ return session.start < session.end ? (hour >= session.start && hour < session.end) : (hour >= session.start || hour < session.end); }
 function tradeSessionTags(t){
-  const raw=tradeDateTimeRaw(t); if(!raw) return [];
+  if(!hasTradeTime(t)) return [];
+  const raw=tradeDateTimeRaw(t);
   const d=new Date(raw); if(Number.isNaN(d.getTime())) return [];
   const utcHour=d.getUTCHours() + d.getUTCMinutes()/60;
   return TRADING_SESSIONS.filter(s=>hourInSession(utcHour,s)).map(s=>s.id);
@@ -309,7 +375,7 @@ function dailyAnalysis(date){
   timed.forEach(t=>tradeSessionTags(t).forEach(id=>{const g=sessions[id]; if(!g)return; g.trades++; g.pnl+=Number(t.pnl)||0; g.r+=Number(t.rr)||0; if((Number(t.pnl)||0)>0)g.wins++; else if((Number(t.pnl)||0)<0)g.losses++;}));
   return {trades,wins,losses,pnl,r,avgR:trades.length?r/trades.length:0,timed,untimed:trades.length-timed.length,hourRows,sessions:Object.values(sessions)};
 }
-function defaultAnalysisDate(){ return STATE.analysisDateFilter || STATE.trades.map(tradeLocalDate).filter(Boolean).sort().at(-1) || new Date().toISOString().slice(0,10); }
+function defaultAnalysisDate(){ return STATE.analysisDateFilter || STATE.trades.map(tradeLocalDate).filter(Boolean).sort().at(-1) || localDateKey(); }
 function sessionGroupsForTrades(trades){
   const sessions={};
   TRADING_SESSIONS.forEach(s=>sessions[s.id]={...s,trades:0,wins:0,losses:0,pnl:0,r:0});
@@ -323,9 +389,13 @@ function sessionGroupsForTrades(trades){
 function saveSessionView(id){
   const el=$(`[data-session-note="${id}"]`); if(!el)return;
   STATE.sessionNotes[id]=String(el.value||'').trim();
-  saveUserData().then(()=>{
-    const status=$(`[data-session-note-status="${id}"]`);
-    if(status){ status.textContent='✓ Saved'; setTimeout(()=>{if(status)status.textContent='';},1800); }
+  const status=$(`[data-session-note-status="${id}"]`);
+  if(status) status.textContent='Saving…';
+  saveUserData('Session note').then(ok=>{
+    const st=$(`[data-session-note-status="${id}"]`);
+    if(!st) return;
+    st.textContent = ok ? '✓ Saved' : '⚠ Not saved — try again';
+    if(ok) setTimeout(()=>{ if(st) st.textContent=''; },1800);
   });
 }
 function renderDailySessionAnalysis(){
@@ -333,7 +403,7 @@ function renderDailySessionAnalysis(){
   const best=a.hourRows[0], worst=[...a.hourRows].sort((x,y)=>x.pnl-y.pnl)[0];
   const allSessions=sessionGroupsForTrades(STATE.trades);
   const hourRows=a.hourRows.map(g=>`<div class="analysis-row"><div><strong>${String(g.hour).padStart(2,'0')}:00</strong><span>${g.trades} trades • ${g.wins}W / ${g.losses}L</span></div><strong class="mono ${g.pnl>=0?'positive':'negative'}">${money(g.pnl)}</strong></div>`).join('');
-  const sessionRows=a.sessions.map(g=>{
+  const sessionRows=sessionGroupsForTrades(a.trades).map(g=>{
     const all=allSessions.find(x=>x.id===g.id)||g;
     const note=STATE.sessionNotes[g.id]||'';
     return `<div class="session-analysis-card ${g.trades?'has-data':''} ${all.pnl<0?'session-negative':''}">
@@ -356,12 +426,12 @@ function renderAnalysisTab(){
   return `<div class="analysis-page">${renderDailySessionAnalysis()}</div>`;
 }
 /* ---------------- Risk Center ---------------- */
-function riskSaveSettings(){ localStorage.setItem('tc_risk_settings', JSON.stringify(STATE.riskSettings)); }
+function riskSaveSettings(){ try { localStorage.setItem('tc_risk_settings', JSON.stringify(STATE.riskSettings)); } catch (_) {} }
 function riskNum(id, fallback=0){ const v=Number($(id)?.value); return Number.isFinite(v)?v:fallback; }
 function currentRiskStats(){
-  const today=new Date().toISOString().slice(0,10);
+  const today=localDateKey(new Date());
   const weekStart=new Date(); weekStart.setHours(0,0,0,0); weekStart.setDate(weekStart.getDate()-((weekStart.getDay()+6)%7));
-  const weekKey=weekStart.toISOString().slice(0,10);
+  const weekKey=localDateKey(weekStart);
   const trades=STATE.trades||[];
   const localDate=t=>tradeLocalDate(t);
   const todayTrades=trades.filter(t=>localDate(t)===today);
@@ -371,7 +441,7 @@ function currentRiskStats(){
   const dailyLimit=Number(STATE.riskSettings.account||0)*Number(STATE.riskSettings.dailyLossPct||0)/100;
   const weeklyLimit=Number(STATE.riskSettings.account||0)*Number(STATE.riskSettings.weeklyLossPct||0)/100;
   let streak=0;
-  for(const t of [...trades].sort((a,b)=>new Date(b.createdAt||b.date||0)-new Date(a.createdAt||a.date||0))){ const x=Number(t.pnl)||0; if(x<0) streak++; else if(x>0) break; }
+  for(const t of [...trades].sort((a,b)=>tradeSortTime(b)-tradeSortTime(a))){ const x=Number(t.pnl)||0; if(x<0) streak++; else if(x>0) break; }
   return {todayTrades,weekTrades,todayPnl,weekPnl,dailyLimit,weeklyLimit,streak};
 }
 function renderRiskCenter(){
@@ -389,11 +459,11 @@ function renderRiskCenter(){
 
     <div class="risk-main-grid">
       <section class="card risk-calculator-card"><div class="risk-section-head"><div><span class="uppercase-label">POSITION SIZING</span><h3 class="section-title">🎯 Can I Take This Trade?</h3><p class="card-sub">Entry, stop aur target se size + risk automatically calculate hoga.</p></div><span class="risk-live">LIVE</span></div>
-        <div class="risk-input-grid"><div><label>Account Balance</label><input type="number" id="risk-account-calc" value="${r.account}" min="0" step="any"></div><div><label>Risk %</label><input type="number" id="risk-pct-calc" value="${r.riskPct}" min="0.01" max="100" step="0.1"></div><div><label>Entry</label><input type="number" id="risk-entry" placeholder="e.g. 2500" step="any"></div><div><label>Stop Loss</label><input type="number" id="risk-sl" placeholder="e.g. 2480" step="any"></div><div><label>Target</label><input type="number" id="risk-target" placeholder="e.g. 2540" step="any"></div><div><label>Point/Unit Value</label><input type="number" id="risk-point-value" value="1" min="0.000001" step="any"><small>₹ per 1 price move</small></div></div>
+        <div class="risk-input-grid"><div><label>Account Balance</label><input type="number" id="risk-account-calc" value="${r.account}" min="0" step="any"></div><div><label>Risk %</label><input type="number" id="risk-pct-calc" value="${r.riskPct}" min="0.01" max="100" step="0.1"></div><div><label>Entry</label><input type="number" id="risk-entry" placeholder="e.g. 2500" step="any"></div><div><label>Stop Loss</label><input type="number" id="risk-sl" placeholder="e.g. 2480" step="any"></div><div><label>Target</label><input type="number" id="risk-target" placeholder="e.g. 2540" step="any"></div><div><label>Point/Unit Value</label><input type="number" id="risk-point-value" value="1" min="0.000001" step="any"><small>${esc(currencySymbol())} per 1 price move</small></div></div>
         <div class="risk-result-grid"><div><span>Max Risk</span><strong id="risk-max-loss">—</strong></div><div><span>Risk / Unit</span><strong id="risk-per-unit">—</strong></div><div><span>Position Size</span><strong id="risk-position-size">—</strong></div><div><span>Potential Profit</span><strong id="risk-profit">—</strong></div><div><span>R : R</span><strong id="risk-rr">—</strong></div></div><div id="risk-calc-message" class="risk-calc-message">Entry + SL + Target bharo — calculator ready hai.</div></section>
 
       <section class="card risk-rules-card"><div class="risk-section-head"><div><span class="uppercase-label">YOUR RULES</span><h3 class="section-title">⚙️ Money Management</h3><p class="card-sub">Ye limits device par automatically remember hongi.</p></div></div>
-        <div class="risk-settings-grid"><label>Default Account <input type="number" id="risk-setting-account" value="${r.account}" min="0" step="any"></label><label>Risk / Trade % <input type="number" id="risk-setting-risk" value="${r.riskPct}" min="0.01" step="0.1"></label><label>Max Daily Loss % <input type="number" id="risk-setting-daily" value="${r.dailyLossPct}" min="0.1" step="0.1"></label><label>Max Weekly Loss % <input type="number" id="risk-setting-weekly" value="${r.weeklyLossPct}" min="0.1" step="0.1"></label><label>Max Trades / Day <input type="number" id="risk-setting-trades" value="${r.maxTrades}" min="1" step="1"></label><label>Max Loss Streak <input type="number" id="risk-setting-streak" value="${r.maxLossStreak}" min="1" step="1"></label><label>Minimum R:R <input type="number" id="risk-setting-rr" value="${r.minRR}" min="0.1" step="0.1"></label></div>
+        <div class="risk-settings-grid"><label>Default Account <input type="number" id="risk-setting-account" value="${r.account}" min="0" step="any"></label><label>Risk / Trade % <input type="number" id="risk-setting-risk" value="${r.riskPct}" min="0.01" step="0.1"></label><label>Max Daily Loss % <input type="number" id="risk-setting-daily" value="${r.dailyLossPct}" min="0.1" step="0.1"></label><label>Max Weekly Loss % <input type="number" id="risk-setting-weekly" value="${r.weeklyLossPct}" min="0.1" step="0.1"></label><label>Max Trades / Day <input type="number" id="risk-setting-trades" value="${r.maxTrades}" min="1" step="1"></label><label>Max Loss Streak <input type="number" id="risk-setting-streak" value="${r.maxLossStreak}" min="1" step="1"></label><label>Minimum R:R <input type="number" id="risk-setting-rr" value="${r.minRR}" min="0.1" step="0.1"></label><label>Currency <select id="risk-setting-currency">${['₹','$','€','£','¥'].map(c=>`<option value="${c}" ${currencySymbol()===c?'selected':''}>${c}</option>`).join('')}</select></label></div>
         <div class="risk-rule-summary"><div>Risk / trade <strong>${money(Number(r.account)*Number(r.riskPct)/100)}</strong></div><div>Daily stop <strong>${money(-Number(r.account)*Number(r.dailyLossPct)/100)}</strong></div><div>Weekly stop <strong>${money(-Number(r.account)*Number(r.weeklyLossPct)/100)}</strong></div></div>
       </section>
     </div>
@@ -401,8 +471,8 @@ function renderRiskCenter(){
     <section class="card risk-checklist-card"><div class="risk-section-head"><div><span class="uppercase-label">PRE-TRADE GATE</span><h3 class="section-title">🚦 Before You Click Buy / Sell</h3><p class="card-sub">Aapke current rules ke against quick safety check.</p></div></div><div class="risk-gate-grid">
       <div class="risk-gate-item ${s.todayTrades.length>=Number(r.maxTrades)?'bad':'good'}"><span>${s.todayTrades.length>=Number(r.maxTrades)?'🔴':'🟢'}</span><div><strong>Daily trade count</strong><small>${s.todayTrades.length} / ${r.maxTrades} used</small></div></div>
       <div class="risk-gate-item ${s.streak>=Number(r.maxLossStreak)?'bad':'good'}"><span>${s.streak>=Number(r.maxLossStreak)?'🔴':'🟢'}</span><div><strong>Loss streak</strong><small>${s.streak} / ${r.maxLossStreak}</small></div></div>
-      <div class="risk-gate-item ${riskUsed>=s.dailyLimit?'bad':'good'}"><span>${riskUsed>=s.dailyLimit?'🔴':'🟢'}</span><div><strong>Daily loss budget</strong><small>${money(-riskUsed)} / ${money(-s.dailyLimit)}</small></div></div>
-      <div class="risk-gate-item good"><span>🟢</span><div><strong>Stop Loss</strong><small>Calculator mein SL define karo</small></div></div>
+      <div class="risk-gate-item ${s.dailyLimit>0&&riskUsed>=s.dailyLimit?'bad':'good'}"><span>${s.dailyLimit>0&&riskUsed>=s.dailyLimit?'🔴':'🟢'}</span><div><strong>Daily loss budget</strong><small>${money(-riskUsed)} / ${money(-s.dailyLimit)}</small></div></div>
+      <div class="risk-gate-item warn" id="risk-gate-sl"><span>🟡</span><div><strong>Stop Loss</strong><small>Calculator mein SL define karo</small></div></div>
     </div></section>
 
     <section class="card r-multiple-card"><div class="risk-section-head"><div><span class="uppercase-label">PERFORMANCE IN R</span><h3 class="section-title">📈 Think in R, Not Just Rupees</h3><p class="card-sub">1R = aapka planned risk. Isse strategy ka real performance samajhna easy hota hai.</p></div></div><div class="r-metrics"><div><span>1R</span><strong>${money(Number(r.account)*Number(r.riskPct)/100)}</strong><small>Planned loss</small></div><div><span>2R</span><strong>${money(Number(r.account)*Number(r.riskPct)*2/100)}</strong><small>2R winner</small></div><div><span>3R</span><strong>${money(Number(r.account)*Number(r.riskPct)*3/100)}</strong><small>3R winner</small></div><div><span>−3R</span><strong>${money(-Number(r.account)*Number(r.riskPct)*3/100)}</strong><small>3 losses worth</small></div></div></section>
@@ -410,14 +480,33 @@ function renderRiskCenter(){
 }
 function updateRiskCalculator(){
   const account=riskNum('#risk-account-calc',Number(STATE.riskSettings.account)||0), pct=riskNum('#risk-pct-calc',Number(STATE.riskSettings.riskPct)||1), entry=riskNum('#risk-entry',NaN), sl=riskNum('#risk-sl',NaN), target=riskNum('#risk-target',NaN), pv=riskNum('#risk-point-value',1)||1;
-  const maxRisk=account*pct/100, riskPerUnit=Math.abs(entry-sl)*pv, size=riskPerUnit>0?maxRisk/riskPerUnit:NaN, profit=(Number.isFinite(target)&&Number.isFinite(entry))?Math.abs(target-entry)*pv*size:NaN, rr=(Number.isFinite(target)&&riskPerUnit>0)?Math.abs(target-entry)*pv/riskPerUnit:NaN;
+  const valid=v=>Number.isFinite(v)&&v>0;
+  const hasEntry=valid(entry), hasSL=valid(sl), hasTarget=valid(target);
+  const maxRisk=account*pct/100;
+  const riskPerUnit=(hasEntry&&hasSL)?Math.abs(entry-sl)*pv:NaN;
+  const rawSize=riskPerUnit>0?maxRisk/riskPerUnit:NaN;
+  const size=Number.isFinite(rawSize)?Math.floor(rawSize):NaN; // whole units/lots only — never round risk UP
+  const actualRisk=Number.isFinite(size)?size*riskPerUnit:NaN;
+  const direction=(hasEntry&&hasSL&&entry!==sl)?(entry>sl?'LONG':'SHORT'):null;
+  const wrongSide=!!(direction&&hasTarget&&((direction==='LONG'&&target<=entry)||(direction==='SHORT'&&target>=entry)));
+  const reward=(hasTarget&&hasEntry&&!wrongSide)?Math.abs(target-entry)*pv:NaN;
+  const profit=Number.isFinite(reward)&&Number.isFinite(size)?reward*size:NaN;
+  const rr=(Number.isFinite(reward)&&riskPerUnit>0)?reward/riskPerUnit:NaN;
   const set=(id,v)=>{const el=$(id);if(el)el.textContent=v;};
-  set('#risk-max-loss',Number.isFinite(maxRisk)?money(-maxRisk):'—'); set('#risk-per-unit',Number.isFinite(riskPerUnit)?money(-riskPerUnit):'—'); set('#risk-position-size',Number.isFinite(size)?size.toFixed(2):'—'); set('#risk-profit',Number.isFinite(profit)?money(profit):'—'); set('#risk-rr',Number.isFinite(rr)?`1 : ${rr.toFixed(2)}`:'—');
-  const msg=$('#risk-calc-message'); if(msg){ msg.className='risk-calc-message'; if(!Number.isFinite(entry)||!Number.isFinite(sl)||entry===sl){msg.textContent='Entry + SL + Target bharo — calculator ready hai.';} else if(Number.isFinite(rr) && rr<Number(STATE.riskSettings.minRR||2)){msg.classList.add('warn');msg.textContent=`⚠️ R:R ${rr.toFixed(2)} hai — aapka minimum rule 1:${STATE.riskSettings.minRR} hai.`;} else {msg.classList.add('good');msg.textContent=`🟢 Within calculator rules — max loss ${money(-maxRisk)} ke andar position size ${size.toFixed(2)}.`;}}
+  set('#risk-max-loss',Number.isFinite(maxRisk)?money(-maxRisk):'—'); set('#risk-per-unit',Number.isFinite(riskPerUnit)?money(-riskPerUnit):'—'); set('#risk-position-size',Number.isFinite(size)?String(size):'—'); set('#risk-profit',Number.isFinite(profit)?money(profit):'—'); set('#risk-rr',Number.isFinite(rr)?`1 : ${rr.toFixed(2)}`:'—');
+  const gate=$('#risk-gate-sl'); if(gate){ const ok=hasEntry&&hasSL&&entry!==sl; gate.className='risk-gate-item '+(ok?'good':'warn'); gate.querySelector('span').textContent=ok?'🟢':'🟡'; gate.querySelector('small').textContent=ok?`${direction} · SL ${sl} defined`:'Calculator mein SL define karo'; }
+  const msg=$('#risk-calc-message'); if(!msg) return; msg.className='risk-calc-message';
+  if(!hasEntry||!hasSL||entry===sl){ msg.textContent='Entry + SL + Target bharo — calculator ready hai.'; return; }
+  if(wrongSide){ msg.classList.add('warn'); msg.textContent=`⚠️ Target galat side par hai — ${direction} trade (SL ${direction==='LONG'?'neeche':'upar'}) mein target entry ke ${direction==='LONG'?'upar':'neeche'} hona chahiye.`; return; }
+  if(Number.isFinite(size)&&size<1){ msg.classList.add('warn'); msg.textContent=`⚠️ Itne risk mein 1 unit bhi nahi aata — SL bahut door hai ya risk % kam hai (1 unit ka risk ${money(-riskPerUnit)}).`; return; }
+  if(!hasTarget){ msg.textContent=`Position size ${size} — actual risk ${money(-actualRisk)}. Target bharo R:R check karne ke liye.`; return; }
+  if(Number.isFinite(rr) && rr<Number(STATE.riskSettings.minRR||2)){ msg.classList.add('warn'); msg.textContent=`⚠️ R:R ${rr.toFixed(2)} hai — aapka minimum rule 1:${STATE.riskSettings.minRR} hai.`; return; }
+  msg.classList.add('good'); msg.textContent=`🟢 Within calculator rules — position size ${size}, actual risk ${money(-actualRisk)} (max ${money(-maxRisk)}).`;
 }
 function bindRiskSettings(){
   const map={ '#risk-setting-account':'account','#risk-setting-risk':'riskPct','#risk-setting-daily':'dailyLossPct','#risk-setting-weekly':'weeklyLossPct','#risk-setting-trades':'maxTrades','#risk-setting-streak':'maxLossStreak','#risk-setting-rr':'minRR' };
   Object.entries(map).forEach(([sel,key])=>{const el=$(sel);if(el)el.addEventListener('input',()=>{const v=Number(el.value);if(Number.isFinite(v)&&v>0){STATE.riskSettings[key]=v;riskSaveSettings();}});});
+  $('#risk-setting-currency')?.addEventListener('change',e=>{ STATE.riskSettings.currency=e.target.value; riskSaveSettings(); render(); });
   ['#risk-account-calc','#risk-pct-calc','#risk-entry','#risk-sl','#risk-target','#risk-point-value'].forEach(sel=>$(sel)?.addEventListener('input',updateRiskCalculator));
 }
 
@@ -574,7 +663,7 @@ function renderCopilotTab(){
     <div class="card">
       <div class="dashboard-section-head"><div><span class="uppercase-label">PERFORMANCE</span><h3 class="section-title">Equity Curve</h3></div><span class="dashboard-stat-note">Best ${money(best)} · Worst ${money(worst)}</span></div>
       ${curveSvg}
-      <div class="equity-footer"><span>Start $0</span><strong class="${pnl>=0?'positive':'negative'}">Current ${money(pnl)}</strong></div>
+      <div class="equity-footer"><span>Start ${currencySymbol()}0</span><strong class="${pnl>=0?'positive':'negative'}">Current ${money(pnl)}</strong></div>
     </div>
 
     <div class="card">
@@ -1526,7 +1615,7 @@ document.addEventListener('submit', async (e) => {
     }
     STATE.editingNoteId = null;
     STATE.noteFormImage = ''; STATE.noteFormBlocks = []; STATE.noteFormConcept = 'General'; STATE.noteFormCustomConcept = '';
-    await saveUserData();
+    await saveUserData('Note');
     renderTabOnly();
   }
 });

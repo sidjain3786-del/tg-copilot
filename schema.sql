@@ -35,3 +35,10 @@ CREATE TABLE IF NOT EXISTS user_session_notes (
   updated_at TEXT NOT NULL,
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
+
+-- Failed-login counter for basic brute-force protection.
+CREATE TABLE IF NOT EXISTS login_attempts (
+  email TEXT PRIMARY KEY,
+  failures INTEGER NOT NULL DEFAULT 0,
+  window_start TEXT NOT NULL
+);
