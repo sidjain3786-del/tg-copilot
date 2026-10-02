@@ -41,7 +41,7 @@ const STATE = {
   noteFormStrategy: '', noteFormConcept: 'General', noteFormCustomConcept: '', noteFormImage: '', noteFormBlocks: [], activeNoteId: null, editingNoteId: null, noteConceptFilter: 'ALL',
   annotator: {src:'', baseSrc:'', noteId:null, blockIndex:null, drawing:false, mode:'pen', color:'#ef4444', size:4, pressure:false, strokes:[], history:[], redo:[], activeStroke:null},
   noteAutoSaveTimer: null, noteAutoSaveBusy: false, noteInsertIndex: null,
-  historyStrategyFilter: 'ALL', historyMistakeFilter: 'ALL', historyDateFilter: '', analysisDateFilter: '', historyView: localStorage.getItem('tc_history_view') || 'grid',
+  dashStrategy: loadDashStrategy(), dashEditStrategy: null, historyStrategyFilter: 'ALL', historyMistakeFilter: 'ALL', historyDateFilter: '', analysisDateFilter: '', historyView: localStorage.getItem('tc_history_view') || 'grid',
   riskSettings: loadRiskSettings()
 };
 function loadRiskSettings(){
@@ -578,8 +578,9 @@ function filteredHistoryTrades(){
   return STATE.trades.filter(t =>
     (STATE.historyStrategyFilter==='ALL' || tradeStrategyName(t)===STATE.historyStrategyFilter) &&
     (STATE.historyMistakeFilter==='ALL' || (t.mistake || 'none')===STATE.historyMistakeFilter) &&
-    (!STATE.historyDateFilter || tradeLocalDate(t)===STATE.historyDateFilter)
-  );
+    (!STATE.historyDateFilter || tradeLocalDate(t)===STATE.historyDateFilter) &&
+    (!STATE.historySearch || [t.symbol,t.notes,t.exitReason,tradeStrategyName(t),emotionText(t),mistakeLabel(t.mistake||'none')].join(' ').toLowerCase().includes(STATE.historySearch.toLowerCase()))
+  ).sort((a,b)=>tradeSortTime(b)-tradeSortTime(a));
 }
 function strategyPerformance(){
   const groups = {};
@@ -592,6 +593,20 @@ function strategyPerformance(){
   });
   return Object.values(groups).map(g=>({...g, winRate:g.trades?Math.round(g.wins/g.trades*100):0, avgR:g.trades?(g.r/g.trades).toFixed(2):'0.00', discipline:g.trades?Math.round(g.followed/g.trades*100):0})).sort((a,b)=>b.pnl-a.pnl);
 }
+function formatTradeTime(t){
+  const raw=tradeDateTimeRaw(t); if(!raw) return '';
+  const d=new Date(raw); if(Number.isNaN(d.getTime())) return String(raw);
+  return hasTradeTime(t)
+    ? d.toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:true})
+    : d.toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});
+}
+function tradeTimeInputValue(t){
+  const raw=String(tradeDateTimeRaw(t)||'');
+  if(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(raw)) return raw;
+  if(/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw+'T09:15';
+  const d=new Date(raw); return Number.isNaN(d.getTime()) ? '' : localDateTimeInputValue(d);
+}
+function isOpenTrade(t){ return t.exitPrice===null || t.exitPrice===undefined || t.exitPrice===''; }
 function mistakeLabel(id){ return MISTAKE_OPTIONS.find(x=>x[0]===id)?.[1] || id || 'No mistake'; }
 function plannedVsActual(t){
   const pe = t.plannedEntry ?? t.entryPrice;
@@ -737,6 +752,8 @@ function renderCopilotTab(){
     <div class="card dashboard-kpi"><span class="uppercase-label">Avg Quality</span><strong>${avgQuality.toFixed(1)}/5</strong><small>Self-rated execution</small></div>
   </div>
 
+  ${renderSetupPlaybook()}
+
   <div class="grid-2 dashboard-main-grid">
     <div class="card">
       <div class="dashboard-section-head"><div><span class="uppercase-label">PERFORMANCE</span><h3 class="section-title">Equity Curve</h3></div><span class="dashboard-stat-note">Best ${money(best)} · Worst ${money(worst)}</span></div>
@@ -861,7 +878,7 @@ function renderLogTab(){
         <div class="field grid-3 fast-journal-time-fields">
           <div><label>Trade Date &amp; Time <span class="optional-label">used for session analysis</span></label><input type="datetime-local" id="log-trade-datetime" value="${esc(localDateTimeInputValue())}"></div>
           <div><label>Exit Reason <span class="optional-label">optional</span></label><input type="text" id="log-exit-reason" placeholder="Target, SL, manual, time, news..."></div>
-          <div><label>Quick Note <span class="optional-label">optional</span></label><input type="text" id="log-notes" placeholder="Kya sahi hua? Kya improve karna hai?"></div>
+          <div><label>Quick Note <span class="optional-label">optional</span></label><textarea id="log-notes" rows="2" placeholder="Kya sahi hua? Kya improve karna hai?"></textarea></div>
         </div>
 
         <div class="fast-journal-emotion">
@@ -1088,16 +1105,20 @@ function historyViewButton(id, icon, label){
 }
 function renderTradeView(t, mode){
   const pv=plannedVsActual(t), imgs=tradeImages(t);
-  const pnl=Number(t.pnl)||0, rr=t.rr ?? '—';
-  const resultClass=pnl>=0?'positive':'negative';
+  const pnl=Number(t.pnl)||0, rr=t.rr ?? '—', open=isOpenTrade(t);
+  const resultClass=open?'':(pnl>=0?'positive':'negative');
+  const resultHtml=open?`<div class="history-detail-result open-trade">Open<small>no exit yet</small></div>`:`<div class="history-detail-result ${resultClass}">${money(pnl)}<small>${esc(String(rr))} R</small></div>`;
+  const when=esc(formatTradeTime(t));
+  const strategy=esc(tradeStrategyName(t));
   const meta=`${esc(t.symbol||'—')} • ${esc(t.type||'—')}`;
-  const chips=`<div class="history-chips"><span class="journal-chip">🧠 ${esc(emotionText(t))}</span><span class="journal-chip">📝 ${esc(mistakeLabel(t.mistake||'none'))}</span><span class="journal-chip">⭐ ${t.quality||3}/5</span></div>`;
+  const chips=`<div class="history-chips"><span class="journal-chip">🧠 ${esc(emotionText(t))}</span><span class="journal-chip ${t.mistake&&t.mistake!=='none'?'chip-warn':''}">📝 ${esc(mistakeLabel(t.mistake||'none'))}</span><span class="journal-chip">⭐ ${t.quality||3}/5</span>${t.exitReason?`<span class="journal-chip">🚪 ${esc(t.exitReason)}</span>`:''}</div>`;
+  const quickNote = t.notes ? `<p class="history-quick-note" title="${esc(t.notes)}"><span>Note</span>${esc(t.notes)}</p>` : '';
   const actions=`<div class="trade-actions"><button type="button" class="btn-secondary trade-edit-btn" data-action="edit-trade" data-id="${esc(t.id)}">✏️ Edit</button><button type="button" class="btn-danger trade-delete-btn" data-action="delete-trade" data-id="${esc(t.id)}" title="Delete trade">🗑️ Delete</button></div>`;
-  const shots = imgs.length ? `<div class="history-images">${imgs.map((src,i)=>`<div class="history-image"><img src="${esc(src)}" data-action="view-image" data-src="${esc(src)}"><span>${i===0?'Before':i===1?'After':`Image ${i+1}`}</span></div>`).join('')}</div>` : `<div class="history-no-images">🖼 No screenshots</div>`;
-  if(mode==='list') return `<div class="history-list-row"><div class="history-list-main"><div class="history-symbol">${meta}</div><span class="history-date">${esc(t.date||t.createdAt||'')}</span></div><div class="history-list-stat">${pv.pe??'—'} → ${t.exitPrice??'—'}</div><div class="history-list-stat">${esc(emotionText(t))}</div><div class="history-list-stat ${resultClass} mono">${money(pnl)}</div><div>${actions}</div></div>`;
-  if(mode==='detailed') return `<article class="history-detail-card"><div class="history-detail-head"><div><span class="history-kicker">TRADE JOURNAL</span><h3>${meta}</h3><p>${esc(t.date||t.createdAt||'')}</p></div><div class="history-detail-result ${resultClass}">${money(pnl)}<small>${esc(String(rr))} R</small></div>${actions}</div>${chips}<div class="history-detail-grid"><div><span>PLANNED</span><strong>Entry ${pv.pe??'—'} • SL ${pv.ps??'—'} • Target ${pv.pt??'—'} • R:R ${pv.prr??'—'}</strong></div><div><span>ACTUAL</span><strong>Entry ${t.entryPrice??'—'} • SL ${t.stopLoss??'—'} • Exit ${t.exitPrice??'—'}</strong></div><div><span>EXIT REASON</span><strong>${esc(t.exitReason||'—')}</strong></div><div><span>LOT SIZE</span><strong>${esc(t.quantity??'—')}</strong></div></div><p class="history-note">${esc(t.notes||'No notes added.')}</p>${shots}</article>`;
-  if(mode==='gallery') return `<article class="history-gallery-card"><div class="history-gallery-head"><div><h3>${meta}</h3><p>${esc(t.date||t.createdAt||'')}</p></div><div class="history-detail-result ${resultClass}">${money(pnl)}<small>${esc(String(rr))} R</small></div>${actions}</div>${shots}<div class="history-gallery-meta">${chips}</div></article>`;
-  return `<article class="history-grid-card"><div class="history-grid-media">${imgs[0]?`<img src="${esc(imgs[0])}" data-action="view-image" data-src="${esc(imgs[0])}">`:`<div class="history-grid-placeholder">📈</div>`}<span class="${t.type==='LONG'?'badge-long':'badge-short'}">${esc(t.type||'—')}</span></div><div class="history-grid-body"><div class="history-grid-top"><div><h3>${esc(t.symbol||'—')}</h3><p>${esc(tradeStrategyName(t)||'No strategy')}</p></div><div class="history-detail-result ${resultClass}">${money(pnl)}<small>${esc(String(rr))} R</small></div></div>${chips}<div class="history-mini-stats"><span>Entry <b>${t.entryPrice??'—'}</b></span><span>Exit <b>${t.exitPrice??'—'}</b></span><span>Lot Size <b>${t.quantity??'—'}</b></span></div><div class="history-card-actions">${actions}</div></div></article>`;
+  const shots = imgs.length ? `<div class="history-images">${imgs.map((src,i)=>`<div class="history-image"><img src="${esc(src)}" data-action="view-image" data-src="${esc(src)}" loading="lazy"><span>${i===0?'Before':i===1?'After':`Image ${i+1}`}</span></div>`).join('')}</div>` : `<div class="history-no-images">🖼 No screenshots</div>`;
+  if(mode==='list') return `<div class="history-list-row"><div class="history-list-main"><div class="history-symbol">${meta}</div><span class="history-date">${when} · ${strategy}</span>${t.notes?`<span class="history-list-note">📝 ${esc(t.notes)}</span>`:''}</div><div class="history-list-stat">${pv.pe??'—'} → ${t.exitPrice??'—'}</div><div class="history-list-stat">${esc(emotionText(t))}</div><div class="history-list-stat ${resultClass} mono">${open?'Open':money(pnl)}</div><div>${actions}</div></div>`;
+  if(mode==='detailed') return `<article class="history-detail-card"><div class="history-detail-head"><div><span class="history-kicker">TRADE JOURNAL</span><h3>${meta}</h3><p>${when} · ${strategy}${t.isSetupTrade===false?'':` · ${t.followedPlan?'✅ Plan followed':'⚠️ Plan broken'}`}</p></div>${resultHtml}${actions}</div>${chips}<div class="history-detail-grid"><div><span>PLANNED</span><strong>Entry ${pv.pe??'—'} • SL ${pv.ps??'—'} • Target ${pv.pt??'—'} • R:R ${pv.prr??'—'}</strong></div><div><span>ACTUAL</span><strong>Entry ${t.entryPrice??'—'} • SL ${t.stopLoss??'—'} • Exit ${t.exitPrice??'—'}</strong></div><div><span>EXIT REASON</span><strong>${esc(t.exitReason||'—')}</strong></div><div><span>LOT SIZE</span><strong>${esc(t.quantity??'—')}</strong></div><div><span>WHERE</span><strong>${esc([t.device,t.location].filter(Boolean).join(' @ ')||'—')}</strong></div></div><p class="history-note">${t.notes?esc(t.notes):'<em>Koi note nahi — Edit se add karo.</em>'}</p>${shots}</article>`;
+  if(mode==='gallery') return `<article class="history-gallery-card"><div class="history-gallery-head"><div><h3>${meta}</h3><p>${when} · ${strategy}</p></div>${resultHtml}${actions}</div>${shots}<div class="history-gallery-meta">${chips}${quickNote}</div></article>`;
+  return `<article class="history-grid-card"><div class="history-grid-media">${imgs[0]?`<img src="${esc(imgs[0])}" data-action="view-image" data-src="${esc(imgs[0])}" loading="lazy">`:`<div class="history-grid-placeholder">📈</div>`}<span class="${t.type==='LONG'?'badge-long':'badge-short'}">${esc(t.type||'—')}</span></div><div class="history-grid-body"><div class="history-grid-top"><div><h3>${esc(t.symbol||'—')}</h3><p>${strategy}</p><p class="history-when">${when}</p></div>${resultHtml}</div>${chips}${quickNote}<div class="history-mini-stats"><span>Entry <b>${t.entryPrice??'—'}</b></span><span>Exit <b>${t.exitPrice??'—'}</b></span><span>SL <b>${t.stopLoss??'—'}</b></span><span>Lot Size <b>${t.quantity??'—'}</b></span></div><div class="history-card-actions">${actions}</div></div></article>`;
 }
 function renderHistoryTab(){
   const all = STATE.trades;
@@ -1131,12 +1152,17 @@ function renderHistoryTab(){
     <div class="grid-3 journal-kpis"><div><span class="uppercase-label">Trades</span><strong>${trades.length}</strong></div><div><span class="uppercase-label">Win Rate</span><strong>${trades.length?Math.round(wins/trades.length*100):0}%</strong></div><div><span class="uppercase-label">Avg Quality</span><strong>${trades.length?(trades.reduce((a,t)=>a+(Number(t.quality)||3),0)/trades.length).toFixed(1):'—'}/5</strong></div></div>
   </div>
   <div class="card history-toolbar"><div class="history-toolbar-title"><strong>View</strong><span>${mode==='grid'?'Compact cards':mode==='list'?'Quick rows':mode==='detailed'?'Full journal':'Screenshot focused'}</span></div><div class="history-view-switcher">${historyViewButton('grid','▦','Grid')}${historyViewButton('list','☰','List')}${historyViewButton('detailed','📖','Detailed')}${historyViewButton('gallery','🖼','Gallery')}</div></div>
-  <div class="card history-filters"><div class="history-filter-grid"><div><label>Strategy Filter</label><select id="history-strategy-filter"><option value="ALL">All Strategies</option>${strategyNames.map(n=>`<option value="${esc(n)}" ${STATE.historyStrategyFilter===n?'selected':''}>${esc(n)}</option>`).join('')}</select></div><div><label>Mistake Filter</label><select id="history-mistake-filter"><option value="ALL">All Mistakes</option>${MISTAKE_OPTIONS.map(x=>`<option value="${x[0]}" ${STATE.historyMistakeFilter===x[0]?'selected':''}>${x[1]}</option>`).join('')}</select></div><div><label>📅 Trade Date</label><input type="date" id="history-date-filter" value="${esc(STATE.historyDateFilter||'')}" aria-label="Select trade date"></div><div class="history-date-actions"><label>&nbsp;</label><button type="button" class="btn-secondary" data-action="clear-history-date" ${STATE.historyDateFilter?'':'disabled'}>Clear Date</button></div></div>${STATE.historyDateFilter?`<div class="history-date-active">📅 Showing trades for <strong>${esc(STATE.historyDateFilter)}</strong></div>`:''}</div>
+  <div class="card history-filters"><div class="history-search"><input type="search" id="history-search" value="${esc(STATE.historySearch||'')}" placeholder="🔍 Search symbol, note, exit reason, emotion…" aria-label="Search trades"></div><div class="history-filter-grid"><div><label>Strategy Filter</label><select id="history-strategy-filter"><option value="ALL">All Strategies</option>${strategyNames.map(n=>`<option value="${esc(n)}" ${STATE.historyStrategyFilter===n?'selected':''}>${esc(n)}</option>`).join('')}</select></div><div><label>Mistake Filter</label><select id="history-mistake-filter"><option value="ALL">All Mistakes</option>${MISTAKE_OPTIONS.map(x=>`<option value="${x[0]}" ${STATE.historyMistakeFilter===x[0]?'selected':''}>${x[1]}</option>`).join('')}</select></div><div><label>📅 Trade Date</label><input type="date" id="history-date-filter" value="${esc(STATE.historyDateFilter||'')}" aria-label="Select trade date"></div><div class="history-date-actions"><label>&nbsp;</label><button type="button" class="btn-secondary" data-action="clear-history-date" ${STATE.historyDateFilter?'':'disabled'}>Clear Date</button></div></div>${STATE.historyDateFilter?`<div class="history-date-active">📅 Showing trades for <strong>${esc(STATE.historyDateFilter)}</strong></div>`:''}</div>
   <div class="history-results ${mode}-view">${trades.length ? (mode==='list' ? `<div class="history-list-head"><span>Trade</span><span>Entry → Exit</span><span>Emotion</span><span>P&amp;L</span><span></span></div>${trades.map(t=>renderTradeView(t,mode)).join('')}` : trades.map(t=>renderTradeView(t,mode)).join('')) : '<p class="empty-msg">Is filter ke liye koi trade nahi mila.</p>'}</div>
   ${STATE.editingTradeId ? renderEditTradeModal(STATE.editingTradeId) : ''}`;
 }
 
 function toDateTimeLocalValue(raw){ if(!raw) return localDateTimeInputValue(); const d=new Date(raw); if(Number.isNaN(d.getTime())) return String(raw).slice(0,16); return localDateTimeInputValue(d); }
+const NO_SETUP_STRATEGY='Bina Setup (Tukke Baazi)';
+function editStrategyOptions(t){
+  const names=[...new Set([...STATE.customStrategies.map(x=>normalizeCustomStrategy(x).name).filter(Boolean), NO_SETUP_STRATEGY, t.strategy].filter(Boolean))];
+  return names.map(n=>`<option value="${esc(n)}" ${n===t.strategy?'selected':''}>${esc(n)}</option>`).join('');
+}
 function renderEditTradeModal(id){
   const t=STATE.trades.find(x=>x.id===id); if(!t) return '';
   const imgs=Array.isArray(t.images)&&t.images.length ? t.images : [t.beforeImage,t.afterImage,t.image].filter(Boolean);
@@ -1145,10 +1171,130 @@ function renderEditTradeModal(id){
     <div class="edit-modal-head"><div><span class="uppercase-label">UPDATE TRADE</span><h2 class="section-title">✏️ Edit ${esc(t.symbol)}</h2><p class="card-sub">Jo field change karna hai karo, phir Update Trade.</p></div><button type="button" class="modal-x" data-action="cancel-edit-trade">×</button></div>
     <div class="field grid-3"><div><label>Symbol</label><input id="edit-symbol" value="${esc(t.symbol)}"></div><div><label>Direction</label><select id="edit-type"><option ${t.type==='LONG'?'selected':''}>LONG</option><option ${t.type==='SHORT'?'selected':''}>SHORT</option></select></div><div><label>Quantity</label><input type="number" step="any" id="edit-qty" value="${t.quantity??''}"></div></div>
     <div class="field grid-3"><div><label>Entry</label><input type="number" step="any" id="edit-entry" value="${t.entryPrice??''}"></div><div><label>Exit</label><input type="number" step="any" id="edit-exit" value="${t.exitPrice??''}"></div><div><label>SL</label><input type="number" step="any" id="edit-sl" value="${t.stopLoss??''}"></div></div>
+    <div class="field grid-3"><div><label>Trade date &amp; time</label><input type="datetime-local" id="edit-trade-datetime" value="${esc(tradeTimeInputValue(t))}"></div><div><label>Strategy</label><select id="edit-strategy">${editStrategyOptions(t)}</select></div><div><label>Mistake</label><select id="edit-mistake">${MISTAKE_OPTIONS.map(x=>`<option value="${x[0]}" ${(t.mistake||'none')===x[0]?'selected':''}>${esc(x[1])}</option>`).join('')}</select></div></div>
+    <div class="field grid-2"><div><label>Execution quality</label><select id="edit-quality">${[1,2,3,4,5].map(n=>`<option value="${n}" ${Number(t.quality||3)===n?'selected':''}>${'⭐'.repeat(n)} ${n}/5</option>`).join('')}</select></div><div><label>Quick note</label><textarea id="edit-notes" rows="2" placeholder="Kya sahi hua? Kya improve karna hai?">${esc(t.notes||'')}</textarea></div></div>
     <div class="field"><label>Emotion(s)</label><div class="emotion-pills edit-emotions">${presets.map(x=>`<button type="button" class="emotion-pill ${(tradeEmotions(t).includes(x))?'selected':''}" data-action="toggle-edit-emotion" data-value="${esc(x)}">${esc(x)}</button>`).join('')}</div><input type="text" id="edit-custom-emotion" value="${esc(tradeEmotions(t).filter(x=>!presets.includes(x)).join(', '))}" placeholder="Custom emotions, comma separated"></div>
     <div class="field grid-2"><div><label>Exit Reason</label><input id="edit-exit-reason" value="${esc(t.exitReason||'')}" placeholder="Target / SL / manual / time..."></div><div><label>Images</label><div class="edit-images-list" id="edit-images-list">${imgs.map((src,i)=>`<div class="edit-image-item"><img src="${esc(src)}" data-src="${esc(src)}"><button type="button" data-action="remove-edit-image" data-index="${i}">×</button></div>`).join('')}<label class="edit-add-image">+ Add<input type="file" id="edit-multi-image-file" accept="image/*" multiple style="display:none"></label></div></div></div>
     <div class="edit-modal-actions"><button type="button" class="btn-secondary" data-action="cancel-edit-trade">Cancel</button><button type="button" class="btn-primary" data-action="update-trade" data-id="${esc(id)}">💾 Update Trade</button></div>
   </div></div>`;
+}
+
+
+/* ---------------- dashboard: setup playbook ----------------
+   One compact view per strategy: its rules, its numbers, the mistakes that
+   cost money in it, linked notes and the latest trades. */
+function loadDashStrategy(){ try { return localStorage.getItem('tc_dash_strategy') || ''; } catch (_) { return ''; } }
+function saveDashStrategy(v){ try { localStorage.setItem('tc_dash_strategy', v); } catch (_) {} }
+const sameName=(a,b)=>String(a||'').trim().toLowerCase()===String(b||'').trim().toLowerCase();
+function playbookStrategyNames(){
+  const counts={};
+  STATE.trades.forEach(t=>{ const n=tradeStrategyName(t); counts[n]=(counts[n]||0)+1; });
+  const saved=allStrategies().map(x=>x.name).filter(Boolean);
+  const fromTrades=Object.keys(counts).filter(n=>!saved.some(x=>sameName(x,n)));
+  return { names:[...saved, ...fromTrades], counts };
+}
+function currentDashStrategy(){
+  const { names, counts } = playbookStrategyNames();
+  if (!names.length) return '';
+  if (STATE.dashStrategy && names.some(n=>sameName(n,STATE.dashStrategy))) return names.find(n=>sameName(n,STATE.dashStrategy));
+  return [...names].sort((a,b)=>(counts[b]||0)-(counts[a]||0))[0];
+}
+function noteMatchesStrategy(n, name){
+  return sameName(n.strategy,name) || sameName(n.concept,name) || sameName(n.customConcept,name);
+}
+function notePreviewText(n){
+  const blocks=normalizeNoteBlocks(n);
+  const txt=blocks.filter(b=>b.type==='text').map(b=>b.text || noteTextFromHtml(b.html||'')).join(' ').trim();
+  return (txt || n.learning || n.analysis || n.entryCriteria || '').replace(/\s+/g,' ').trim();
+}
+function setupPlaybookData(name){
+  const trades=STATE.trades.filter(t=>sameName(tradeStrategyName(t),name)).sort((a,b)=>tradeSortTime(b)-tradeSortTime(a));
+  const closed=trades.filter(t=>!isOpenTrade(t));
+  const wins=closed.filter(t=>(Number(t.pnl)||0)>0), losses=closed.filter(t=>(Number(t.pnl)||0)<0);
+  const pnl=closed.reduce((a,t)=>a+(Number(t.pnl)||0),0);
+  const avgR=closed.length?closed.reduce((a,t)=>a+(Number(t.rr)||0),0)/closed.length:0;
+  const followed=closed.filter(t=>t.followedPlan), broken=closed.filter(t=>!t.followedPlan);
+  const sum=list=>list.reduce((a,t)=>a+(Number(t.pnl)||0),0);
+  const mistakes={};
+  closed.filter(t=>t.mistake&&t.mistake!=='none').forEach(t=>{ const m=mistakes[t.mistake]||(mistakes[t.mistake]={id:t.mistake,count:0,pnl:0}); m.count++; m.pnl+=Number(t.pnl)||0; });
+  const mistakeList=Object.values(mistakes).sort((a,b)=>a.pnl-b.pnl||b.count-a.count);
+  const sessions=sessionGroupsForTrades(closed).filter(g=>g.trades>0).sort((a,b)=>b.pnl-a.pnl);
+  const strategy=allStrategies().find(x=>sameName(x.name,name)) || null;
+  const notes=STATE.notes.filter(n=>noteMatchesStrategy(n,name)).sort((a,b)=>new Date(b.updatedAt||b.date||0)-new Date(a.updatedAt||a.date||0));
+  const tradeNotes=trades.filter(t=>t.notes).slice(0,3);
+  return { name, strategy, trades, closed, wins, losses, pnl, avgR, followed, broken, followedPnl:sum(followed), brokenPnl:sum(broken), mistakeList, sessions, notes, tradeNotes,
+    winRate: closed.length?Math.round(wins.length/closed.length*100):0, ruleRate: closed.length?Math.round(followed.length/closed.length*100):0 };
+}
+function renderSetupPlaybook(){
+  const { names, counts } = playbookStrategyNames();
+  if (!names.length) return `<section class="card setup-playbook" id="setup-playbook"><div class="playbook-head"><div><h3 class="section-title">Setup Playbook</h3><p class="card-sub">Pehle ek strategy banao (Log Trade tab → Add Strategy). Phir yahan uska poora data ek jagah dikhega.</p></div><button class="btn-secondary btn-small" data-action="set-tab" data-tab="log">＋ Add strategy</button></div></section>`;
+  const name=currentDashStrategy();
+  const d=setupPlaybookData(name);
+  const st=d.strategy || {entryCriteria:'',exitCriteria:'',rules:[]};
+  const rules=(Array.isArray(st.rules)&&st.rules.length?st.rules:(st.mandatoryRules||[])).filter(Boolean);
+  const editing=STATE.dashEditStrategy===name && !!d.strategy;
+  const best=d.sessions[0], worst=d.sessions.length>1?d.sessions[d.sessions.length-1]:null;
+  const cls=v=>v>=0?'positive':'negative';
+  const options=names.map(n=>`<option value="${esc(n)}" ${sameName(n,name)?'selected':''}>${esc(n)}${counts[n]?` · ${counts[n]} trade${counts[n]===1?'':'s'}`:' · no trades yet'}</option>`).join('');
+
+  const rulesCol = editing ? `
+    <div class="pb-col pb-rules">
+      <h4>Rules</h4>
+      <label class="pb-edit-label">Entry criteria<textarea id="pb-entry" rows="3">${esc(st.entryCriteria||'')}</textarea></label>
+      <label class="pb-edit-label">Exit / invalidation<textarea id="pb-exit" rows="3">${esc(st.exitCriteria||'')}</textarea></label>
+      <label class="pb-edit-label">Mandatory rules <small>(har rule nayi line mein)</small><textarea id="pb-rules" rows="4">${esc(rules.join('\n'))}</textarea></label>
+      <div class="pb-edit-actions"><button type="button" class="btn-secondary btn-small" data-action="cancel-setup-criteria">Cancel</button><button type="button" class="btn-primary btn-small" data-action="save-setup-criteria" data-name="${esc(name)}">Save rules</button></div>
+    </div>` : `
+    <div class="pb-col pb-rules">
+      <div class="pb-col-head"><h4>Rules</h4>${d.strategy?`<button type="button" class="pb-link" data-action="edit-setup-criteria" data-name="${esc(name)}">✏️ Edit</button>`:''}</div>
+      <div class="pb-criteria"><span>Entry</span><p>${st.entryCriteria?esc(st.entryCriteria):'<em>Entry criteria add nahi kiya.</em>'}</p></div>
+      <div class="pb-criteria"><span>Exit / invalidation</span><p>${st.exitCriteria?esc(st.exitCriteria):'<em>Exit criteria add nahi kiya.</em>'}</p></div>
+      ${rules.length?`<ul class="pb-rule-list">${rules.map(r=>`<li>${esc(r)}</li>`).join('')}</ul>`:`<p class="pb-empty">${d.strategy?'Koi mandatory rule nahi. ✏️ Edit se add karo.':'Yeh strategy sirf trades mein hai, saved playbook nahi.'}</p>`}
+    </div>`;
+
+  const mistakesCol = `
+    <div class="pb-col pb-mistakes">
+      <h4>Mistakes in this setup</h4>
+      ${d.mistakeList.length ? `<ul class="pb-mistake-list">${d.mistakeList.map(m=>`<li><span>${esc(mistakeLabel(m.id))} <small>×${m.count}</small></span><strong class="${cls(m.pnl)}">${money(m.pnl)}</strong></li>`).join('')}</ul>` : `<p class="pb-empty">${d.closed.length?'Is setup mein abhi tak koi mistake log nahi hui. 👏':'Trades aane par yahan dikhega.'}</p>`}
+      ${d.closed.length ? `<div class="pb-split">
+        <div><span>Rules follow kiye</span><strong class="${cls(d.followedPnl)}">${money(d.followedPnl)}</strong><small>${d.followed.length} trade${d.followed.length===1?'':'s'}</small></div>
+        <div><span>Rules tode</span><strong class="${cls(d.brokenPnl)}">${money(d.brokenPnl)}</strong><small>${d.broken.length} trade${d.broken.length===1?'':'s'}</small></div>
+      </div>` : ''}
+    </div>`;
+
+  const notesCol = `
+    <div class="pb-col pb-notes">
+      <div class="pb-col-head"><h4>Notes</h4><button type="button" class="pb-link" data-action="create-note-for-setup" data-name="${esc(name)}">＋ Note</button></div>
+      ${d.notes.length ? `<ul class="pb-note-list">${d.notes.slice(0,4).map(n=>`<li><button type="button" data-action="open-note-from-dash" data-id="${esc(n.id)}"><strong>${esc(n.title||n.symbol||'Untitled note')}</strong><span>${esc(notePreviewText(n).slice(0,120)||'Khali note')}</span></button></li>`).join('')}</ul>` : `<p class="pb-empty">Is setup se linked koi note nahi. Note mein Strategy field mein "${esc(name)}" likho, woh yahan aa jayega.</p>`}
+      ${d.tradeNotes.length ? `<div class="pb-trade-notes"><span>Trade notes</span>${d.tradeNotes.map(t=>`<p><b>${esc(t.symbol||'')}</b> <small>${esc(formatTradeTime(t))}</small><br>${esc(t.notes)}</p>`).join('')}</div>` : ''}
+    </div>`;
+
+  const recent = d.trades.slice(0,5);
+  return `<section class="card setup-playbook" id="setup-playbook">
+    <div class="playbook-head">
+      <div><h3 class="section-title">Setup Playbook</h3><p class="card-sub">Strategy chuno — uske rules, numbers, mistakes aur notes ek jagah.</p></div>
+      <label class="playbook-select"><span class="sr-only">Select strategy</span><select id="dash-strategy-select">${options}</select></label>
+    </div>
+    <div class="pb-stats">
+      <div><span>Trades</span><strong>${d.closed.length}${d.trades.length>d.closed.length?`<small> +${d.trades.length-d.closed.length} open</small>`:''}</strong></div>
+      <div><span>Win rate</span><strong>${d.winRate}%</strong></div>
+      <div><span>Net P&amp;L</span><strong class="${cls(d.pnl)}">${money(d.pnl)}</strong></div>
+      <div><span>Avg R</span><strong>${d.avgR.toFixed(2)}R</strong></div>
+      <div><span>Rules followed</span><strong>${d.ruleRate}%</strong></div>
+      <div><span>Best session</span><strong>${best?`${best.emoji} ${esc(best.name)}`:'—'}</strong>${best?`<small class="${cls(best.pnl)}">${money(best.pnl)}${worst&&worst.pnl<0?` · worst ${esc(worst.name)}`:''}</small>`:''}</div>
+    </div>
+    <div class="pb-grid">${rulesCol}${mistakesCol}${notesCol}</div>
+    <div class="pb-recent">
+      <div class="pb-col-head"><h4>Latest trades</h4>${d.trades.length?`<button type="button" class="pb-link" data-action="open-setup-history" data-name="${esc(name)}">Sab dekho →</button>`:''}</div>
+      ${recent.length ? `<div class="pb-recent-list">${recent.map(t=>{const open=isOpenTrade(t), v=Number(t.pnl)||0; return `<div class="pb-trade"><div><strong>${esc(t.symbol||'—')}</strong> <span class="pb-dir ${t.type==='SHORT'?'short':'long'}">${esc(t.type||'')}</span><small>${esc(formatTradeTime(t))}</small>${t.mistake&&t.mistake!=='none'?`<span class="journal-chip chip-warn">${esc(mistakeLabel(t.mistake))}</span>`:''}</div><b class="${open?'':cls(v)}">${open?'Open':money(v)}</b></div>`;}).join('')}</div>` : `<p class="pb-empty">Is strategy se abhi koi trade log nahi hua.</p>`}
+    </div>
+  </section>`;
+}
+function rerenderSetupPlaybook(){
+  const el=$('#setup-playbook'); if(!el) return;
+  el.outerHTML=renderSetupPlaybook();
+  const fresh=$('#setup-playbook');
+  if(fresh && !REDUCED_MOTION){ fresh.classList.add('pb-swap'); }
 }
 
 /* ---------------- main render ---------------- */
@@ -1333,6 +1479,26 @@ document.addEventListener('click', async (e) => {
     STATE.editingNoteId = null;
     renderTabOnly();
   }
+  else if (action==='edit-setup-criteria') { STATE.dashEditStrategy=btn.dataset.name; rerenderSetupPlaybook(); setTimeout(()=>$('#pb-entry')?.focus(),30); }
+  else if (action==='cancel-setup-criteria') { STATE.dashEditStrategy=null; rerenderSetupPlaybook(); }
+  else if (action==='save-setup-criteria') {
+    const name=btn.dataset.name;
+    const idx=STATE.customStrategies.findIndex(x=>sameName(normalizeCustomStrategy(x).name,name));
+    if (idx<0) return;
+    const base=normalizeCustomStrategy(STATE.customStrategies[idx]);
+    const rules=($('#pb-rules')?.value||'').split('\n').map(x=>x.trim()).filter(Boolean);
+    STATE.customStrategies[idx]={...base, entryCriteria:($('#pb-entry')?.value||'').trim(), exitCriteria:($('#pb-exit')?.value||'').trim(), rules, mandatoryRules:rules};
+    STATE.dashEditStrategy=null; rerenderSetupPlaybook();
+    saveUserData('Strategy', ['customStrategies']);
+  }
+  else if (action==='open-note-from-dash') { STATE.activeNoteId=btn.dataset.id; STATE.noteConceptFilter='ALL'; STATE.editingNoteId=null; STATE.activeTab='notes'; render(); window.scrollTo({top:0,behavior:REDUCED_MOTION?'auto':'smooth'}); }
+  else if (action==='create-note-for-setup') {
+    const id=`n-${Date.now()}`, now=new Date().toISOString();
+    STATE.notes.unshift({ id, title:`${btn.dataset.name} — note`, symbol:'General', concept:'General', customConcept:'', strategy:btn.dataset.name, blocks:[{type:'text',text:''}], image:null, entryCriteria:'', exitCriteria:'', analysis:'', learning:'', date:now, updatedAt:now });
+    STATE.activeNoteId=id; STATE.noteConceptFilter='ALL'; STATE.activeTab='notes'; render();
+    autoSaveNote(id);
+  }
+  else if (action==='open-setup-history') { STATE.historyStrategyFilter=btn.dataset.name; STATE.historyMistakeFilter='ALL'; STATE.historyDateFilter=''; STATE.historySearch=''; STATE.activeTab='history'; render(); window.scrollTo({top:0,behavior:REDUCED_MOTION?'auto':'smooth'}); }
   else if (action==='select-note') {
     STATE.activeNoteId = btn.dataset.id;
     STATE.editingNoteId = null;
@@ -1445,6 +1611,7 @@ function refreshBatteryOnly(){
 }
 
 document.addEventListener('change', (e) => {
+  if (e.target.id==='dash-strategy-select') { STATE.dashStrategy=e.target.value; STATE.dashEditStrategy=null; saveDashStrategy(e.target.value); rerenderSetupPlaybook(); return; }
   if (e.target.id==='playbook-select') { STATE.selectedPlaybookId = e.target.value; STATE.checkedRules = {}; renderTabOnly(); }
   else if (e.target.id==='log-strategy-select') { STATE.selectedPlaybookId = e.target.value; STATE.checkedRules = {}; updateLogPreview(); }
   else if (e.target.id==='log-location-select') { STATE.logFormLocation = e.target.value; updateLogPreview(); }
@@ -1637,14 +1804,33 @@ async function updateExistingTrade(id){
   const emotions = [...new Set([...selectedEdit, ...customEdit])];
   const emotion = emotions.join(' · ') || t.emotion || ''; 
   const images=[...document.querySelectorAll('#edit-images-list img')].map(x=>x.dataset.src).filter(Boolean);
-  const pnl=(entry&&exit&&qty)?Math.round((type==='LONG'?(exit-entry)*qty:(entry-exit)*qty)*100)/100:(t.pnl||0);
-  const rr=(sl&&entry&&exit&&entry!==sl)?Math.round(((type==='LONG'?exit-entry:entry-exit)/Math.abs(entry-sl))*100)/100:(t.rr||0);
+  const hasExit=Number.isFinite(exit), canPnl=Number.isFinite(entry)&&hasExit&&Number.isFinite(qty);
+  // Exit cleared => trade is open again, so P&L/R go back to 0 instead of keeping the old result.
+  const pnl=canPnl?Math.round((type==='LONG'?(exit-entry)*qty:(entry-exit)*qty)*100)/100:(hasExit?(t.pnl||0):0);
+  const rr=(Number.isFinite(sl)&&Number.isFinite(entry)&&hasExit&&entry!==sl)?Math.round(((type==='LONG'?exit-entry:entry-exit)/Math.abs(entry-sl))*100)/100:(hasExit?(t.rr||0):0);
+  const strategy=$('#edit-strategy')?.value || t.strategy;
+  const isSetupTrade=strategy!==NO_SETUP_STRATEGY;
+  const mistake=$('#edit-mistake')?.value || t.mistake || 'none';
+  const quality=Number($('#edit-quality')?.value) || t.quality || 3;
+  const notes=$('#edit-notes') ? $('#edit-notes').value.trim() : (t.notes||'');
   const snapshot = JSON.parse(JSON.stringify(t));
-  Object.assign(t,{symbol:symbol.toUpperCase(),type,emotions,quantity:Number.isFinite(qty)?qty:t.quantity,entryPrice:Number.isFinite(entry)?entry:null,exitPrice:Number.isFinite(exit)?exit:null,stopLoss:Number.isFinite(sl)?sl:null,tradeDateTime:$('#edit-trade-datetime')?.value || t.tradeDateTime || t.date,emotion,exitReason:$('#edit-exit-reason')?.value.trim()||'',images,beforeImage:images[0]||null,afterImage:images[1]||null,image:images[0]||null,pnl,rr});
+  Object.assign(t,{symbol:symbol.toUpperCase(),type,emotions,quantity:Number.isFinite(qty)?qty:t.quantity,entryPrice:Number.isFinite(entry)?entry:null,exitPrice:Number.isFinite(exit)?exit:null,stopLoss:Number.isFinite(sl)?sl:null,tradeDateTime:$('#edit-trade-datetime')?.value || t.tradeDateTime || t.date,emotion,exitReason:$('#edit-exit-reason')?.value.trim()||'',notes,strategy,isSetupTrade,mistake,quality,followedPlan:isSetupTrade&&mistake==='none',updatedAt:new Date().toISOString(),images,beforeImage:images[0]||null,afterImage:images[1]||null,image:images[0]||null,pnl,rr});
   const saved = await saveUserData('Trade', ['trades']);
   if (!saved) { Object.assign(t, snapshot); return; }
   STATE.editingTradeId=null; render();
 }
+
+document.addEventListener('input', (e) => {
+  if (e.target.id !== 'history-search') return;
+  STATE.historySearch = e.target.value;
+  clearTimeout(STATE.historySearchTimer);
+  STATE.historySearchTimer = setTimeout(() => {
+    const pos = e.target.selectionStart;
+    renderTabOnly();
+    const box = $('#history-search');
+    if (box) { box.focus(); try { box.setSelectionRange(pos, pos); } catch (_) {} }
+  }, 200);
+});
 
 document.addEventListener('submit', async (e) => {
   if (e.target.id==='log-form') {
@@ -1668,7 +1854,7 @@ document.addEventListener('submit', async (e) => {
       entryPrice: entry === '' ? null : parseFloat(entry), exitPrice: exit === '' ? null : parseFloat(exit), quantity: parseFloat(qty),
       stopLoss: $('#log-sl').value ? parseFloat($('#log-sl').value) : null, takeProfit: null,
       strategy: strategyName, emotions: finalEmotions, emotion: finalEmotions.join(' · '), emotionPreset: null, device: STATE.logFormDevice, location: STATE.logFormLocation,
-      notes: $('#log-notes')?.value || '', exitReason: $('#log-exit-reason')?.value.trim() || '', image: currentLogImages()[0] || null, beforeImage: currentLogImages()[0] || null, afterImage: currentLogImages()[1] || null, images: currentLogImages(),
+      notes: ($('#log-notes')?.value || '').trim(), exitReason: $('#log-exit-reason')?.value.trim() || '', image: currentLogImages()[0] || null, beforeImage: currentLogImages()[0] || null, afterImage: currentLogImages()[1] || null, images: currentLogImages(),
       plannedEntry, plannedSL, plannedTP, plannedRR, mistake: $('#log-mistake').value, quality: Number($('#log-quality').value), followedPlan: STATE.logFormIsSetup && $('#log-mistake').value==='none',
       date: new Date().toISOString(), tradeDateTime: $('#log-trade-datetime')?.value || new Date().toISOString(), pnl: p.pnl, rr: p.rr, xpEarned: p.xp
     };

@@ -42,3 +42,23 @@ but large journals will hit D1's 2 MB row limit — the server now returns a cle
 - Motion: sliding tab indicator, short content transition on tab change, modal lift, risk bars fill in, one dashboard load moment (curve draws, numbers count up — once per visit), candle loader.
 - `prefers-reduced-motion` respected; animations can never break rendering (fail-safe).
 - App icons and PWA theme colour updated to the new palette. Service worker cache bumped to v3.
+
+## Update 4 — Trade history completeness
+- **Quick note now shows in every history view** (Grid, List, Gallery — before it was only in Detailed). Shown as a highlighted note on the card; search finds it.
+- Log form quick note is now multi-line.
+- **Edit Trade** can now change: quick note, trade date & time, strategy, mistake, execution quality (before these could not be edited). "Plan followed" is recalculated after editing.
+- Trade time shown properly everywhere (e.g. "1 Oct 2026, 11:05 am") instead of the raw logging timestamp; Grid view now shows time and SL.
+- History sorted by actual trade time (backdated trades land in the right place).
+- Search box: symbol, note, exit reason, strategy, emotion, mistake.
+- Exit price removed in Edit → trade becomes "Open" and P&L/R reset to 0 (before it kept the old P&L).
+- Mistake chip highlighted in red; exit reason shown as a chip; device/location shown in Detailed view.
+- Grid and Gallery use multiple columns on wide screens.
+
+## Update 5 — Setup Playbook on the dashboard
+- New **Setup Playbook** card (below the KPIs): pick a strategy from the dropdown and see everything about it in one compact view. The choice is remembered on that device.
+- **Numbers:** trades (open trades shown separately, not counted in stats), win rate, net P&L, avg R, % rules followed, best and worst session.
+- **Rules:** entry criteria, exit/invalidation, mandatory rules. ✏️ Edit right there (works for old strategies that had no criteria too).
+- **Mistakes in this setup:** each mistake with count and how much money it cost, plus "rules followed vs rules broken" P&L.
+- **Notes:** notes whose Strategy (or concept) matches the setup, click to open; ＋ Note creates a note already linked to the setup; latest trade quick notes.
+- **Latest trades:** last 5 trades of that setup; "Sab dekho" opens History filtered to it.
+- Strategies that exist only in trades (e.g. "Bina Setup") are listed too.
