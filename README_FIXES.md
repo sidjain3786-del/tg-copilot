@@ -97,3 +97,8 @@ This restores the WHOLE database (trades/notes saved after that time are rolled 
 - The app now checks that a file really decodes as an image, not just that the server answered.
 - **Self-repair on the server:** if a file in R2 contains the image as base64 / data-URL text instead of real image bytes, `/api/img` decodes it, serves it correctly and saves the fixed file back to R2.
 - Files that are truly unreadable show: "R2 mein is image ki file kharab hai — Edit se hata kar dobara upload karo". "Sab images check karo" now also counts damaged files.
+
+## Update 10 — "Image baar-baar load nahi ho rahi" (stale browser cache)
+- **Cause:** earlier builds served `/api/img/...` with `Cache-Control: immutable` for 1 year. Browsers that had once received a bad copy of an image kept showing that bad copy even after the server copy was fixed. (Health check showed 13/13 found, 0 damaged — the server side was fine; only the browser copy was stale.)
+- **Fix:** images are now displayed with a version tag (`?v=3`), so every browser fetches a fresh copy once. Stored data keeps the plain URL. If one copy still fails, the app fetches a fresh one, remembers the working URL and reuses it when the screen re-renders (notes autosave, typing etc.). Server cache is now 1 day, not 1 year/immutable.
+- Verified in the same browser profile that had the stale copies: before → all images broken with this message; after → all valid images show.

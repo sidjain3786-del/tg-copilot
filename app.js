@@ -111,7 +111,7 @@ function noteBlocksForForm(){ return (STATE.noteFormBlocks||[]).filter(b => b &&
 function renderNoteBlocksEditor(){
   const blocks=STATE.noteFormBlocks||[];
   const box=$('#note-blocks-editor'); if(!box) return;
-  box.innerHTML=blocks.length ? blocks.map((b,i)=> b.type==='image' ? `<div class=\"note-block-editor image\"><img src=\"${esc(b.src)}\" data-action=\"open-note-block-annotator\" data-index=\"${i}\"><div class=\"note-block-actions\"><button type=\"button\" class=\"btn-secondary\" data-action=\"open-note-block-annotator\" data-index=\"${i}\">✍️ Draw</button><button type=\"button\" class=\"item-delete\" data-action=\"remove-note-block\" data-index=\"${i}\">🗑️</button></div></div>` : `<div class=\"note-block-editor text\"><textarea data-note-block-text=\"${i}\" rows=\"3\" placeholder=\"Image ke neeche kya likhna hai?\">${esc(b.text)}</textarea><button type=\"button\" class=\"item-delete\" data-action=\"remove-note-block\" data-index=\"${i}\">🗑️</button></div>`).join('') : `<div class=\"notes-blocks-empty\">Abhi koi screenshot/text block nahi hai. Neeche se image ya text add karein.</div>`;
+  box.innerHTML=blocks.length ? blocks.map((b,i)=> b.type==='image' ? `<div class=\"note-block-editor image\"><img src=\"${esc(imgUrl(b.src))}\" data-action=\"open-note-block-annotator\" data-index=\"${i}\"><div class=\"note-block-actions\"><button type=\"button\" class=\"btn-secondary\" data-action=\"open-note-block-annotator\" data-index=\"${i}\">✍️ Draw</button><button type=\"button\" class=\"item-delete\" data-action=\"remove-note-block\" data-index=\"${i}\">🗑️</button></div></div>` : `<div class=\"note-block-editor text\"><textarea data-note-block-text=\"${i}\" rows=\"3\" placeholder=\"Image ke neeche kya likhna hai?\">${esc(b.text)}</textarea><button type=\"button\" class=\"item-delete\" data-action=\"remove-note-block\" data-index=\"${i}\">🗑️</button></div>`).join('') : `<div class=\"notes-blocks-empty\">Abhi koi screenshot/text block nahi hai. Neeche se image ya text add karein.</div>`;
 }
 
 async function api(path, method='GET', body){
@@ -126,6 +126,17 @@ async function api(path, method='GET', body){
 
 /* ---------------- broken image diagnostics ----------------
    If a stored chart image can't load, show WHY instead of a broken icon. */
+// Older builds served /api/img with a 1-year "immutable" cache header, so a browser
+// could keep a bad copy forever. Every display URL gets a version tag so the
+// browser asks the server again. Stored data keeps the plain URL.
+const IMG_URL_VERSION = '3';
+function imgUrl(src){
+  const s0 = String(src||'');
+  if (!s0.startsWith('/api/img/')) return s0;
+  const base = s0.split('?')[0];
+  return IMG_GOOD_URL.get(base) || `${base}?v=${IMG_URL_VERSION}`;
+}
+const IMG_GOOD_URL = new Map();   // base URL -> URL that is known to load
 const IMG_STATUS_CACHE = new Map();
 const BROKEN_ORIGINALS = new WeakMap();
 const IMG_RETRIED = new Set();   // auto-retry each image at most once (no flicker loop)
@@ -168,8 +179,15 @@ document.addEventListener('error', async (e) => {
   img.style.visibility = 'hidden';   // no broken-icon flash while we check
   const info = { ...(await diagnoseImage(src.split('?')[0])) };
   const baseSrc = src.split('?')[0];
-  if (info.status === 200 && !IMG_RETRIED.has(baseSrc)) {          // a hiccup: try exactly once more
-    IMG_RETRIED.add(baseSrc); img.dataset.brokenHandled=''; img.addEventListener('load',()=>{ img.style.visibility=''; },{once:true}); img.src = baseSrc + '?r=' + Date.now(); return;
+  if (info.status === 200 && !IMG_RETRIED.has(baseSrc)) {          // server copy is fine: fetch a fresh copy exactly once
+    IMG_RETRIED.add(baseSrc);
+    const fresh = baseSrc + '?r=' + Date.now();
+    img.dataset.brokenHandled='';
+    img.addEventListener('load',()=>{ img.style.visibility=''; IMG_GOOD_URL.set(baseSrc, fresh); },{once:true});
+    img.src = fresh; return;
+  }
+  if (IMG_GOOD_URL.has(baseSrc) && src !== IMG_GOOD_URL.get(baseSrc)) {   // re-rendered element: use the URL that worked
+    img.dataset.brokenHandled=''; img.style.visibility=''; img.src = IMG_GOOD_URL.get(baseSrc); return;
   }
   if (info.status === 200) info.text = 'Image baar-baar load nahi ho rahi. Page refresh karke dekho; phir bhi na aaye to Edit se dobara upload karo.';
   const box = document.createElement('div');
@@ -926,7 +944,7 @@ function renderLogImagePreview(){
   const box = $('#log-image-preview');
   if (!box) return;
   const images = currentLogImages();
-  box.innerHTML = images.length ? `<div class="multi-image-grid">${images.map((src,i)=>`<div class="multi-image-item"><img src="${esc(src)}" data-action="view-image" data-src="${esc(src)}"><button type="button" data-action="remove-log-image-index" data-index="${i}">×</button><span>Image ${i+1}</span></div>`).join('')}</div><div class="image-count">📸 ${images.length} image${images.length===1?'':'s'} attached</div>` : '<div class="shot-empty">No images added yet</div>';
+  box.innerHTML = images.length ? `<div class="multi-image-grid">${images.map((src,i)=>`<div class="multi-image-item"><img src="${esc(imgUrl(src))}" data-action="view-image" data-src="${esc(src)}"><button type="button" data-action="remove-log-image-index" data-index="${i}">×</button><span>Image ${i+1}</span></div>`).join('')}</div><div class="image-count">📸 ${images.length} image${images.length===1?'':'s'} attached</div>` : '<div class="shot-empty">No images added yet</div>';
 }
 function addLogImages(images){
   const arr=currentLogImages();
@@ -974,8 +992,8 @@ function renderLogTab(){
         </div>
 
         <div class="fast-journal-screenshots"><div class="fast-shot-head"><div><strong>📸 Before & After</strong><span>Optional — chart screenshots</span></div></div><div class="before-after-grid">
-          <label class="shot-upload-card ${STATE.logFormBeforeImage?'has-image':''}"><div class="shot-label">BEFORE ENTRY</div>${STATE.logFormBeforeImage ? `<img src="${esc(STATE.logFormBeforeImage)}" alt="Before entry">` : `<div class="shot-placeholder">＋<small>Upload before entry</small></div>`}<input type="file" id="log-before-image-file" accept="image/*" style="display:none;"></label>
-          <label class="shot-upload-card ${STATE.logFormAfterImage?'has-image':''}"><div class="shot-label">AFTER EXIT</div>${STATE.logFormAfterImage ? `<img src="${esc(STATE.logFormAfterImage)}" alt="After exit">` : `<div class="shot-placeholder">＋<small>Upload after exit</small></div>`}<input type="file" id="log-after-image-file" accept="image/*" style="display:none;"></label>
+          <label class="shot-upload-card ${STATE.logFormBeforeImage?'has-image':''}"><div class="shot-label">BEFORE ENTRY</div>${STATE.logFormBeforeImage ? `<img src="${esc(imgUrl(STATE.logFormBeforeImage))}" alt="Before entry">` : `<div class="shot-placeholder">＋<small>Upload before entry</small></div>`}<input type="file" id="log-before-image-file" accept="image/*" style="display:none;"></label>
+          <label class="shot-upload-card ${STATE.logFormAfterImage?'has-image':''}"><div class="shot-label">AFTER EXIT</div>${STATE.logFormAfterImage ? `<img src="${esc(imgUrl(STATE.logFormAfterImage))}" alt="After exit">` : `<div class="shot-placeholder">＋<small>Upload after exit</small></div>`}<input type="file" id="log-after-image-file" accept="image/*" style="display:none;"></label>
         </div><div class="image-url-add-row fast-extra-image"><input type="url" id="log-image-url" placeholder="Optional: paste another image URL..."><button type="button" class="btn-secondary" data-action="add-log-image-url">+ Add</button></div><div id="log-image-preview"></div></div>
       </div>
 
@@ -1036,7 +1054,7 @@ function renderNoteImagePreview(){
   if (!box) return;
   box.innerHTML = STATE.noteFormImage ? `
     <div class="image-preview-row">
-      <div style="display:flex; align-items:center; gap:.6rem;"><img src="${STATE.noteFormImage}"><span style="font-size:.7rem; color:var(--emerald); font-weight:700;">✅ Attached</span></div>
+      <div style="display:flex; align-items:center; gap:.6rem;"><img src="${esc(imgUrl(STATE.noteFormImage))}"><span style="font-size:.7rem; color:var(--emerald); font-weight:700;">✅ Attached</span></div>
       <button type="button" data-action="remove-note-image" style="background:var(--rose-light); color:var(--rose); border:none; border-radius:.7rem; padding:.35rem .6rem; cursor:pointer;">🗑️</button>
     </div>` : '';
 }
@@ -1118,7 +1136,7 @@ function renderNotesTab(){
         ${normalizeNoteBlocks(active).map((b,i)=> b.type==='image' ? `
           <div class="note-live-block image samsung-note-image-block">
             <div class="note-live-image-wrap">
-              <img src="${esc(b.src)}" data-action="open-note-block-annotator" data-note-id="${active.id}" data-index="${i}" alt="Note image">
+              <img src="${esc(imgUrl(b.src))}" data-action="open-note-block-annotator" data-note-id="${active.id}" data-index="${i}" alt="Note image">
               <button type="button" class="note-block-remove-floating" data-action="remove-live-note-block" data-note-id="${active.id}" data-index="${i}" title="Remove image">×</button>
               <button type="button" class="note-draw-floating" data-action="open-note-block-annotator" data-note-id="${active.id}" data-index="${i}">✍️ Draw</button>
             </div>
@@ -1200,11 +1218,11 @@ function renderTradeView(t, mode){
   const chips=`<div class="history-chips"><span class="journal-chip">🧠 ${esc(emotionText(t))}</span><span class="journal-chip ${t.mistake&&t.mistake!=='none'?'chip-warn':''}">📝 ${esc(mistakeLabel(t.mistake||'none'))}</span><span class="journal-chip">⭐ ${t.quality||3}/5</span>${t.exitReason?`<span class="journal-chip">🚪 ${esc(t.exitReason)}</span>`:''}</div>`;
   const quickNote = t.notes ? `<p class="history-quick-note" title="${esc(t.notes)}"><span>Note</span>${esc(t.notes)}</p>` : '';
   const actions=`<div class="trade-actions"><button type="button" class="btn-secondary trade-edit-btn" data-action="edit-trade" data-id="${esc(t.id)}">✏️ Edit</button><button type="button" class="btn-danger trade-delete-btn" data-action="delete-trade" data-id="${esc(t.id)}" title="Delete trade">🗑️ Delete</button></div>`;
-  const shots = imgs.length ? `<div class="history-images">${imgs.map((src,i)=>`<div class="history-image"><img src="${esc(src)}" data-action="view-image" data-src="${esc(src)}" loading="lazy"><span>${i===0?'Before':i===1?'After':`Image ${i+1}`}</span></div>`).join('')}</div>` : `<div class="history-no-images">🖼 No screenshots</div>`;
+  const shots = imgs.length ? `<div class="history-images">${imgs.map((src,i)=>`<div class="history-image"><img src="${esc(imgUrl(src))}" data-action="view-image" data-src="${esc(src)}" loading="lazy"><span>${i===0?'Before':i===1?'After':`Image ${i+1}`}</span></div>`).join('')}</div>` : `<div class="history-no-images">🖼 No screenshots</div>`;
   if(mode==='list') return `<div class="history-list-row"><div class="history-list-main"><div class="history-symbol">${meta}</div><span class="history-date">${when} · ${strategy}</span>${t.notes?`<span class="history-list-note">📝 ${esc(t.notes)}</span>`:''}</div><div class="history-list-stat">${pv.pe??'—'} → ${t.exitPrice??'—'}</div><div class="history-list-stat">${esc(emotionText(t))}</div><div class="history-list-stat ${resultClass} mono">${open?'Open':money(pnl)}</div><div>${actions}</div></div>`;
   if(mode==='detailed') return `<article class="history-detail-card"><div class="history-detail-head"><div><span class="history-kicker">TRADE JOURNAL</span><h3>${meta}</h3><p>${when} · ${strategy}${t.isSetupTrade===false?'':` · ${t.followedPlan?'✅ Plan followed':'⚠️ Plan broken'}`}</p></div>${resultHtml}${actions}</div>${chips}<div class="history-detail-grid"><div><span>PLANNED</span><strong>Entry ${pv.pe??'—'} • SL ${pv.ps??'—'} • Target ${pv.pt??'—'} • R:R ${pv.prr??'—'}</strong></div><div><span>ACTUAL</span><strong>Entry ${t.entryPrice??'—'} • SL ${t.stopLoss??'—'} • Exit ${t.exitPrice??'—'}</strong></div><div><span>EXIT REASON</span><strong>${esc(t.exitReason||'—')}</strong></div><div><span>LOT SIZE</span><strong>${esc(t.quantity??'—')}</strong></div><div><span>WHERE</span><strong>${esc([t.device,t.location].filter(Boolean).join(' @ ')||'—')}</strong></div></div><p class="history-note">${t.notes?esc(t.notes):'<em>Koi note nahi — Edit se add karo.</em>'}</p>${shots}</article>`;
   if(mode==='gallery') return `<article class="history-gallery-card"><div class="history-gallery-head"><div><h3>${meta}</h3><p>${when} · ${strategy}</p></div>${resultHtml}${actions}</div>${shots}<div class="history-gallery-meta">${chips}${quickNote}</div></article>`;
-  return `<article class="history-grid-card"><div class="history-grid-media">${imgs[0]?`<img src="${esc(imgs[0])}" data-action="view-image" data-src="${esc(imgs[0])}" loading="lazy">`:`<div class="history-grid-placeholder">📈</div>`}<span class="${t.type==='LONG'?'badge-long':'badge-short'}">${esc(t.type||'—')}</span></div><div class="history-grid-body"><div class="history-grid-top"><div><h3>${esc(t.symbol||'—')}</h3><p>${strategy}</p><p class="history-when">${when}</p></div>${resultHtml}</div>${chips}${quickNote}<div class="history-mini-stats"><span>Entry <b>${t.entryPrice??'—'}</b></span><span>Exit <b>${t.exitPrice??'—'}</b></span><span>SL <b>${t.stopLoss??'—'}</b></span><span>Lot Size <b>${t.quantity??'—'}</b></span></div><div class="history-card-actions">${actions}</div></div></article>`;
+  return `<article class="history-grid-card"><div class="history-grid-media">${imgs[0]?`<img src="${esc(imgUrl(imgs[0]))}" data-action="view-image" data-src="${esc(imgs[0])}" loading="lazy">`:`<div class="history-grid-placeholder">📈</div>`}<span class="${t.type==='LONG'?'badge-long':'badge-short'}">${esc(t.type||'—')}</span></div><div class="history-grid-body"><div class="history-grid-top"><div><h3>${esc(t.symbol||'—')}</h3><p>${strategy}</p><p class="history-when">${when}</p></div>${resultHtml}</div>${chips}${quickNote}<div class="history-mini-stats"><span>Entry <b>${t.entryPrice??'—'}</b></span><span>Exit <b>${t.exitPrice??'—'}</b></span><span>SL <b>${t.stopLoss??'—'}</b></span><span>Lot Size <b>${t.quantity??'—'}</b></span></div><div class="history-card-actions">${actions}</div></div></article>`;
 }
 function renderHistoryTab(){
   const all = STATE.trades;
@@ -1260,7 +1278,7 @@ function renderEditTradeModal(id){
     <div class="field grid-3"><div><label>Trade date &amp; time</label><input type="datetime-local" id="edit-trade-datetime" value="${esc(tradeTimeInputValue(t))}"></div><div><label>Strategy</label><select id="edit-strategy">${editStrategyOptions(t)}</select></div><div><label>Mistake</label><select id="edit-mistake">${MISTAKE_OPTIONS.map(x=>`<option value="${x[0]}" ${(t.mistake||'none')===x[0]?'selected':''}>${esc(x[1])}</option>`).join('')}</select></div></div>
     <div class="field grid-2"><div><label>Execution quality</label><select id="edit-quality">${[1,2,3,4,5].map(n=>`<option value="${n}" ${Number(t.quality||3)===n?'selected':''}>${'⭐'.repeat(n)} ${n}/5</option>`).join('')}</select></div><div><label>Quick note</label><textarea id="edit-notes" rows="2" placeholder="Kya sahi hua? Kya improve karna hai?">${esc(t.notes||'')}</textarea></div></div>
     <div class="field"><label>Emotion(s)</label><div class="emotion-pills edit-emotions">${presets.map(x=>`<button type="button" class="emotion-pill ${(tradeEmotions(t).includes(x))?'selected':''}" data-action="toggle-edit-emotion" data-value="${esc(x)}">${esc(x)}</button>`).join('')}</div><input type="text" id="edit-custom-emotion" value="${esc(tradeEmotions(t).filter(x=>!presets.includes(x)).join(', '))}" placeholder="Custom emotions, comma separated"></div>
-    <div class="field grid-2"><div><label>Exit Reason</label><input id="edit-exit-reason" value="${esc(t.exitReason||'')}" placeholder="Target / SL / manual / time..."></div><div><label>Images</label><div class="edit-images-list" id="edit-images-list">${imgs.map((src,i)=>`<div class="edit-image-item"><img src="${esc(src)}" data-src="${esc(src)}"><button type="button" data-action="remove-edit-image" data-index="${i}">×</button></div>`).join('')}<label class="edit-add-image">+ Add<input type="file" id="edit-multi-image-file" accept="image/*" multiple style="display:none"></label></div></div></div>
+    <div class="field grid-2"><div><label>Exit Reason</label><input id="edit-exit-reason" value="${esc(t.exitReason||'')}" placeholder="Target / SL / manual / time..."></div><div><label>Images</label><div class="edit-images-list" id="edit-images-list">${imgs.map((src,i)=>`<div class="edit-image-item"><img src="${esc(imgUrl(src))}" data-src="${esc(src)}"><button type="button" data-action="remove-edit-image" data-index="${i}">×</button></div>`).join('')}<label class="edit-add-image">+ Add<input type="file" id="edit-multi-image-file" accept="image/*" multiple style="display:none"></label></div></div></div>
     <div class="edit-modal-actions"><button type="button" class="btn-secondary" data-action="cancel-edit-trade">Cancel</button><button type="button" class="btn-primary" data-action="update-trade" data-id="${esc(id)}">💾 Update Trade</button></div>
   </div></div>`;
 }
@@ -1884,7 +1902,7 @@ document.addEventListener('change', (e) => {
     const files=[...e.target.files]; if(!files.length) return;
     Promise.all(files.map(readAndCompressImage)).then(loaded=>{
       const box=$('#edit-images-list');
-      loaded.forEach(src=>{ const wrap=document.createElement('div'); wrap.className='edit-image-item'; wrap.innerHTML=`<img src="${src}" data-src="${src}"><button type="button" data-action="remove-edit-image">×</button>`; box?.insertBefore(wrap, box.querySelector('.edit-add-image')); });
+      loaded.forEach(src=>{ const wrap=document.createElement('div'); wrap.className='edit-image-item'; wrap.innerHTML=`<img src="${esc(imgUrl(src))}" data-src="${esc(src)}"><button type="button" data-action="remove-edit-image">×</button>`; box?.insertBefore(wrap, box.querySelector('.edit-add-image')); });
     }).catch(err=>alert(err.message || 'Image upload failed.'));
     e.target.value='';
   }
@@ -1911,7 +1929,7 @@ function openAnnotator(src,noteId=null,blockIndex=null){
   }
   STATE.annotator={src:src||baseSrc,baseSrc,noteId,blockIndex,drawing:false,mode:'pen',color:$('#annotator-color')?.value||'#ef4444',size:Number($('#annotator-size')?.value)||4,pressure:!!$('#annotator-pressure')?.checked,strokes,history:[strokes.map(cloneStroke)],redo:[],activeStroke:null};
   setAnnotatorMode('pen');
-  img.src=baseSrc; modal.style.display='flex';
+  img.src=imgUrl(baseSrc); modal.style.display='flex';
   img.onload=()=>setupAnnotatorCanvas();
   if(img.complete) setupAnnotatorCanvas();
 }
