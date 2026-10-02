@@ -124,6 +124,64 @@ async function api(path, method='GET', body){
   return data;
 }
 
+/* ---------------- broken image diagnostics ----------------
+   If a stored chart image can't load, show WHY instead of a broken icon. */
+const IMG_STATUS_CACHE = new Map();
+const BROKEN_ORIGINALS = new WeakMap();
+function imageProblemText(status, body){
+  if (status === 501) return 'Image storage (R2) is deployment se connected nahi hai. Cloudflare Pages → Settings → Bindings mein R2 binding "IMAGES" add karke redeploy karo.';
+  if (status === 404) return 'Yeh image R2 bucket mein nahi mili. Shayad IMAGES binding ab kisi doosre bucket se judi hai — wahi bucket bind karo jisme pehle images gayi thi.';
+  if (status === 401) return 'Login session khatam ho gaya. Dobara login karo.';
+  if (status === 0) return 'Internet / server se connect nahi ho paya. Thodi der baad Retry karo.';
+  return `Image load nahi hui (error ${status}${body&&body.error?': '+body.error:''}).`;
+}
+async function diagnoseImage(src){
+  if (IMG_STATUS_CACHE.has(src)) return IMG_STATUS_CACHE.get(src);
+  const p = (async () => {
+    if (src.startsWith('data:')) return { status: 'inline', text: 'Yeh purani image database mein hi kharab save hui thi (data corrupt). Edit se nayi image daal do.' };
+    try {
+      const r = await fetch(src, { credentials:'same-origin', cache:'no-store' });
+      const body = await r.clone().json().catch(()=>null);
+      if (r.ok && (r.headers.get('Content-Type')||'').startsWith('image/')) return { status: 200, text: '' };
+      return { status: r.status, text: imageProblemText(r.status, body) };
+    } catch (_) { return { status: 0, text: imageProblemText(0) }; }
+  })();
+  IMG_STATUS_CACHE.set(src, p);
+  return p;
+}
+document.addEventListener('error', async (e) => {
+  const img = e.target;
+  if (!(img instanceof HTMLImageElement) || img.dataset.brokenHandled) return;
+  const src = img.getAttribute('src') || '';
+  if (!src || !(src.startsWith('/api/img/') || src.startsWith('data:image/'))) return;
+  img.dataset.brokenHandled = '1';
+  const info = await diagnoseImage(src);
+  if (info.status === 200) { img.dataset.brokenHandled=''; img.src = src + (src.includes('?')?'&':'?') + 'r=' + Date.now(); return; }
+  const box = document.createElement('div');
+  box.className = 'img-broken';
+  box.innerHTML = `<strong>🖼️ Image load nahi hui</strong><p class="img-broken-msg">${esc(info.text)}</p><div class="img-broken-actions"><button type="button" data-action="retry-broken-image">Retry</button>${src.startsWith('/api/img/')?'<button type="button" data-action="check-all-images">Sab images check karo</button>':''}</div>`;
+  box.dataset.src = src;
+  BROKEN_ORIGINALS.set(box, img);
+  img.replaceWith(box);
+}, true);
+async function checkAllImages(){
+  try {
+    const r = await fetch('/api/img-health', { credentials:'same-origin', cache:'no-store' });
+    const d = await r.json();
+    if (!r.ok) { alert(d.error || 'Check nahi ho paya.'); return; }
+    const lines = [
+      `Image storage (R2) connected: ${d.binding ? 'Haan ✅' : 'NAHI ❌'}`,
+      `Journal mein R2 images: ${d.referenced}`,
+      `Bucket mein mili: ${d.found}`,
+      `Gayab: ${d.missing.length}`,
+      `Abhi bhi database ke andar (inline) images: ${d.inline}`
+    ];
+    if (!d.binding) lines.push('', 'Fix: Cloudflare Pages → Settings → Bindings → R2 bucket → Variable name IMAGES → redeploy.');
+    else if (d.missing.length) lines.push('', 'Gayab images us bucket mein nahi hain jo abhi bind hai. Agar pehle koi aur bucket bind tha, wahi wapas bind karo.');
+    alert(lines.join('\n'));
+  } catch (_) { alert('Check nahi ho paya — internet check karo.'); }
+}
+
 /* ---------------- motion ---------------- */
 const REDUCED_MOTION = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)').matches : false;
 let LAST_RENDERED_TAB = null;
@@ -215,6 +273,7 @@ $('#auth-form').addEventListener('submit', async (e) => {
 
 $('#logout-btn').addEventListener('click', async () => {
   try { await api('/api/logout', 'POST'); } catch (e) { console.warn('Logout request failed', e); }
+  IMAGE_URL_CACHE.clear(); IMAGE_STORE_AVAILABLE = true;
   STATE.user = null; STATE.trades = []; STATE.notes = []; STATE.customStrategies = []; STATE.sessionNotes = {};
   setAuthMode('login');
   showAuth();
@@ -250,7 +309,17 @@ async function uploadImageNow(dataUrl){
   const res = await fetch('/api/upload', { method:'POST', headers:{'Content-Type':'application/json'}, credentials:'same-origin', body: JSON.stringify({ dataUrl }) });
   if (res.status === 501) { IMAGE_STORE_AVAILABLE = false; return dataUrl; }
   const data = await res.json().catch(()=>({}));
+  // A single unsupported/too-big image must not block the whole save: keep it inline.
+  if (res.status >= 400 && res.status < 500 && res.status !== 401) { console.warn('Image kept inline:', data.error || res.status); return dataUrl; }
   if (!res.ok || !data.url) throw new Error(data.error || 'Image upload failed.');
+  // Never swap a working inline image for a link that doesn't open: check it first.
+  const check = await fetch(data.url, { credentials:'same-origin', cache:'no-store' }).catch(()=>null);
+  const type = check?.headers?.get('Content-Type') || '';
+  if (!check || !check.ok || !type.startsWith('image/')) {
+    console.warn('Uploaded image not readable back, keeping inline copy', check?.status);
+    IMAGE_STORE_AVAILABLE = false;
+    return dataUrl;
+  }
   return data.url;
 }
 function uploadImage(dataUrl){
@@ -1574,6 +1643,8 @@ document.addEventListener('click', async (e) => {
     STATE.editingNoteId = null;
     renderTabOnly();
   }
+  else if (action==='retry-broken-image') { const box=btn.closest('.img-broken'); if(box){ const src=box.dataset.src; IMG_STATUS_CACHE.delete(src); const img=BROKEN_ORIGINALS.get(box)||document.createElement('img'); img.dataset.brokenHandled=''; img.src=src+(src.startsWith('data:')?'':(src.includes('?')?'&':'?')+'r='+Date.now()); box.replaceWith(img); } }
+  else if (action==='check-all-images') { checkAllImages(); }
   else if (action==='open-strategy-manager') { openStrategyManager(btn.dataset.new ? 'new' : (btn.dataset.id || null)); }
   else if (action==='close-strategy-manager') { closeStrategyManager(); }
   else if (action==='sm-backdrop') { if (e.target===btn) closeStrategyManager(); }

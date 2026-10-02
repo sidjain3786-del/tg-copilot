@@ -76,3 +76,18 @@ but large journals will hit D1's 2 MB row limit — the server now returns a cle
 ## Update 7 — Strategy dropdown in notes
 - Note editor → Strategy is a clear, larger dropdown of your saved strategies ("— Strategy chuno —").
 - Last option "＋ Nayi strategy banao…" opens the strategy window; the new strategy is saved and linked to that note automatically. Closing the window without saving leaves the note unchanged.
+
+## Update 8 — Broken images after R2: diagnosis + safety
+- A broken image no longer shows a blank/broken icon. It shows the exact reason:
+  - **R2 not connected** in this deployment (binding missing / not redeployed) → add `IMAGES` binding and redeploy.
+  - **Image not in bucket** (binding now points to a different bucket) → bind the bucket the images were uploaded to.
+  - **Session expired** → log in again.
+  With "Retry" and "Sab images check karo" (calls new `GET /api/img-health`: binding present?, how many R2 images, how many found/missing, how many still inline).
+- **Safer migration:** after uploading an old image to R2, the app now opens it back from R2 before replacing the inline copy. If it can't be read, the inline image is kept (nothing is lost).
+- A single unsupported/oversized image no longer blocks saving; it simply stays inline. `image/jpg` data URLs are accepted.
+- Image cache is cleared on logout (prevents one account's image links being reused in another).
+
+### If images are already missing from R2
+D1 Time Travel can roll the database back to a minute before the migration (Free plan: last 7 days, Paid: 30 days):
+`npx wrangler d1 time-travel restore <DB_NAME> --timestamp=<UNIX_TIME_BEFORE_MIGRATION>`
+This restores the WHOLE database (trades/notes saved after that time are rolled back too). The command prints a bookmark to undo the restore.

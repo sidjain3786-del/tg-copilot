@@ -365,3 +365,13 @@ button, input, select, textarea { font-family: inherit; }
 /* note editor: strategy picker is easy to spot and tap */
 .samsung-note-strategy select { font-size: .8rem; font-weight: 600; color: var(--ink); background: var(--ink-tint); border: 1px solid var(--ink-line); padding: .5rem 2rem .5rem .65rem; min-height: 36px; cursor: pointer; min-width: 13rem; }
 .samsung-note-strategy select:focus { outline: none; border-color: var(--ink-3); box-shadow: 0 0 0 3px rgba(45,82,135,.14); }
+
+/* broken image explainer */
+.img-broken { display: flex; flex-direction: column; gap: .35rem; justify-content: center; min-height: 120px; padding: .85rem; border: 1px dashed #F3C2C1; border-radius: 10px; background: #FFF7F7; color: var(--text); font-size: .74rem; line-height: 1.45; text-align: left; }
+.img-broken strong { font-size: .8rem; color: #B42318; }
+.img-broken-actions { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .2rem; }
+.img-broken-actions button { font: inherit; font-size: .7rem; font-weight: 600; padding: .35rem .6rem; border-radius: 8px; border: 1px solid var(--line); background: #fff; color: var(--ink); cursor: pointer; }
+.history-grid-media .img-broken { height: 100%; border-radius: 0; border-width: 0 0 1px; }
+.img-broken .img-broken-msg { margin: 0; position: static; font-size: .74rem; }
+.img-broken button { position: relative; z-index: 1; }
+.history-image .img-broken, .history-gallery-card .img-broken { height: auto; min-height: 140px; }
