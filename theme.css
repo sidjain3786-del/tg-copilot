@@ -331,3 +331,37 @@ button, input, select, textarea { font-family: inherit; }
   .pb-col, .pb-col + .pb-col { padding: .85rem 0; border-left: 0; max-height: none; }
   .pb-col + .pb-col { border-top: 1px solid var(--line); }
 }
+
+/* ---------- Strategy manager ---------- */
+.playbook-controls { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+.sm-overlay { animation: tc-fade .2s ease-out; background: rgba(10,19,35,.55); }
+.sm-modal { width: min(720px, 100%); border-radius: var(--r-lg); animation: tc-modal .28s var(--ease-out); }
+.sm-form { border: 1px solid var(--ink-line); background: #FAFBFD; border-radius: var(--r-md); padding: 1rem; margin-bottom: 1rem; }
+.sm-form h3 { margin: 0 0 .75rem; font-family: var(--font-display); font-size: 1rem; color: var(--ink); }
+.sm-form .field input, .sm-form .field textarea { background: #fff; }
+.sm-error { margin: 0; min-height: 1rem; font-size: .76rem; color: var(--loss); font-weight: 600; }
+.sm-form-actions { display: flex; justify-content: flex-end; gap: .5rem; }
+.sm-list-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: .5rem; font-size: .85rem; }
+.sm-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
+.sm-list li { display: flex; justify-content: space-between; align-items: center; gap: .75rem; padding: .7rem .85rem; background: #fff; }
+.sm-list li + li { border-top: 1px solid var(--line); }
+.sm-list li.is-editing { background: var(--ink-tint); }
+.sm-list strong { display: block; font-size: .88rem; }
+.sm-list small { display: block; font-size: .72rem; color: var(--muted); margin-top: .1rem; }
+.sm-row-actions { display: flex; gap: .4rem; flex-shrink: 0; }
+.btn-danger.btn-small { font-size: .65rem; padding: .4rem .65rem; }
+.log-strategy-label { display: flex !important; justify-content: space-between; align-items: center; }
+.pb-link-note select { width: 100%; margin-bottom: .55rem; font: inherit; font-size: .74rem; color: var(--muted); border: 1px dashed var(--ink-line); border-radius: 8px; padding: .45rem .55rem; background: #fff; cursor: pointer; }
+.pb-link-note select:focus { outline: none; border-color: var(--ink-3); }
+.samsung-note-strategy select { border: 0; background: #f8fafc; border-radius: .55rem; padding: .45rem .55rem; color: var(--slate-700); font: inherit; font-size: .68rem; outline: none; flex: 1; min-width: 10rem; }
+@media (max-width: 700px) {
+  .playbook-controls { width: 100%; }
+  .playbook-controls .btn-secondary { width: 100%; }
+  .sm-list li { flex-direction: column; align-items: stretch; }
+  .sm-row-actions .btn-small { flex: 1; }
+}
+.sm-row-actions .btn-danger { background: #fff; color: var(--loss); border: 1px solid #F3C2C1; border-radius: var(--r-sm); font-weight: 600; cursor: pointer; transition: background .15s; }
+.sm-row-actions .btn-danger:hover { background: #FFF1F1; }
+/* note editor: strategy picker is easy to spot and tap */
+.samsung-note-strategy select { font-size: .8rem; font-weight: 600; color: var(--ink); background: var(--ink-tint); border: 1px solid var(--ink-line); padding: .5rem 2rem .5rem .65rem; min-height: 36px; cursor: pointer; min-width: 13rem; }
+.samsung-note-strategy select:focus { outline: none; border-color: var(--ink-3); box-shadow: 0 0 0 3px rgba(45,82,135,.14); }

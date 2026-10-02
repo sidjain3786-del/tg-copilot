@@ -62,3 +62,17 @@ but large journals will hit D1's 2 MB row limit — the server now returns a cle
 - **Notes:** notes whose Strategy (or concept) matches the setup, click to open; ＋ Note creates a note already linked to the setup; latest trade quick notes.
 - **Latest trades:** last 5 trades of that setup; "Sab dekho" opens History filtered to it.
 - Strategies that exist only in trades (e.g. "Bina Setup") are listed too.
+
+## Update 6 — Manage strategies + notes linking
+- The original "Add Strategy" section existed in the code but was never shown on any screen. Replaced by a **Manage strategies** window, opened from:
+  Dashboard → Setup Playbook → "⚙️ Manage strategies", and Log Trade → Strategy → "⚙️ Manage" (or "＋ Add strategy" when there are none).
+- In it: add, edit (name, entry criteria, exit/invalidation, rules) and delete strategies. Duplicate names are blocked.
+  Renaming moves that strategy's trades and notes to the new name. Deleting a strategy never deletes its trades.
+- Notes now link to a setup much more reliably:
+  - Note editor's Strategy field is now a dropdown of your saved strategies (was free text, so small typos broke the link).
+  - Matching ignores case/spaces/punctuation, accepts short forms ("orb" → "ORB Breakout"), and also picks up notes whose title names the strategy.
+  - Setup Playbook has "🔗 Purana note is setup se jodo…" to attach any existing note in one tap.
+
+## Update 7 — Strategy dropdown in notes
+- Note editor → Strategy is a clear, larger dropdown of your saved strategies ("— Strategy chuno —").
+- Last option "＋ Nayi strategy banao…" opens the strategy window; the new strategy is saved and linked to that note automatically. Closing the window without saving leaves the note unchanged.

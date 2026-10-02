@@ -41,7 +41,7 @@ const STATE = {
   noteFormStrategy: '', noteFormConcept: 'General', noteFormCustomConcept: '', noteFormImage: '', noteFormBlocks: [], activeNoteId: null, editingNoteId: null, noteConceptFilter: 'ALL',
   annotator: {src:'', baseSrc:'', noteId:null, blockIndex:null, drawing:false, mode:'pen', color:'#ef4444', size:4, pressure:false, strokes:[], history:[], redo:[], activeStroke:null},
   noteAutoSaveTimer: null, noteAutoSaveBusy: false, noteInsertIndex: null,
-  dashStrategy: loadDashStrategy(), dashEditStrategy: null, historyStrategyFilter: 'ALL', historyMistakeFilter: 'ALL', historyDateFilter: '', analysisDateFilter: '', historyView: localStorage.getItem('tc_history_view') || 'grid',
+  dashStrategy: loadDashStrategy(), dashEditStrategy: null, strategyManager: {open:false, editingId:null}, historyStrategyFilter: 'ALL', historyMistakeFilter: 'ALL', historyDateFilter: '', analysisDateFilter: '', historyView: localStorage.getItem('tc_history_view') || 'grid',
   riskSettings: loadRiskSettings()
 };
 function loadRiskSettings(){
@@ -900,7 +900,7 @@ function renderLogTab(){
           <button type="button" class="toggle-btn ${!STATE.logFormIsSetup?'active-red':''}" data-action="set-log-setup" data-value="false">⚡ Quick trade</button>
         </div>
         ${STATE.logFormIsSetup ? `<div class="field strategy-select-field log-strategy-mini">
-          <label>🎯 Strategy</label>
+          <label class="log-strategy-label">🎯 Strategy <button type="button" class="pb-link" data-action="open-strategy-manager" ${allStrategies().length?'':'data-new="1"'}>${allStrategies().length?'⚙️ Manage':'＋ Add strategy'}</button></label>
           <select id="log-strategy-select" ${allStrategies().length ? '' : 'disabled'}>${allStrategies().length ? strategyOptions : '<option>No strategy yet</option>'}</select>
         </div>` : ''}
       </div>
@@ -1025,7 +1025,7 @@ function renderNotesTab(){
 
       <div class="samsung-note-meta-row">
         <label class="samsung-note-concept"><span>CONCEPT</span><select data-note-editor-concept="${active.id}">${NOTE_CONCEPTS.map(c=>`<option value="${esc(c)}" ${(active.concept||'General')===c && !active.customConcept?'selected':''}>${esc(c)}</option>`).join('')}<option value="__custom__" ${active.customConcept?'selected':''}>Custom</option></select></label>
-        <label class="samsung-note-strategy"><span>STRATEGY</span><input data-note-editor-strategy="${active.id}" value="${esc(active.strategy||'')}" placeholder="Optional"></label>
+        <label class="samsung-note-strategy"><span>STRATEGY</span><select data-note-editor-strategy="${active.id}">${noteStrategyOptions(active.strategy)}</select></label>
       </div>
 
       <div class="samsung-note-page">
@@ -1199,8 +1199,14 @@ function currentDashStrategy(){
   if (STATE.dashStrategy && names.some(n=>sameName(n,STATE.dashStrategy))) return names.find(n=>sameName(n,STATE.dashStrategy));
   return [...names].sort((a,b)=>(counts[b]||0)-(counts[a]||0))[0];
 }
+const normKey=v=>String(v||'').toLowerCase().replace(/[^a-z0-9\u0900-\u097f]+/g,'');
+// A note belongs to a setup if its Strategy/concept names it (spacing, case and
+// punctuation ignored, "ORB" also matches "ORB Breakout"), or its title names it.
 function noteMatchesStrategy(n, name){
-  return sameName(n.strategy,name) || sameName(n.concept,name) || sameName(n.customConcept,name);
+  const key=normKey(name); if(!key) return false;
+  const fieldHit=[n.strategy,n.concept,n.customConcept].some(v=>{ const k=normKey(v); return k && (k===key || (k.length>=3 && (key.startsWith(k)||k.startsWith(key)))); });
+  if (fieldHit) return true;
+  return key.length>=4 && normKey(n.title).includes(key);
 }
 function notePreviewText(n){
   const blocks=normalizeNoteBlocks(n);
@@ -1225,9 +1231,20 @@ function setupPlaybookData(name){
   return { name, strategy, trades, closed, wins, losses, pnl, avgR, followed, broken, followedPnl:sum(followed), brokenPnl:sum(broken), mistakeList, sessions, notes, tradeNotes,
     winRate: closed.length?Math.round(wins.length/closed.length*100):0, ruleRate: closed.length?Math.round(followed.length/closed.length*100):0 };
 }
+function noteStrategyOptions(current){
+  const names=allStrategies().map(x=>x.name).filter(Boolean);
+  const cur=String(current||'').trim();
+  const extra=cur && !names.some(n=>sameName(n,cur)) ? `<option value="${esc(cur)}" selected>${esc(cur)} (not saved)</option>` : '';
+  return `<option value="">— Strategy chuno —</option>${extra}${names.map(n=>`<option value="${esc(n)}" ${sameName(n,cur)?'selected':''}>${esc(n)}</option>`).join('')}<option value="__new__">＋ Nayi strategy banao…</option>`;
+}
+function linkableNotesSelect(d, name){
+  const others=STATE.notes.filter(n=>!d.notes.includes(n));
+  if(!others.length) return '';
+  return `<label class="pb-link-note"><span class="sr-only">Link an existing note</span><select data-link-note-to="${esc(name)}"><option value="">🔗 Purana note is setup se jodo…</option>${others.slice(0,60).map(n=>`<option value="${esc(n.id)}">${esc((n.title||n.symbol||'Untitled').slice(0,60))}${n.strategy?` (abhi: ${esc(n.strategy)})`:''}</option>`).join('')}</select></label>`;
+}
 function renderSetupPlaybook(){
   const { names, counts } = playbookStrategyNames();
-  if (!names.length) return `<section class="card setup-playbook" id="setup-playbook"><div class="playbook-head"><div><h3 class="section-title">Setup Playbook</h3><p class="card-sub">Pehle ek strategy banao (Log Trade tab → Add Strategy). Phir yahan uska poora data ek jagah dikhega.</p></div><button class="btn-secondary btn-small" data-action="set-tab" data-tab="log">＋ Add strategy</button></div></section>`;
+  if (!names.length) return `<section class="card setup-playbook" id="setup-playbook"><div class="playbook-head"><div><h3 class="section-title">Setup Playbook</h3><p class="card-sub">Pehle ek strategy banao. Phir yahan uske rules, numbers, mistakes aur notes ek jagah dikhenge.</p></div><button class="btn-primary btn-small" data-action="open-strategy-manager" data-new="1">＋ Add strategy</button></div></section>`;
   const name=currentDashStrategy();
   const d=setupPlaybookData(name);
   const st=d.strategy || {entryCriteria:'',exitCriteria:'',rules:[]};
@@ -1265,6 +1282,7 @@ function renderSetupPlaybook(){
   const notesCol = `
     <div class="pb-col pb-notes">
       <div class="pb-col-head"><h4>Notes</h4><button type="button" class="pb-link" data-action="create-note-for-setup" data-name="${esc(name)}">＋ Note</button></div>
+      ${linkableNotesSelect(d, name)}
       ${d.notes.length ? `<ul class="pb-note-list">${d.notes.slice(0,4).map(n=>`<li><button type="button" data-action="open-note-from-dash" data-id="${esc(n.id)}"><strong>${esc(n.title||n.symbol||'Untitled note')}</strong><span>${esc(notePreviewText(n).slice(0,120)||'Khali note')}</span></button></li>`).join('')}</ul>` : `<p class="pb-empty">Is setup se linked koi note nahi. Note mein Strategy field mein "${esc(name)}" likho, woh yahan aa jayega.</p>`}
       ${d.tradeNotes.length ? `<div class="pb-trade-notes"><span>Trade notes</span>${d.tradeNotes.map(t=>`<p><b>${esc(t.symbol||'')}</b> <small>${esc(formatTradeTime(t))}</small><br>${esc(t.notes)}</p>`).join('')}</div>` : ''}
     </div>`;
@@ -1273,7 +1291,7 @@ function renderSetupPlaybook(){
   return `<section class="card setup-playbook" id="setup-playbook">
     <div class="playbook-head">
       <div><h3 class="section-title">Setup Playbook</h3><p class="card-sub">Strategy chuno — uske rules, numbers, mistakes aur notes ek jagah.</p></div>
-      <label class="playbook-select"><span class="sr-only">Select strategy</span><select id="dash-strategy-select">${options}</select></label>
+      <div class="playbook-controls"><label class="playbook-select"><span class="sr-only">Select strategy</span><select id="dash-strategy-select">${options}</select></label><button type="button" class="btn-secondary btn-small" data-action="open-strategy-manager">⚙️ Manage strategies</button></div>
     </div>
     <div class="pb-stats">
       <div><span>Trades</span><strong>${d.closed.length}${d.trades.length>d.closed.length?`<small> +${d.trades.length-d.closed.length} open</small>`:''}</strong></div>
@@ -1295,6 +1313,83 @@ function rerenderSetupPlaybook(){
   el.outerHTML=renderSetupPlaybook();
   const fresh=$('#setup-playbook');
   if(fresh && !REDUCED_MOTION){ fresh.classList.add('pb-swap'); }
+}
+
+
+/* ---------------- strategy manager ---------------- */
+function strategyUsage(name){
+  return { trades: STATE.trades.filter(t=>sameName(t.strategy,name)).length, notes: STATE.notes.filter(n=>noteMatchesStrategy(n,name)).length, exactNotes: STATE.notes.filter(n=>sameName(n.strategy,name)).length };
+}
+function openStrategyManager(editId=null){
+  STATE.strategyManager={ open:true, editingId:editId };
+  renderStrategyManager();
+}
+function closeStrategyManager(){ STATE.pendingNoteStrategyFor=null; STATE.strategyManager={open:false,editingId:null}; const host=$('#strategy-manager-host'); if(host) host.innerHTML=''; }
+function renderStrategyManager(){
+  let host=$('#strategy-manager-host');
+  if(!host){ host=document.createElement('div'); host.id='strategy-manager-host'; document.body.appendChild(host); }
+  const sm=STATE.strategyManager||{}; if(!sm.open){ host.innerHTML=''; return; }
+  const list=allStrategies();
+  const editing = sm.editingId==='new' ? {id:'',name:'',entryCriteria:'',exitCriteria:'',rules:[]} : (sm.editingId ? list.find(x=>x.id===sm.editingId) : null);
+  const rules = editing ? ((Array.isArray(editing.rules)&&editing.rules.length?editing.rules:(editing.mandatoryRules||[]))) : [];
+  const form = editing ? `
+    <div class="sm-form">
+      <h3>${sm.editingId==='new'?'New strategy':`Edit: ${esc(editing.name)}`}</h3>
+      <div class="field"><label>Strategy name</label><input id="sm-name" maxlength="80" value="${esc(editing.name)}" placeholder="e.g. ORB Breakout"></div>
+      <div class="field grid-2"><div><label>Entry criteria</label><textarea id="sm-entry" rows="3" placeholder="Entry ke liye mandatory conditions…">${esc(editing.entryCriteria||'')}</textarea></div><div><label>Exit / invalidation</label><textarea id="sm-exit" rows="3" placeholder="Target, SL aur invalidation rules…">${esc(editing.exitCriteria||'')}</textarea></div></div>
+      <div class="field"><label>Mandatory rules <span class="optional-label">har rule nayi line mein</span></label><textarea id="sm-rules" rows="4" placeholder="HTF bias aligned\nRisk 1% se zyada nahi">${esc(rules.join('\n'))}</textarea></div>
+      <p class="sm-error" id="sm-error" role="alert"></p>
+      <div class="sm-form-actions"><button type="button" class="btn-secondary" data-action="sm-cancel">Cancel</button><button type="button" class="btn-primary" data-action="sm-save">${sm.editingId==='new'?'Add strategy':'Save changes'}</button></div>
+    </div>` : '';
+  host.innerHTML = `<div class="edit-overlay sm-overlay" data-action="sm-backdrop"><div class="edit-modal sm-modal" role="dialog" aria-modal="true" aria-labelledby="sm-title">
+    <div class="edit-modal-head"><div><h2 class="section-title" id="sm-title">Manage strategies</h2><p class="card-sub">Yahan banai strategies Trade Log, History filters aur Setup Playbook — sab jagah dikhti hain.</p></div><button type="button" class="modal-x" data-action="close-strategy-manager" aria-label="Close">×</button></div>
+    ${form}
+    <div class="sm-list-head"><strong>${list.length} strateg${list.length===1?'y':'ies'}</strong>${editing?'':`<button type="button" class="btn-primary btn-small" data-action="sm-new">＋ New strategy</button>`}</div>
+    ${list.length ? `<ul class="sm-list">${list.map(x=>{ const u=strategyUsage(x.name); const r=(x.rules&&x.rules.length?x.rules:(x.mandatoryRules||[])).length; return `<li class="${sm.editingId===x.id?'is-editing':''}"><div><strong>${esc(x.name)}</strong><small>${u.trades} trade${u.trades===1?'':'s'} · ${u.notes} note${u.notes===1?'':'s'} · ${r} rule${r===1?'':'s'}${x.entryCriteria?'':' · entry criteria missing'}</small></div><div class="sm-row-actions"><button type="button" class="btn-secondary btn-small" data-action="sm-edit" data-id="${esc(x.id)}">✏️ Edit</button><button type="button" class="btn-danger btn-small" data-action="sm-delete" data-id="${esc(x.id)}">Delete</button></div></li>`; }).join('')}</ul>` : `<p class="pb-empty">Abhi koi strategy nahi. ＋ New strategy se pehli banao.</p>`}
+  </div></div>`;
+  if(editing) setTimeout(()=>$('#sm-name')?.focus(),30);
+}
+async function saveStrategyFromManager(){
+  const sm=STATE.strategyManager; const err=$('#sm-error');
+  const name=($('#sm-name')?.value||'').trim().replace(/\s+/g,' ');
+  const entryCriteria=($('#sm-entry')?.value||'').trim(), exitCriteria=($('#sm-exit')?.value||'').trim();
+  const rules=($('#sm-rules')?.value||'').split('\n').map(x=>x.trim()).filter(Boolean);
+  if(!name){ if(err) err.textContent='Strategy ka naam likho.'; return; }
+  const list=allStrategies();
+  const idx = sm.editingId==='new' ? -1 : STATE.customStrategies.findIndex(x=>normalizeCustomStrategy(x).id===sm.editingId);
+  const old = idx>=0 ? normalizeCustomStrategy(STATE.customStrategies[idx]) : null;
+  if(list.some(x=>sameName(x.name,name) && (!old || x.id!==old.id))){ if(err) err.textContent=`"${name}" naam ki strategy pehle se hai.`; return; }
+  const parts=['customStrategies'];
+  if(old && !sameName(old.name,name)){
+    const u=strategyUsage(old.name);
+    if((u.trades||u.exactNotes) && !confirm(`"${old.name}" ka naam "${name}" karne par ${u.trades} trades aur ${u.exactNotes} notes bhi naye naam par update honge. Continue?`)) return;
+    STATE.trades.forEach(t=>{ if(sameName(t.strategy,old.name)) t.strategy=name; });
+    STATE.notes.forEach(n=>{ if(sameName(n.strategy,old.name)) n.strategy=name; });
+    if(u.trades) parts.push('trades'); if(u.exactNotes) parts.push('notes');
+    if(sameName(STATE.dashStrategy,old.name)){ STATE.dashStrategy=name; saveDashStrategy(name); }
+    if(sameName(STATE.historyStrategyFilter,old.name)) STATE.historyStrategyFilter=name;
+  }
+  const record={ ...(old||{}), id: old?.id || `custom-${Date.now()}`, name, entryCriteria, exitCriteria, rules, mandatoryRules:rules,
+    commonTraps: old?.commonTraps||[], winningExamples: old?.winningExamples||[], losingExamples: old?.losingExamples||[] };
+  if(idx>=0) STATE.customStrategies[idx]=record; else STATE.customStrategies.push(record);
+  if(sm.editingId==='new' && STATE.activeTab==='copilot'){ STATE.dashStrategy=name; saveDashStrategy(name); }
+  const linkNote = sm.editingId==='new' && STATE.pendingNoteStrategyFor ? STATE.notes.find(n=>n.id===STATE.pendingNoteStrategyFor) : null;
+  STATE.pendingNoteStrategyFor=null;
+  if(linkNote){ linkNote.strategy=name; linkNote.updatedAt=new Date().toISOString(); if(!parts.includes('notes')) parts.push('notes');
+    STATE.strategyManager={open:false,editingId:null}; renderStrategyManager(); renderTabOnly(); saveUserData('Strategy', parts); return; }
+  STATE.strategyManager={open:true, editingId:null};
+  renderStrategyManager(); renderTabOnly();
+  saveUserData('Strategy', parts);
+}
+function deleteStrategyFromManager(id){
+  const idx=STATE.customStrategies.findIndex(x=>normalizeCustomStrategy(x).id===id); if(idx<0) return;
+  const st=normalizeCustomStrategy(STATE.customStrategies[idx]); const u=strategyUsage(st.name);
+  if(!confirm(`"${st.name}" delete karein?${u.trades?`\n\nIske ${u.trades} trades delete NAHI honge — woh History aur Playbook mein isi naam se dikhte rahenge.`:''}`)) return;
+  STATE.customStrategies.splice(idx,1);
+  if(STATE.selectedPlaybookId===st.id) STATE.selectedPlaybookId=allStrategies()[0]?.id||'';
+  STATE.strategyManager={open:true, editingId:null};
+  renderStrategyManager(); renderTabOnly();
+  saveUserData('Strategy', ['customStrategies']);
 }
 
 /* ---------------- main render ---------------- */
@@ -1479,6 +1574,14 @@ document.addEventListener('click', async (e) => {
     STATE.editingNoteId = null;
     renderTabOnly();
   }
+  else if (action==='open-strategy-manager') { openStrategyManager(btn.dataset.new ? 'new' : (btn.dataset.id || null)); }
+  else if (action==='close-strategy-manager') { closeStrategyManager(); }
+  else if (action==='sm-backdrop') { if (e.target===btn) closeStrategyManager(); }
+  else if (action==='sm-new') { STATE.strategyManager.editingId='new'; renderStrategyManager(); }
+  else if (action==='sm-edit') { STATE.strategyManager.editingId=btn.dataset.id; renderStrategyManager(); }
+  else if (action==='sm-cancel') { STATE.strategyManager.editingId=null; renderStrategyManager(); }
+  else if (action==='sm-save') { saveStrategyFromManager(); }
+  else if (action==='sm-delete') { deleteStrategyFromManager(btn.dataset.id); }
   else if (action==='edit-setup-criteria') { STATE.dashEditStrategy=btn.dataset.name; rerenderSetupPlaybook(); setTimeout(()=>$('#pb-entry')?.focus(),30); }
   else if (action==='cancel-setup-criteria') { STATE.dashEditStrategy=null; rerenderSetupPlaybook(); }
   else if (action==='save-setup-criteria') {
@@ -1559,6 +1662,7 @@ document.addEventListener('focusin', (e) => {
 // emotion, not submit/save the entire trade. The explicit ＋ button does the
 // same thing for mouse/touch users.
 document.addEventListener('keydown', (e) => {
+  if (e.key==='Escape' && STATE.strategyManager?.open) { closeStrategyManager(); return; }
   if (e.target?.id === 'log-custom-emotion' && e.key === 'Enter') {
     e.preventDefault();
     e.stopPropagation();
@@ -1594,6 +1698,12 @@ document.addEventListener('input', (e) => {
   else if (e.target.matches('[data-note-editor-exit]')) updateActiveNoteField(e.target.dataset.noteEditorExit,'exitCriteria',e.target.value);
   else if (e.target.matches('[data-note-editor-analysis]')) updateActiveNoteField(e.target.dataset.noteEditorAnalysis,'analysis',e.target.value);
   else if (e.target.matches('[data-note-editor-learning]')) updateActiveNoteField(e.target.dataset.noteEditorLearning,'learning',e.target.value);
+  else if (e.target.matches('[data-note-editor-strategy]') && e.target.value==='__new__') {
+    const noteId=e.target.dataset.noteEditorStrategy, note=STATE.notes.find(n=>n.id===noteId);
+    e.target.value=note?.strategy||'';            // don't store the "new" placeholder
+    STATE.pendingNoteStrategyFor=noteId;          // link the new strategy to this note once saved
+    openStrategyManager('new');
+  }
   else if (e.target.matches('[data-note-editor-strategy]')) updateActiveNoteField(e.target.dataset.noteEditorStrategy,'strategy',e.target.value);
   else if (e.target.matches('[data-note-block-text]')) { const i=Number(e.target.dataset.noteBlockText); if(STATE.noteFormBlocks[i]) STATE.noteFormBlocks[i].text=e.target.value; }
 });
@@ -1611,6 +1721,11 @@ function refreshBatteryOnly(){
 }
 
 document.addEventListener('change', (e) => {
+  if (e.target.matches('[data-link-note-to]')) {
+    const note=STATE.notes.find(n=>n.id===e.target.value); if(!note) return;
+    note.strategy=e.target.dataset.linkNoteTo; note.updatedAt=new Date().toISOString();
+    rerenderSetupPlaybook(); saveUserData('Note', ['notes']); return;
+  }
   if (e.target.id==='dash-strategy-select') { STATE.dashStrategy=e.target.value; STATE.dashEditStrategy=null; saveDashStrategy(e.target.value); rerenderSetupPlaybook(); return; }
   if (e.target.id==='playbook-select') { STATE.selectedPlaybookId = e.target.value; STATE.checkedRules = {}; renderTabOnly(); }
   else if (e.target.id==='log-strategy-select') { STATE.selectedPlaybookId = e.target.value; STATE.checkedRules = {}; updateLogPreview(); }
