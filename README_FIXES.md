@@ -91,3 +91,9 @@ but large journals will hit D1's 2 MB row limit — the server now returns a cle
 D1 Time Travel can roll the database back to a minute before the migration (Free plan: last 7 days, Paid: 30 days):
 `npx wrangler d1 time-travel restore <DB_NAME> --timestamp=<UNIX_TIME_BEFORE_MIGRATION>`
 This restores the WHOLE database (trades/notes saved after that time are rolled back too). The command prints a bookmark to undo the restore.
+
+## Update 9 — Old images blinking
+- **Cause (app bug):** when an image failed to display but the server still answered "OK", the broken-image helper reloaded it again and again (~50 requests/second) → images blinked. Now an image is retried at most once, then a clear message is shown. In a test with 3 damaged files: 206 requests in 4 s before, 4 after.
+- The app now checks that a file really decodes as an image, not just that the server answered.
+- **Self-repair on the server:** if a file in R2 contains the image as base64 / data-URL text instead of real image bytes, `/api/img` decodes it, serves it correctly and saves the fixed file back to R2.
+- Files that are truly unreadable show: "R2 mein is image ki file kharab hai — Edit se hata kar dobara upload karo". "Sab images check karo" now also counts damaged files.

@@ -128,10 +128,12 @@ async function api(path, method='GET', body){
    If a stored chart image can't load, show WHY instead of a broken icon. */
 const IMG_STATUS_CACHE = new Map();
 const BROKEN_ORIGINALS = new WeakMap();
+const IMG_RETRIED = new Set();   // auto-retry each image at most once (no flicker loop)
 function imageProblemText(status, body){
   if (status === 501) return 'Image storage (R2) is deployment se connected nahi hai. Cloudflare Pages → Settings → Bindings mein R2 binding "IMAGES" add karke redeploy karo.';
   if (status === 404) return 'Yeh image R2 bucket mein nahi mili. Shayad IMAGES binding ab kisi doosre bucket se judi hai — wahi bucket bind karo jisme pehle images gayi thi.';
   if (status === 401) return 'Login session khatam ho gaya. Dobara login karo.';
+  if (status === 422 || status === 'corrupt') return 'R2 mein is image ki file kharab hai (valid image nahi hai). Trade → ✏️ Edit se yeh image hata kar dobara upload karo.';
   if (status === 0) return 'Internet / server se connect nahi ho paya. Thodi der baad Retry karo.';
   return `Image load nahi hui (error ${status}${body&&body.error?': '+body.error:''}).`;
 }
@@ -142,7 +144,15 @@ async function diagnoseImage(src){
     try {
       const r = await fetch(src, { credentials:'same-origin', cache:'no-store' });
       const body = await r.clone().json().catch(()=>null);
-      if (r.ok && (r.headers.get('Content-Type')||'').startsWith('image/')) return { status: 200, text: '' };
+      if (r.ok && (r.headers.get('Content-Type')||'').startsWith('image/')) {
+        // Server says OK — make sure the bytes really decode before trusting it.
+        const blob = await r.blob();
+        if (typeof createImageBitmap === 'function') {
+          try { const bm = await createImageBitmap(blob); bm.close && bm.close(); return { status: 200, text: '' }; }
+          catch (_) { return { status: 'corrupt', text: imageProblemText('corrupt') }; }
+        }
+        return { status: 200, text: '' };
+      }
       return { status: r.status, text: imageProblemText(r.status, body) };
     } catch (_) { return { status: 0, text: imageProblemText(0) }; }
   })();
@@ -155,8 +165,13 @@ document.addEventListener('error', async (e) => {
   const src = img.getAttribute('src') || '';
   if (!src || !(src.startsWith('/api/img/') || src.startsWith('data:image/'))) return;
   img.dataset.brokenHandled = '1';
-  const info = await diagnoseImage(src);
-  if (info.status === 200) { img.dataset.brokenHandled=''; img.src = src + (src.includes('?')?'&':'?') + 'r=' + Date.now(); return; }
+  img.style.visibility = 'hidden';   // no broken-icon flash while we check
+  const info = { ...(await diagnoseImage(src.split('?')[0])) };
+  const baseSrc = src.split('?')[0];
+  if (info.status === 200 && !IMG_RETRIED.has(baseSrc)) {          // a hiccup: try exactly once more
+    IMG_RETRIED.add(baseSrc); img.dataset.brokenHandled=''; img.addEventListener('load',()=>{ img.style.visibility=''; },{once:true}); img.src = baseSrc + '?r=' + Date.now(); return;
+  }
+  if (info.status === 200) info.text = 'Image baar-baar load nahi ho rahi. Page refresh karke dekho; phir bhi na aaye to Edit se dobara upload karo.';
   const box = document.createElement('div');
   box.className = 'img-broken';
   box.innerHTML = `<strong>🖼️ Image load nahi hui</strong><p class="img-broken-msg">${esc(info.text)}</p><div class="img-broken-actions"><button type="button" data-action="retry-broken-image">Retry</button>${src.startsWith('/api/img/')?'<button type="button" data-action="check-all-images">Sab images check karo</button>':''}</div>`;
@@ -174,10 +189,12 @@ async function checkAllImages(){
       `Journal mein R2 images: ${d.referenced}`,
       `Bucket mein mili: ${d.found}`,
       `Gayab: ${d.missing.length}`,
+      `Kharab file (damaged): ${(d.damaged||[]).length}`,
       `Abhi bhi database ke andar (inline) images: ${d.inline}`
     ];
     if (!d.binding) lines.push('', 'Fix: Cloudflare Pages → Settings → Bindings → R2 bucket → Variable name IMAGES → redeploy.');
     else if (d.missing.length) lines.push('', 'Gayab images us bucket mein nahi hain jo abhi bind hai. Agar pehle koi aur bucket bind tha, wahi wapas bind karo.');
+    if ((d.damaged||[]).length) lines.push('', 'Kharab files ko trade Edit karke hatao aur dobara upload karo.');
     alert(lines.join('\n'));
   } catch (_) { alert('Check nahi ho paya — internet check karo.'); }
 }
@@ -1643,7 +1660,7 @@ document.addEventListener('click', async (e) => {
     STATE.editingNoteId = null;
     renderTabOnly();
   }
-  else if (action==='retry-broken-image') { const box=btn.closest('.img-broken'); if(box){ const src=box.dataset.src; IMG_STATUS_CACHE.delete(src); const img=BROKEN_ORIGINALS.get(box)||document.createElement('img'); img.dataset.brokenHandled=''; img.src=src+(src.startsWith('data:')?'':(src.includes('?')?'&':'?')+'r='+Date.now()); box.replaceWith(img); } }
+  else if (action==='retry-broken-image') { const box=btn.closest('.img-broken'); if(box){ const src=box.dataset.src.split('?')[0]; IMG_STATUS_CACHE.delete(src); IMG_RETRIED.add(src); const img=BROKEN_ORIGINALS.get(box)||document.createElement('img'); img.dataset.brokenHandled=''; img.style.visibility=''; img.src=src+(src.startsWith('data:')?'':(src.includes('?')?'&':'?')+'r='+Date.now()); box.replaceWith(img); } }
   else if (action==='check-all-images') { checkAllImages(); }
   else if (action==='open-strategy-manager') { openStrategyManager(btn.dataset.new ? 'new' : (btn.dataset.id || null)); }
   else if (action==='close-strategy-manager') { closeStrategyManager(); }
