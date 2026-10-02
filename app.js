@@ -124,6 +124,55 @@ async function api(path, method='GET', body){
   return data;
 }
 
+/* ---------------- motion ---------------- */
+const REDUCED_MOTION = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)').matches : false;
+let LAST_RENDERED_TAB = null;
+let DASHBOARD_INTRO_DONE = false;
+let TAB_INDICATOR_POS = null;
+function playTabEnter(){
+  const content=$('#tab-content'); if(!content) return;
+  if (LAST_RENDERED_TAB !== null && LAST_RENDERED_TAB !== STATE.activeTab && !REDUCED_MOTION) {
+    content.classList.remove('tc-enter'); void content.offsetWidth; content.classList.add('tc-enter');
+  }
+  LAST_RENDERED_TAB = STATE.activeTab;
+}
+// Slide the white pill under the active desktop tab from where it was before.
+function placeTabIndicator(){
+  const nav=$('#tab-nav'); if(!nav) return;
+  const active=nav.querySelector('.tab-btn.active'); if(!active) return;
+  let ind=document.createElement('span'); ind.className='tab-indicator'; nav.prepend(ind);
+  const target={x:active.offsetLeft, w:active.offsetWidth};
+  if (!target.w) return; // nav hidden (mobile)
+  const from=TAB_INDICATOR_POS || target;
+  ind.style.transition='none'; ind.style.transform=`translateX(${from.x}px)`; ind.style.width=from.w+'px';
+  void ind.offsetWidth;
+  ind.style.transition=''; ind.style.transform=`translateX(${target.x}px)`; ind.style.width=target.w+'px';
+  TAB_INDICATOR_POS=target;
+  if (active.scrollIntoView && nav.scrollWidth>nav.clientWidth) active.scrollIntoView({block:'nearest',inline:'nearest',behavior:REDUCED_MOTION?'auto':'smooth'});
+}
+// Count a formatted number up from zero, keeping its prefix/suffix (₹, %, R, /5 ...).
+function countUp(el, duration=900){
+  if (!el || REDUCED_MOTION || typeof requestAnimationFrame!=='function') return;
+  const text=el.textContent; const m=text.match(/-?[\d,]*\.?\d+/); if(!m) return;
+  const raw=m[0], target=parseFloat(raw.replace(/,/g,'')); if(!Number.isFinite(target) || target===0) return;
+  const decimals=(raw.split('.')[1]||'').length, grouped=raw.includes(',');
+  const pre=text.slice(0,m.index), post=text.slice(m.index+raw.length);
+  const fmt=v=> grouped ? (v<0?'-':'')+Math.abs(v).toLocaleString('en-IN',{minimumFractionDigits:decimals,maximumFractionDigits:decimals}) : v.toFixed(decimals);
+  const t0=performance.now();
+  const step=now=>{ const k=Math.min(1,(now-t0)/duration), e=1-Math.pow(1-k,3); el.textContent=pre+fmt(target*e)+post; if(k<1) requestAnimationFrame(step); else el.textContent=text; };
+  requestAnimationFrame(step);
+}
+function playDashboardIntro(){
+  if (STATE.activeTab!=='copilot' || DASHBOARD_INTRO_DONE) return;
+  DASHBOARD_INTRO_DONE = true;
+  const content=$('#tab-content'); if(!content || REDUCED_MOTION) return;
+  content.classList.add('tc-intro');
+  setTimeout(()=>content.classList.remove('tc-intro'), 3200);
+  $$('.hero-today strong, .dashboard-kpi strong', content).forEach(el=>countUp(el));
+}
+// Motion is decoration: it must never be able to break rendering.
+function afterTabRender(){ try { playTabEnter(); playDashboardIntro(); } catch (e) { console.warn('motion skipped', e); } }
+
 /* ---------------- auth flow ---------------- */
 let authMode = 'login';
 
@@ -409,6 +458,7 @@ function saveSessionView(id){
     const st=$(`[data-session-note-status="${id}"]`);
     if(!st) return;
     st.textContent = ok ? '✓ Saved' : '⚠ Not saved — try again';
+    st.classList.remove('tc-flash'); void st.offsetWidth; st.classList.add('tc-flash');
     if(ok) setTimeout(()=>{ if(st) st.textContent=''; },1800);
   });
 }
@@ -612,6 +662,7 @@ function renderTabNav(){
   $('#tab-nav').innerHTML = TABS.map(t =>
     `<button class="tab-btn ${STATE.activeTab===t.id?'active':''}" data-action="set-tab" data-tab="${t.id}">${t.label}</button>`
   ).join('');
+  try { placeTabIndicator(); } catch (e) { console.warn('indicator skipped', e); }
   const mobileIcons = {copilot:'⚡',log:'➕',notes:'🧠',history:'📜',analysis:'📊',risk:'🛡️'};
   const mobileLabels = {copilot:'Co-Pilot',log:'Log Trade',notes:'Notes',history:'History',analysis:'Analysis',risk:'Risk'};
   const mobile = $('#mobile-tab-nav');
@@ -622,7 +673,7 @@ function renderTabNav(){
 
 /* ---------------- Co-Pilot tab ---------------- */
 function renderCopilotTab(){
-  const trades = [...STATE.trades].sort((a,b)=>new Date(a.createdAt||a.date||0)-new Date(b.createdAt||b.date||0));
+  const trades = [...STATE.trades].sort((a,b)=>tradeSortTime(a)-tradeSortTime(b));
   const total = trades.length;
   const wins = trades.filter(t => Number(t.pnl||0) > 0).length;
   const losses = trades.filter(t => Number(t.pnl||0) < 0).length;
@@ -634,6 +685,11 @@ function renderCopilotTab(){
   const best = total ? Math.max(...trades.map(t=>Number(t.pnl)||0)) : 0;
   const worst = total ? Math.min(...trades.map(t=>Number(t.pnl)||0)) : 0;
   const recent = [...trades].reverse().slice(0,6);
+  const risk = currentRiskStats();
+  const budgetUsedPct = risk.dailyLimit>0 ? Math.min(100, Math.max(0,-risk.todayPnl)/risk.dailyLimit*100) : 0;
+  const hour = new Date().getHours();
+  const firstName = String(STATE.user?.name || '').trim().split(/\s+/)[0] || 'Trader';
+  const heroGreeting = `${hour<12?'Good morning':hour<17?'Good afternoon':'Good evening'}, ${firstName}`;
   const perf = strategyPerformance().slice(0,6);
   const mistakes = {};
   trades.forEach(t => { const k=t.mistake||'none'; mistakes[k]=(mistakes[k]||0)+1; });
@@ -651,17 +707,25 @@ function renderCopilotTab(){
       return `${x.toFixed(1)},${y.toFixed(1)}`;
     }).join(' ');
     const zeroY=h-pad-((0-curveMin)/curveRange)*(h-2*pad);
-    return `<svg class="equity-chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Equity curve"><line x1="${pad}" y1="${zeroY.toFixed(1)}" x2="${w-pad}" y2="${zeroY.toFixed(1)}" class="equity-zero"></line><polyline points="${pts}" class="equity-line" fill="none"></polyline></svg>`;
+    const ptList=pts.split(' '), first=ptList[0].split(','), last=ptList[ptList.length-1].split(',');
+    const area=`${first[0]},${zeroY.toFixed(1)} ${pts} ${last[0]},${zeroY.toFixed(1)}`;
+    return `<svg class="equity-chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Equity curve, current ${esc(money(curve[curve.length-1]))}"><defs><linearGradient id="equityFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2D5287" stop-opacity=".22"/><stop offset="1" stop-color="#2D5287" stop-opacity="0"/></linearGradient></defs><line x1="${pad}" y1="${zeroY.toFixed(1)}" x2="${w-pad}" y2="${zeroY.toFixed(1)}" class="equity-zero"></line><polygon points="${area}" class="equity-area"></polygon><polyline points="${pts}" class="equity-line" fill="none" pathLength="1"></polyline><circle cx="${last[0]}" cy="${last[1]}" r="9" class="equity-dot-ring"></circle><circle cx="${last[0]}" cy="${last[1]}" r="6" class="equity-dot"></circle></svg>`;
   })() : '<div class="dashboard-empty-chart">Save a few trades to see your equity curve.</div>';
 
   return `
-  <section class="dashboard-hero card">
-    <div>
-      <span class="uppercase-label" style="color:var(--indigo);">TRADING JOURNAL DASHBOARD</span>
-      <h2 class="section-title" style="font-size:1.35rem;margin:.2rem 0 .35rem;">Your trading, in numbers.</h2>
-      <p class="card-sub">Yahan sirf woh data hai jo tumhari trading improve karne mein directly help karega.</p>
+  <section class="dashboard-hero dashboard-hero-ink">
+    <div class="hero-copy">
+      <span class="hero-greeting">${esc(heroGreeting)}</span>
+      <h2 class="hero-title">Your trading, in numbers.</h2>
+      <p>Yahan sirf woh data hai jo tumhari trading improve karne mein directly help karega.</p>
     </div>
-    <button class="btn-primary" data-action="set-tab" data-tab="log">＋ Log New Trade</button>
+    <div class="hero-today">
+      <span>Aaj ka P&amp;L</span>
+      <strong class="${risk.todayPnl>=0?'positive':'negative'}">${money(risk.todayPnl)}</strong>
+      <small>${risk.todayTrades.length} trade${risk.todayTrades.length===1?'':'s'} aaj · loss budget ${risk.dailyLimit>0?`${Math.round(budgetUsedPct)}% used`:'set nahi hai'}</small>
+      ${risk.dailyLimit>0?`<div class="hero-budget" aria-hidden="true"><i class="${budgetUsedPct>=75?'hot':''}" style="width:${Math.max(2,budgetUsedPct)}%"></i></div>`:''}
+    </div>
+    <button class="btn-cta" data-action="set-tab" data-tab="log">＋ Log New Trade</button>
   </section>
 
   <div class="dashboard-kpis">
@@ -1098,6 +1162,7 @@ function render(){
   else if (STATE.activeTab==='history') content.innerHTML = renderHistoryTab();
   else if (STATE.activeTab==='analysis') content.innerHTML = renderAnalysisTab();
   else if (STATE.activeTab==='risk') { content.innerHTML = renderRiskCenter(); bindRiskSettings(); updateRiskCalculator(); }
+  afterTabRender();
 }
 function renderTabOnly(){ // re-render just the active tab (after in-tab interactions)
   const content = $('#tab-content');
@@ -1108,6 +1173,7 @@ function renderTabOnly(){ // re-render just the active tab (after in-tab interac
   else if (STATE.activeTab==='analysis') content.innerHTML = renderAnalysisTab();
   else if (STATE.activeTab==='risk') { content.innerHTML = renderRiskCenter(); bindRiskSettings(); updateRiskCalculator(); }
   renderTabNav();
+  afterTabRender();
 }
 
 /* ---------------- event delegation ---------------- */

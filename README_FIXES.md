@@ -33,3 +33,12 @@ but large journals will hit D1's 2 MB row limit — the server now returns a cle
 - Screenshots start uploading to R2 the moment they're picked or drawn, and multiple images upload in parallel.
 - Drawn/annotated images are now max 1400px JPEG (were full-size WEBP), roughly 3–5× smaller.
 - Adding a strategy, saving a note form and deleting a note no longer freeze the screen while saving.
+
+## Update 3 — New look ("Ink & Marigold")
+- New `theme.css` (loaded after `style.css`): deep ink header and hero, marigold for actions and XP, green/red kept only for money.
+- Fonts: Bricolage Grotesque (headings, big numbers) + IBM Plex Sans (text, tabular figures). Loaded from Google Fonts; falls back to system fonts offline.
+- Dashboard hero now shows a greeting, today's P&L and how much of today's loss budget is used.
+- Equity curve sorted by trade time, with area fill and a marker on the latest point.
+- Motion: sliding tab indicator, short content transition on tab change, modal lift, risk bars fill in, one dashboard load moment (curve draws, numbers count up — once per visit), candle loader.
+- `prefers-reduced-motion` respected; animations can never break rendering (fail-safe).
+- App icons and PWA theme colour updated to the new palette. Service worker cache bumped to v3.
