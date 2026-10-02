@@ -124,6 +124,26 @@ async function api(path, method='GET', body){
   return data;
 }
 
+/* ---------------- image from a link ----------------
+   TradingView snapshot links, direct image links, or pages with a preview image.
+   The server downloads it and keeps its own copy, so the journal never breaks
+   if the original link goes away. */
+async function fetchImageFromLink(link){
+  const url=String(link||'').trim();
+  if(!/^https?:\/\//i.test(url)) throw new Error('Sahi link paste karo (https://… se shuru).');
+  const res=await fetch('/api/fetch-image',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({url})});
+  const data=await res.json().catch(()=>({}));
+  if(!res.ok) throw new Error(data.error||'Link se image nahi la paye.');
+  return data.url || data.dataUrl;
+}
+async function runImageLink(inputSel, buttonEl, onImage){
+  const input=$(inputSel); const link=input?.value.trim(); if(!link) { input?.focus(); return; }
+  const label=buttonEl?.textContent; if(buttonEl){ buttonEl.disabled=true; buttonEl.textContent='Laa rahe hain…'; }
+  try { const src=await fetchImageFromLink(link); if(input) input.value=''; onImage(src); }
+  catch(e){ alert('🔗 '+(e.message||'Link se image nahi la paye.')); }
+  finally { if(buttonEl && buttonEl.isConnected){ buttonEl.disabled=false; buttonEl.textContent=label; } }
+}
+
 /* ---------------- broken image diagnostics ----------------
    If a stored chart image can't load, show WHY instead of a broken icon. */
 // Older builds served /api/img with a 1-year "immutable" cache header, so a browser
@@ -946,6 +966,23 @@ function renderLogImagePreview(){
   const images = currentLogImages();
   box.innerHTML = images.length ? `<div class="multi-image-grid">${images.map((src,i)=>`<div class="multi-image-item"><img src="${esc(imgUrl(src))}" data-action="view-image" data-src="${esc(src)}"><button type="button" data-action="remove-log-image-index" data-index="${i}">×</button><span>Image ${i+1}</span></div>`).join('')}</div><div class="image-count">📸 ${images.length} image${images.length===1?'':'s'} attached</div>` : '<div class="shot-empty">No images added yet</div>';
 }
+function insertImagesIntoActiveNote(srcs){
+  const note=STATE.notes.find(n=>n.id===STATE.activeNoteId); if(!note||!srcs.length) return;
+  note.blocks=normalizeNoteBlocks(note);
+  let at = Number.isInteger(STATE.noteInsertIndex) ? Math.min(STATE.noteInsertIndex + 1, note.blocks.length) : note.blocks.length;
+  srcs.forEach(src=>{
+    note.blocks.splice(at, 0, {type:'image', src});
+    at += 1;
+    if (note.blocks[at]?.type !== 'text') note.blocks.splice(at, 0, {type:'text', text:'', html:''});
+    at += 1;
+  });
+  note.image=note.blocks.find(b=>b.type==='image')?.src || null;
+  note.updatedAt=new Date().toISOString();
+  STATE.noteInsertIndex = Math.max(0, at-1);
+  renderTabOnly();
+  scheduleNoteAutoSave(note.id);
+  setTimeout(() => { const fields = $$(`[data-live-note-text="${note.id}"]`); fields[Math.min(at-1, fields.length-1)]?.focus(); }, 30);
+}
 function addLogImages(images){
   const arr=currentLogImages();
   images.filter(Boolean).forEach(src=>{ if(!arr.includes(src) && arr.length < 8) arr.push(src); });
@@ -994,7 +1031,7 @@ function renderLogTab(){
         <div class="fast-journal-screenshots"><div class="fast-shot-head"><div><strong>📸 Before & After</strong><span>Optional — chart screenshots</span></div></div><div class="before-after-grid">
           <label class="shot-upload-card ${STATE.logFormBeforeImage?'has-image':''}"><div class="shot-label">BEFORE ENTRY</div>${STATE.logFormBeforeImage ? `<img src="${esc(imgUrl(STATE.logFormBeforeImage))}" alt="Before entry">` : `<div class="shot-placeholder">＋<small>Upload before entry</small></div>`}<input type="file" id="log-before-image-file" accept="image/*" style="display:none;"></label>
           <label class="shot-upload-card ${STATE.logFormAfterImage?'has-image':''}"><div class="shot-label">AFTER EXIT</div>${STATE.logFormAfterImage ? `<img src="${esc(imgUrl(STATE.logFormAfterImage))}" alt="After exit">` : `<div class="shot-placeholder">＋<small>Upload after exit</small></div>`}<input type="file" id="log-after-image-file" accept="image/*" style="display:none;"></label>
-        </div><div class="image-url-add-row fast-extra-image"><input type="url" id="log-image-url" placeholder="Optional: paste another image URL..."><button type="button" class="btn-secondary" data-action="add-log-image-url">+ Add</button></div><div id="log-image-preview"></div></div>
+        </div><div class="image-url-add-row fast-extra-image"><input type="url" id="log-image-url" placeholder="🔗 TradingView / image link paste karo…"><button type="button" class="btn-secondary" data-action="add-log-image-url">+ Add</button></div><div id="log-image-preview"></div></div>
       </div>
 
       <div class="log-step">
@@ -1125,6 +1162,7 @@ function renderNotesTab(){
         <button type="button" class="btn-secondary" data-action="add-live-text-block">＋ Text</button>
         <button type="button" class="btn-secondary" data-action="trigger-live-image">🖼️ Images</button>
         <input type="file" id="live-note-image-file" accept="image/*" multiple hidden>
+        <div class="note-link-row"><input type="url" id="live-note-image-link" placeholder="🔗 TradingView / image link paste karo…" enterkeyhint="done"><button type="button" class="btn-primary btn-small" data-action="add-live-image-link">Add</button></div>
       </div>
 
       <div class="samsung-note-meta-row">
@@ -1218,11 +1256,11 @@ function renderTradeView(t, mode){
   const chips=`<div class="history-chips"><span class="journal-chip">🧠 ${esc(emotionText(t))}</span><span class="journal-chip ${t.mistake&&t.mistake!=='none'?'chip-warn':''}">📝 ${esc(mistakeLabel(t.mistake||'none'))}</span><span class="journal-chip">⭐ ${t.quality||3}/5</span>${t.exitReason?`<span class="journal-chip">🚪 ${esc(t.exitReason)}</span>`:''}</div>`;
   const quickNote = t.notes ? `<p class="history-quick-note" title="${esc(t.notes)}"><span>Note</span>${esc(t.notes)}</p>` : '';
   const actions=`<div class="trade-actions"><button type="button" class="btn-secondary trade-edit-btn" data-action="edit-trade" data-id="${esc(t.id)}">✏️ Edit</button><button type="button" class="btn-danger trade-delete-btn" data-action="delete-trade" data-id="${esc(t.id)}" title="Delete trade">🗑️ Delete</button></div>`;
-  const shots = imgs.length ? `<div class="history-images">${imgs.map((src,i)=>`<div class="history-image"><img src="${esc(imgUrl(src))}" data-action="view-image" data-src="${esc(src)}" loading="lazy"><span>${i===0?'Before':i===1?'After':`Image ${i+1}`}</span></div>`).join('')}</div>` : `<div class="history-no-images">🖼 No screenshots</div>`;
+  const shots = imgs.length ? `<div class="history-images">${imgs.map((src,i)=>`<div class="history-image"><img src="${esc(imgUrl(src))}" data-action="view-image" data-trade-id="${esc(t.id)}" data-src="${esc(src)}" loading="lazy"><span>${i===0?'Before':i===1?'After':`Image ${i+1}`}</span></div>`).join('')}</div>` : `<div class="history-no-images">🖼 No screenshots</div>`;
   if(mode==='list') return `<div class="history-list-row"><div class="history-list-main"><div class="history-symbol">${meta}</div><span class="history-date">${when} · ${strategy}</span>${t.notes?`<span class="history-list-note">📝 ${esc(t.notes)}</span>`:''}</div><div class="history-list-stat">${pv.pe??'—'} → ${t.exitPrice??'—'}</div><div class="history-list-stat">${esc(emotionText(t))}</div><div class="history-list-stat ${resultClass} mono">${open?'Open':money(pnl)}</div><div>${actions}</div></div>`;
   if(mode==='detailed') return `<article class="history-detail-card"><div class="history-detail-head"><div><span class="history-kicker">TRADE JOURNAL</span><h3>${meta}</h3><p>${when} · ${strategy}${t.isSetupTrade===false?'':` · ${t.followedPlan?'✅ Plan followed':'⚠️ Plan broken'}`}</p></div>${resultHtml}${actions}</div>${chips}<div class="history-detail-grid"><div><span>PLANNED</span><strong>Entry ${pv.pe??'—'} • SL ${pv.ps??'—'} • Target ${pv.pt??'—'} • R:R ${pv.prr??'—'}</strong></div><div><span>ACTUAL</span><strong>Entry ${t.entryPrice??'—'} • SL ${t.stopLoss??'—'} • Exit ${t.exitPrice??'—'}</strong></div><div><span>EXIT REASON</span><strong>${esc(t.exitReason||'—')}</strong></div><div><span>LOT SIZE</span><strong>${esc(t.quantity??'—')}</strong></div><div><span>WHERE</span><strong>${esc([t.device,t.location].filter(Boolean).join(' @ ')||'—')}</strong></div></div><p class="history-note">${t.notes?esc(t.notes):'<em>Koi note nahi — Edit se add karo.</em>'}</p>${shots}</article>`;
   if(mode==='gallery') return `<article class="history-gallery-card"><div class="history-gallery-head"><div><h3>${meta}</h3><p>${when} · ${strategy}</p></div>${resultHtml}${actions}</div>${shots}<div class="history-gallery-meta">${chips}${quickNote}</div></article>`;
-  return `<article class="history-grid-card"><div class="history-grid-media">${imgs[0]?`<img src="${esc(imgUrl(imgs[0]))}" data-action="view-image" data-src="${esc(imgs[0])}" loading="lazy">`:`<div class="history-grid-placeholder">📈</div>`}<span class="${t.type==='LONG'?'badge-long':'badge-short'}">${esc(t.type||'—')}</span></div><div class="history-grid-body"><div class="history-grid-top"><div><h3>${esc(t.symbol||'—')}</h3><p>${strategy}</p><p class="history-when">${when}</p></div>${resultHtml}</div>${chips}${quickNote}<div class="history-mini-stats"><span>Entry <b>${t.entryPrice??'—'}</b></span><span>Exit <b>${t.exitPrice??'—'}</b></span><span>SL <b>${t.stopLoss??'—'}</b></span><span>Lot Size <b>${t.quantity??'—'}</b></span></div><div class="history-card-actions">${actions}</div></div></article>`;
+  return `<article class="history-grid-card"><div class="history-grid-media">${imgs[0]?`<img src="${esc(imgUrl(imgs[0]))}" data-action="view-image" data-trade-id="${esc(t.id)}" data-src="${esc(imgs[0])}" loading="lazy">`:`<div class="history-grid-placeholder">📈</div>`}<span class="${t.type==='LONG'?'badge-long':'badge-short'}">${esc(t.type||'—')}</span></div><div class="history-grid-body"><div class="history-grid-top"><div><h3>${esc(t.symbol||'—')}</h3><p>${strategy}</p><p class="history-when">${when}</p></div>${resultHtml}</div>${chips}${quickNote}<div class="history-mini-stats"><span>Entry <b>${t.entryPrice??'—'}</b></span><span>Exit <b>${t.exitPrice??'—'}</b></span><span>SL <b>${t.stopLoss??'—'}</b></span><span>Lot Size <b>${t.quantity??'—'}</b></span></div><div class="history-card-actions">${actions}</div></div></article>`;
 }
 function renderHistoryTab(){
   const all = STATE.trades;
@@ -1579,7 +1617,7 @@ document.addEventListener('click', async (e) => {
   else if (action==='set-log-device') { const draft=captureLogDraft(); STATE.logFormDevice = btn.dataset.value; renderTabOnly(); restoreLogDraft(draft); }
   else if (action==='remove-log-image') { STATE.logFormImage=''; STATE.logFormBeforeImage=''; STATE.logFormAfterImage=''; STATE.logFormImages=[]; renderLogImagePreview(); updateLogPreview(); }
   else if (action==='remove-log-image-index') { const i=Number(btn.dataset.index); const arr=currentLogImages(); arr.splice(i,1); STATE.logFormImages=arr; STATE.logFormBeforeImage=arr[0]||''; STATE.logFormAfterImage=arr[1]||''; renderLogImagePreview(); updateLogPreview(); }
-  else if (action==='add-log-image-url') { const v=$('#log-image-url')?.value.trim(); if(v){ addLogImages([v]); $('#log-image-url').value=''; } }
+  else if (action==='add-log-image-url') { runImageLink('#log-image-url', btn, src=>addLogImages([src])); }
   else if (action==='edit-trade') { STATE.editingTradeId=btn.dataset.id; render(); }
   else if (action==='delete-trade') { await deleteTrade(btn.dataset.id); }
   else if (action==='cancel-edit-trade') { STATE.editingTradeId=null; render(); }
@@ -1588,9 +1626,9 @@ document.addEventListener('click', async (e) => {
   else if (action==='remove-note-image') { STATE.noteFormImage=''; renderNoteImagePreview(); }
   else if (action==='add-note-text-block') { STATE.noteFormBlocks.push({type:'text',text:''}); renderNoteBlocksEditor(); setTimeout(()=>$$('[data-note-block-text]').at(-1)?.focus(),0); }
   else if (action==='remove-note-block') { const i=Number(btn.dataset.index); STATE.noteFormBlocks.splice(i,1); renderNoteBlocksEditor(); }
-  else if (action==='add-note-image-url') { const v=$('#note-image-url')?.value.trim(); if(v){ STATE.noteFormBlocks.push({type:'image',src:v}); $('#note-image-url').value=''; renderNoteBlocksEditor(); } }
+  else if (action==='add-note-image-url') { runImageLink('#note-image-url', btn, src=>{ STATE.noteFormBlocks.push({type:'image',src}); renderNoteBlocksEditor(); }); }
   else if (action==='open-note-block-annotator') { const noteId=btn.dataset.noteId || null; const index=Number(btn.dataset.index); const src=noteId ? (STATE.notes.find(n=>n.id===noteId)?.blocks?.[index]?.src || '') : (STATE.noteFormBlocks[index]?.src || ''); if(src) openAnnotator(src,noteId,index); }
-  else if (action==='view-image') { openAnnotator(btn.dataset.src || '', null, null); }
+  else if (action==='view-image') { openAnnotator(btn.dataset.src || '', null, null, { tradeId: btn.dataset.tradeId || null }); }
   else if (action==='toggle-strategy-builder') {
     const form = $('#strategy-builder-form');
     if (form) form.style.display = form.style.display === 'none' ? 'block' : 'none';
@@ -1657,6 +1695,9 @@ document.addEventListener('click', async (e) => {
     renderTabOnly();
     scheduleNoteAutoSave(note.id);
     setTimeout(() => { const fields = $$(`[data-live-note-text=\"${note.id}\"]`); fields[at]?.focus(); }, 30);
+  }
+  else if (action==='add-live-image-link') {
+    runImageLink('#live-note-image-link', btn, src=>insertImagesIntoActiveNote([src]));
   }
   else if (action==='trigger-live-image') {
     $('#live-note-image-file')?.click();
@@ -1743,6 +1784,7 @@ document.addEventListener('click', async (e) => {
 });
 
 $('#modal-close').addEventListener('click', closeAnnotator);
+$('#annotator-fullscreen')?.addEventListener('click', toggleAnnotatorFullscreen);
 $('#image-modal').addEventListener('click', (e) => { if (e.target.id==='image-modal') closeAnnotator(); });
 $('#annotator-pen')?.addEventListener('click', () => setAnnotatorMode('pen'));
 $('#annotator-eraser')?.addEventListener('click', () => setAnnotatorMode('eraser'));
@@ -1768,6 +1810,11 @@ document.addEventListener('focusin', (e) => {
 // emotion, not submit/save the entire trade. The explicit ＋ button does the
 // same thing for mouse/touch users.
 document.addEventListener('keydown', (e) => {
+  if (e.key==='Enter' && ['live-note-image-link','log-image-url','note-image-url'].includes(e.target.id)) {
+    e.preventDefault();
+    const act={'live-note-image-link':'add-live-image-link','log-image-url':'add-log-image-url','note-image-url':'add-note-image-url'}[e.target.id];
+    document.querySelector(`[data-action="${act}"]`)?.click(); return;
+  }
   if (e.key==='Escape' && STATE.strategyManager?.open) { closeStrategyManager(); return; }
   if (e.target?.id === 'log-custom-emotion' && e.key === 'Enter') {
     e.preventDefault();
@@ -1865,21 +1912,7 @@ document.addEventListener('change', (e) => {
   else if (e.target.id==='live-note-image-file') {
     const files=[...e.target.files]; const note=STATE.notes.find(n=>n.id===STATE.activeNoteId);
     if(!files.length || !note) return;
-    Promise.all(files.map(readAndCompressImage)).then(srcs=>{
-      note.blocks=normalizeNoteBlocks(note);
-      let at = Number.isInteger(STATE.noteInsertIndex) ? Math.min(STATE.noteInsertIndex + 1, note.blocks.length) : note.blocks.length;
-      srcs.forEach(src=>{
-        note.blocks.splice(at, 0, {type:'image', src});
-        at += 1;
-        if (note.blocks[at]?.type !== 'text') note.blocks.splice(at, 0, {type:'text', text:'', html:''});
-        at += 1;
-      });
-      note.image=note.blocks.find(b=>b.type==='image')?.src || null;
-      STATE.noteInsertIndex = Math.max(0, at-1);
-      renderTabOnly();
-      scheduleNoteAutoSave(note.id);
-      setTimeout(() => { const fields = $$(`[data-live-note-text=\"${note.id}\"]`); fields[Math.min(at-1, fields.length-1)]?.focus(); }, 30);
-    }).catch(err=>alert(err.message||'Image upload failed.'));
+    Promise.all(files.map(readAndCompressImage)).then(srcs=>insertImagesIntoActiveNote(srcs)).catch(err=>alert(err.message||'Image upload failed.'));
     e.target.value='';
   }
   else if (e.target.id==='log-multi-image-file') {
@@ -1918,16 +1951,26 @@ function setAnnotatorMode(mode){
   $('#annotator-pen')?.classList.toggle('active', mode==='pen');
   $('#annotator-eraser')?.classList.toggle('active', mode==='eraser');
 }
-function openAnnotator(src,noteId=null,blockIndex=null){
+const plainSrc=v=>String(v||'').split('?')[0];
+function openAnnotator(src,noteId=null,blockIndex=null,opts={}){
   const modal=$('#image-modal'), img=$('#modal-image'), canvas=$('#annotator-canvas');
   if(!modal||!img||!canvas) return;
   let baseSrc=src||''; let strokes=[];
-  const block = noteId ? (STATE.notes.find(n=>n.id===noteId)?.blocks?.[blockIndex]) : STATE.noteFormBlocks?.[blockIndex];
+  const tradeId=opts.tradeId||null;
+  const block = noteId ? (STATE.notes.find(n=>n.id===noteId)?.blocks?.[blockIndex]) : (Number.isInteger(blockIndex) ? STATE.noteFormBlocks?.[blockIndex] : null);
   if(block?.type==='image'){
     baseSrc=block.baseSrc || block.src || baseSrc;
     strokes=Array.isArray(block.drawingStrokes)?structuredClone(block.drawingStrokes):[];
   }
-  STATE.annotator={src:src||baseSrc,baseSrc,noteId,blockIndex,drawing:false,mode:'pen',color:$('#annotator-color')?.value||'#ef4444',size:Number($('#annotator-size')?.value)||4,pressure:!!$('#annotator-pressure')?.checked,strokes,history:[strokes.map(cloneStroke)],redo:[],activeStroke:null};
+  if(tradeId){
+    const t=STATE.trades.find(x=>x.id===tradeId);
+    const d=(t?.imageDrawings||[]).find(x=>plainSrc(x.src)===plainSrc(src));
+    if(d){ baseSrc=d.baseSrc||src; strokes=Array.isArray(d.strokes)?structuredClone(d.strokes):[]; }
+  }
+  const canSave = !!(noteId || block || tradeId);
+  $('#image-modal .annotator-card')?.classList.toggle('view-only', !canSave);
+  const hint=$('#image-modal .annotator-hint'); if(hint) hint.textContent = canSave ? 'Pen se chart par draw karein · Eraser sirf drawing mitata hai, chart nahi' : 'Sirf dekhne ke liye — drawing History ya Notes se karein';
+  STATE.annotator={src:src||baseSrc,baseSrc,noteId,blockIndex,tradeId,drawing:false,mode:'pen',color:$('#annotator-color')?.value||'#ef4444',size:Number($('#annotator-size')?.value)||4,pressure:!!$('#annotator-pressure')?.checked,strokes,history:[strokes.map(cloneStroke)],redo:[],activeStroke:null};
   setAnnotatorMode('pen');
   img.src=imgUrl(baseSrc); modal.style.display='flex';
   img.onload=()=>setupAnnotatorCanvas();
@@ -1979,13 +2022,39 @@ function redoAnnotator(){
 function clearAnnotator(){
   if(!STATE.annotator.strokes.length)return; STATE.annotator.redo.push(snapshotAnnotator()); STATE.annotator.strokes=[]; STATE.annotator.history.push([]); if(STATE.annotator.history.length>80)STATE.annotator.history.shift(); renderAnnotator();
 }
+// Drawing and erasing happen on their own transparent layer, which is then laid on
+// top of the chart. (Before, the eraser cut holes into the chart itself, so erased
+// areas came out as black/white patches after saving.)
+function renderStrokeLayer(width, height, scale){
+  const layer=document.createElement('canvas'); layer.width=width; layer.height=height;
+  const lctx=layer.getContext('2d'); lctx.save(); lctx.scale(scale,scale);
+  (STATE.annotator.strokes||[]).forEach(st=>drawSmoothStroke(lctx,st));
+  lctx.restore();
+  return layer;
+}
 function compositeAnnotatedImage(){
   const img=$('#modal-image'); if(!img||!img.naturalWidth)return Promise.resolve('');
   const max=1400, scale=Math.min(1, max/Math.max(img.naturalWidth,img.naturalHeight));
-  const out=document.createElement('canvas'); out.width=Math.max(1,Math.round(img.naturalWidth*scale)); out.height=Math.max(1,Math.round(img.naturalHeight*scale));
-  const ctx=out.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,out.width,out.height);
-  ctx.save(); ctx.scale(scale,scale); ctx.drawImage(img,0,0,img.naturalWidth,img.naturalHeight); (STATE.annotator.strokes||[]).forEach(st=>drawSmoothStroke(ctx,st)); ctx.restore();
-  return Promise.resolve(preuploadImage(out.toDataURL('image/jpeg',.8)));
+  const w=Math.max(1,Math.round(img.naturalWidth*scale)), h=Math.max(1,Math.round(img.naturalHeight*scale));
+  const out=document.createElement('canvas'); out.width=w; out.height=h;
+  const ctx=out.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,w,h);
+  ctx.drawImage(img,0,0,w,h);                       // 1) the untouched chart
+  ctx.drawImage(renderStrokeLayer(w,h,scale),0,0);  // 2) pen strokes minus eraser strokes
+  return Promise.resolve(preuploadImage(out.toDataURL('image/jpeg',.85)));
+}
+function saveTradeImageDrawing(newSrc){
+  const a=STATE.annotator, t=STATE.trades.find(x=>x.id===a.tradeId); if(!t) return;
+  const strokes=snapshotAnnotator();
+  const finalSrc = strokes.length ? newSrc : a.baseSrc;          // all drawing erased -> back to the original chart
+  const old=plainSrc(a.src);
+  const swap=v=>plainSrc(v)===old ? finalSrc : v;
+  if(Array.isArray(t.images)) t.images=t.images.map(swap);
+  ['image','beforeImage','afterImage'].forEach(k=>{ if(t[k]) t[k]=swap(t[k]); });
+  t.imageDrawings=(t.imageDrawings||[]).filter(d=>plainSrc(d.src)!==old);
+  if(strokes.length) t.imageDrawings.push({src:finalSrc, baseSrc:a.baseSrc, strokes});
+  t.updatedAt=new Date().toISOString();
+  renderTabOnly();
+  saveUserData('Trade', ['trades']);
 }
 async function saveAnnotatedImage(){
   const img=$('#modal-image'); if(!img||!img.naturalWidth)return;
@@ -1994,10 +2063,27 @@ async function saveAnnotatedImage(){
   if(STATE.annotator.noteId){
     const note=STATE.notes.find(n=>n.id===STATE.annotator.noteId);
     if(note){ note.blocks=normalizeNoteBlocks(note); if(note.blocks[STATE.annotator.blockIndex])note.blocks[STATE.annotator.blockIndex]=payload; note.image=note.blocks.find(b=>b.type==='image')?.src||null; scheduleNoteAutoSave(note.id); renderTabOnly(); }
-  } else if(STATE.annotator.blockIndex!==null && STATE.noteFormBlocks[STATE.annotator.blockIndex]) { STATE.noteFormBlocks[STATE.annotator.blockIndex]=payload; renderNoteBlocksEditor(); }
+  } else if(Number.isInteger(STATE.annotator.blockIndex) && STATE.noteFormBlocks[STATE.annotator.blockIndex]) { STATE.noteFormBlocks[STATE.annotator.blockIndex]=payload; renderNoteBlocksEditor(); }
+  else if(STATE.annotator.tradeId){ saveTradeImageDrawing(src); }
   closeAnnotator();
 }
-function closeAnnotator(){ const modal=$('#image-modal'); if(modal) modal.style.display='none'; const canvas=$('#annotator-canvas'); canvas?.getContext('2d')?.clearRect(0,0,canvas.width,canvas.height); }
+function isAnnotatorFullscreen(){ const card=$('#image-modal .annotator-card'); return !!card && (document.fullscreenElement===card || card.classList.contains('is-fullscreen')); }
+async function toggleAnnotatorFullscreen(){
+  const card=$('#image-modal .annotator-card'); if(!card) return;
+  if (isAnnotatorFullscreen()) {
+    if (document.fullscreenElement) { try { await document.exitFullscreen(); } catch (_) {} }
+    card.classList.remove('is-fullscreen');
+  } else if (card.requestFullscreen) {
+    try { await card.requestFullscreen({ navigationUI: 'hide' }); } catch (_) { card.classList.add('is-fullscreen'); }
+  } else {
+    card.classList.add('is-fullscreen');                    // iPhone Safari: fill the screen with CSS
+  }
+  updateFullscreenButton(); setTimeout(setupAnnotatorCanvas, 60);
+}
+function updateFullscreenButton(){ const b=$('#annotator-fullscreen'); if(b){ const on=isAnnotatorFullscreen(); b.textContent = on ? '🗗 Exit full screen' : '⛶ Full screen'; b.setAttribute('aria-pressed', on?'true':'false'); } }
+document.addEventListener('fullscreenchange', () => { if(!document.fullscreenElement) $('#image-modal .annotator-card')?.classList.remove('is-fullscreen'); updateFullscreenButton(); setTimeout(setupAnnotatorCanvas, 60); });
+window.addEventListener('resize', () => { if($('#image-modal')?.style.display==='flex') setupAnnotatorCanvas(); });
+function closeAnnotator(){ const modal=$('#image-modal'); if(document.fullscreenElement) document.exitFullscreen?.().catch(()=>{}); $('#image-modal .annotator-card')?.classList.remove('is-fullscreen'); updateFullscreenButton(); if(modal) modal.style.display='none'; const canvas=$('#annotator-canvas'); canvas?.getContext('2d')?.clearRect(0,0,canvas.width,canvas.height); }
 
 async function deleteTrade(id){
   const index = STATE.trades.findIndex(t => t.id === id);

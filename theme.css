@@ -375,3 +375,23 @@ button, input, select, textarea { font-family: inherit; }
 .img-broken .img-broken-msg { margin: 0; position: static; font-size: .74rem; }
 .img-broken button { position: relative; z-index: 1; }
 .history-image .img-broken, .history-gallery-card .img-broken { height: auto; min-height: 140px; }
+
+/* ---------- Image viewer / annotator: full screen, link rows ---------- */
+.annotator-head-actions { display: flex; align-items: center; gap: .4rem; }
+.annotator-fs-btn { border: 1px solid var(--line); background: #fff; color: var(--ink); border-radius: 999px; padding: .4rem .75rem; font: inherit; font-size: .72rem; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background .15s; }
+.annotator-fs-btn:hover { background: var(--ink-tint); }
+.annotator-card.view-only .annotator-toolbar { display: none; }
+.annotator-card:fullscreen, .annotator-card.is-fullscreen { width: 100vw !important; max-width: 100vw; height: 100vh; height: 100dvh; max-height: none; border-radius: 0; margin: 0; background: #0B1220; }
+.annotator-card.is-fullscreen { position: fixed; inset: 0; z-index: 9999; }
+.annotator-card:fullscreen .modal-header, .annotator-card.is-fullscreen .modal-header { padding-top: max(.6rem, env(safe-area-inset-top, 0px)); }
+.annotator-card:fullscreen .annotator-stage, .annotator-card.is-fullscreen .annotator-stage { flex: 1; padding: .5rem !important; }
+.annotator-card:fullscreen #modal-image, .annotator-card.is-fullscreen #modal-image { max-width: 100%; max-height: calc(100dvh - 9.5rem); width: auto; height: auto; object-fit: contain; }
+.annotator-card.view-only:fullscreen #modal-image, .annotator-card.view-only.is-fullscreen #modal-image { max-height: calc(100dvh - 4.5rem); }
+.note-link-row { display: flex; gap: .4rem; width: 100%; margin-top: .5rem; }
+.note-link-row input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 8px; padding: .5rem .65rem; font: inherit; font-size: .8rem; }
+.note-link-row input:focus, .image-url-add-row input:focus { outline: none; border-color: var(--ink-3); box-shadow: 0 0 0 3px rgba(45,82,135,.14); }
+.note-plus-menu { flex-wrap: wrap; }
+button[disabled] { opacity: .65; cursor: progress; }
+.modal-header .annotator-fs-btn { width: auto; height: auto; min-height: 1.8rem; padding: .35rem .75rem; background: #fff; border: 1px solid var(--line); }
+.modal-header .annotator-head-actions { flex-shrink: 0; }
+@media (max-width: 700px) { .modal-header .annotator-fs-btn { padding: .35rem .55rem; font-size: .68rem; } .annotator-hint { max-width: 22ch; } }
