@@ -12,8 +12,13 @@ export async function onRequestPost({ request, env }) {
     if (!env.IMAGES) return json({ error: 'Image storage (R2 binding IMAGES) is not configured.' }, { status: 501 });
 
     const body = await readJson(request);
-    const match = /^data:(image\/[a-z+]+);base64,([A-Za-z0-9+/=\s]+)$/.exec(String(body?.dataUrl || ''));
-    if (!match || !TYPES[match[1]]) return json({ error: 'Only JPG, PNG, WEBP or GIF images are allowed.' }, { status: 400 });
+    const match = /^data:(image\/[a-z+.-]+);base64,([A-Za-z0-9+/=_\-\s]+)$/i.exec(String(body?.dataUrl || ''));
+    let type = match ? match[1].toLowerCase() : '';
+    if (type === 'image/jpg' || type === 'image/pjpeg') type = 'image/jpeg';
+    if (!match || !TYPES[type]) return json({ error: 'Only JPG, PNG, WEBP or GIF images are allowed.' }, { status: 400 });
+    match[1] = type;
+    match[2] = match[2].replace(/-/g, '+').replace(/_/g, '/');
+    while (match[2].replace(/\s/g, '').length % 4) match[2] += '=';
 
     const binary = atob(match[2].replace(/\s/g, ''));
     if (binary.length > MAX_BYTES) return json({ error: 'Image too large (max 5 MB).' }, { status: 413 });
