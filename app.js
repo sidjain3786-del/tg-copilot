@@ -864,7 +864,7 @@ function renderCopilotTab(){
       <small>${risk.todayTrades.length} trade${risk.todayTrades.length===1?'':'s'} aaj · loss budget ${risk.dailyLimit>0?`${Math.round(budgetUsedPct)}% used`:'set nahi hai'}</small>
       ${risk.dailyLimit>0?`<div class="hero-budget" aria-hidden="true"><i class="${budgetUsedPct>=75?'hot':''}" style="width:${Math.max(2,budgetUsedPct)}%"></i></div>`:''}
     </div>
-    <button class="btn-cta" data-action="set-tab" data-tab="log">＋ Log New Trade</button>
+    <div class="hero-actions"><button class="btn-cta" data-action="set-tab" data-tab="log">＋ Log New Trade</button><button type="button" class="btn-hero-ghost" data-action="open-weekly-report">📄 Weekly report</button></div>
   </section>
 
   <div class="dashboard-kpis">
@@ -1293,7 +1293,7 @@ function renderHistoryTab(){
     <div class="history-heading"><div><h2 class="section-title">📜 Trade History</h2><p class="card-sub">Apne trades ko jis tarah dekhna ho, wahi view choose karo.</p></div><div class="mono history-total ${totalPnl>=0?'positive':'negative'}">${money(totalPnl)}</div></div>
     <div class="grid-3 journal-kpis"><div><span class="uppercase-label">Trades</span><strong>${trades.length}</strong></div><div><span class="uppercase-label">Win Rate</span><strong>${trades.length?Math.round(wins/trades.length*100):0}%</strong></div><div><span class="uppercase-label">Avg Quality</span><strong>${trades.length?(trades.reduce((a,t)=>a+(Number(t.quality)||3),0)/trades.length).toFixed(1):'—'}/5</strong></div></div>
   </div>
-  <div class="card history-toolbar"><div class="history-toolbar-title"><strong>View</strong><span>${mode==='grid'?'Compact cards':mode==='list'?'Quick rows':mode==='detailed'?'Full journal':'Screenshot focused'}</span></div><div class="history-view-switcher">${historyViewButton('grid','▦','Grid')}${historyViewButton('list','☰','List')}${historyViewButton('detailed','📖','Detailed')}${historyViewButton('gallery','🖼','Gallery')}</div></div>
+  <div class="card history-toolbar"><button type="button" class="btn-secondary btn-small history-report-btn" data-action="open-weekly-report">📄 Weekly report (PDF)</button><div class="history-toolbar-title"><strong>View</strong><span>${mode==='grid'?'Compact cards':mode==='list'?'Quick rows':mode==='detailed'?'Full journal':'Screenshot focused'}</span></div><div class="history-view-switcher">${historyViewButton('grid','▦','Grid')}${historyViewButton('list','☰','List')}${historyViewButton('detailed','📖','Detailed')}${historyViewButton('gallery','🖼','Gallery')}</div></div>
   <div class="card history-filters"><div class="history-search"><input type="search" id="history-search" value="${esc(STATE.historySearch||'')}" placeholder="🔍 Search symbol, note, exit reason, emotion…" aria-label="Search trades"></div><div class="history-filter-grid"><div><label>Strategy Filter</label><select id="history-strategy-filter"><option value="ALL">All Strategies</option>${strategyNames.map(n=>`<option value="${esc(n)}" ${STATE.historyStrategyFilter===n?'selected':''}>${esc(n)}</option>`).join('')}</select></div><div><label>Mistake Filter</label><select id="history-mistake-filter"><option value="ALL">All Mistakes</option>${MISTAKE_OPTIONS.map(x=>`<option value="${x[0]}" ${STATE.historyMistakeFilter===x[0]?'selected':''}>${x[1]}</option>`).join('')}</select></div><div><label>📅 Trade Date</label><input type="date" id="history-date-filter" value="${esc(STATE.historyDateFilter||'')}" aria-label="Select trade date"></div><div class="history-date-actions"><label>&nbsp;</label><button type="button" class="btn-secondary" data-action="clear-history-date" ${STATE.historyDateFilter?'':'disabled'}>Clear Date</button></div></div>${STATE.historyDateFilter?`<div class="history-date-active">📅 Showing trades for <strong>${esc(STATE.historyDateFilter)}</strong></div>`:''}</div>
   <div class="history-results ${mode}-view">${trades.length ? (mode==='list' ? `<div class="history-list-head"><span>Trade</span><span>Entry → Exit</span><span>Emotion</span><span>P&amp;L</span><span></span></div>${trades.map(t=>renderTradeView(t,mode)).join('')}` : trades.map(t=>renderTradeView(t,mode)).join('')) : '<p class="empty-msg">Is filter ke liye koi trade nahi mila.</p>'}</div>
   ${STATE.editingTradeId ? renderEditTradeModal(STATE.editingTradeId) : ''}`;
@@ -1457,6 +1457,202 @@ function rerenderSetupPlaybook(){
   if(fresh && !REDUCED_MOTION){ fresh.classList.add('pb-swap'); }
 }
 
+
+
+/* ---------------- weekly report (PDF download) ----------------
+   Builds a Monday–Sunday report from the journal and downloads it as a PDF.
+   jsPDF is bundled in /vendor and loaded only when a report is made. */
+function weekStartOf(d){ const x=new Date(d); x.setHours(0,0,0,0); x.setDate(x.getDate()-((x.getDay()+6)%7)); return x; }
+function addDays(d,n){ const x=new Date(d); x.setDate(x.getDate()+n); return x; }
+function fmtDay(d,opts){ return d.toLocaleDateString('en-IN',opts||{day:'numeric',month:'short'}); }
+function weekLabel(start){ const end=addDays(start,6); return `${fmtDay(start)} – ${fmtDay(end,{day:'numeric',month:'short',year:'numeric'})}`; }
+function tradesInWeek(start){
+  const from=localDateKey(start), to=localDateKey(addDays(start,6));
+  return STATE.trades.filter(t=>{ const k=tradeLocalDate(t); return k && k>=from && k<=to; }).sort((a,b)=>tradeSortTime(a)-tradeSortTime(b));
+}
+function weeklyReportData(start){
+  const trades=tradesInWeek(start), closed=trades.filter(t=>!isOpenTrade(t));
+  const pnlOf=t=>Number(t.pnl)||0, sum=l=>l.reduce((a,t)=>a+pnlOf(t),0);
+  const wins=closed.filter(t=>pnlOf(t)>0), losses=closed.filter(t=>pnlOf(t)<0);
+  const grossWin=sum(wins), grossLoss=Math.abs(sum(losses));
+  const group=(keyFn)=>{ const m={}; closed.forEach(t=>{ const k=keyFn(t); if(!k) return; const g=m[k]||(m[k]={name:k,trades:0,wins:0,pnl:0,r:0}); g.trades++; if(pnlOf(t)>0) g.wins++; g.pnl+=pnlOf(t); g.r+=Number(t.rr)||0; }); return Object.values(m).map(g=>({...g,winRate:g.trades?Math.round(g.wins/g.trades*100):0,avgR:g.trades?g.r/g.trades:0})).sort((a,b)=>b.pnl-a.pnl); };
+  const days=[...Array(7)].map((_,i)=>{ const d=addDays(start,i), key=localDateKey(d), list=closed.filter(t=>tradeLocalDate(t)===key); return {label:fmtDay(d,{weekday:'short',day:'numeric',month:'short'}), trades:list.length, wins:list.filter(t=>pnlOf(t)>0).length, pnl:sum(list)}; });
+  let run=0; const curve=closed.map(t=>(run+=pnlOf(t)));
+  const prev=tradesInWeek(addDays(start,-7)).filter(t=>!isOpenTrade(t));
+  const followed=closed.filter(t=>t.followedPlan), broken=closed.filter(t=>!t.followedPlan);
+  const sessions=sessionGroupsForTrades(closed).filter(g=>g.trades>0).sort((a,b)=>b.pnl-a.pnl);
+  const best=[...closed].sort((a,b)=>pnlOf(b)-pnlOf(a))[0], worst=[...closed].sort((a,b)=>pnlOf(a)-pnlOf(b))[0];
+  return {
+    start, end:addDays(start,6), label:weekLabel(start), trades, closed, open:trades.length-closed.length,
+    wins:wins.length, losses:losses.length, pnl:sum(closed), prevPnl:sum(prev), prevTrades:prev.length,
+    winRate:closed.length?Math.round(wins.length/closed.length*100):0,
+    avgR:closed.length?closed.reduce((a,t)=>a+(Number(t.rr)||0),0)/closed.length:0,
+    profitFactor:grossLoss?grossWin/grossLoss:(grossWin?Infinity:0),
+    avgWin:wins.length?grossWin/wins.length:0, avgLoss:losses.length?-grossLoss/losses.length:0,
+    ruleRate:closed.length?Math.round(followed.length/closed.length*100):0, followedPnl:sum(followed), brokenPnl:sum(broken), followedN:followed.length, brokenN:broken.length,
+    quality:closed.length?closed.reduce((a,t)=>a+(Number(t.quality)||3),0)/closed.length:0,
+    best, worst, days, curve, sessions,
+    strategies:group(t=>tradeStrategyName(t)),
+    mistakes:group(t=>t.mistake&&t.mistake!=='none'?mistakeLabel(t.mistake):null).sort((a,b)=>a.pnl-b.pnl),
+    emotions:group(t=>emotionText(t)),
+    notes:trades.filter(t=>t.notes)
+  };
+}
+function openWeeklyReport(){ STATE.report={ open:true, start:weekStartOf(new Date()), screenshots:STATE.report?.screenshots ?? true, busy:false }; renderWeeklyReportModal(); }
+function closeWeeklyReport(){ if(STATE.report) STATE.report.open=false; const h=$('#report-host'); if(h) h.innerHTML=''; }
+function renderWeeklyReportModal(){
+  let host=$('#report-host'); if(!host){ host=document.createElement('div'); host.id='report-host'; document.body.appendChild(host); }
+  const r=STATE.report; if(!r?.open){ host.innerHTML=''; return; }
+  const d=weeklyReportData(r.start), cur=weekStartOf(new Date()), isCurrent=r.start.getTime()===cur.getTime();
+  const shots=d.trades.reduce((a,t)=>a+tradeImages(t).length,0);
+  const delta=d.pnl-d.prevPnl;
+  host.innerHTML=`<div class="edit-overlay sm-overlay" data-action="report-backdrop"><div class="edit-modal sm-modal report-modal" role="dialog" aria-modal="true" aria-labelledby="report-title">
+    <div class="edit-modal-head"><div><h2 class="section-title" id="report-title">📄 Weekly report</h2><p class="card-sub">Hafte ka poora hisaab ek PDF mein — download karke save ya share karo.</p></div><button type="button" class="modal-x" data-action="close-weekly-report" aria-label="Close">×</button></div>
+    <div class="report-week-nav">
+      <button type="button" class="btn-secondary btn-small" data-action="report-week" data-step="-1" aria-label="Previous week">‹ Pichhla</button>
+      <div><strong>${esc(d.label)}</strong><small>${isCurrent?'Is hafte':'Mon – Sun'}</small></div>
+      <button type="button" class="btn-secondary btn-small" data-action="report-week" data-step="1" ${isCurrent?'disabled':''} aria-label="Next week">Agla ›</button>
+    </div>
+    ${d.trades.length ? `<div class="report-summary">
+      <div><span>Trades</span><strong>${d.closed.length}${d.open?`<small> +${d.open} open</small>`:''}</strong></div>
+      <div><span>Win rate</span><strong>${d.winRate}%</strong></div>
+      <div><span>Net P&amp;L</span><strong class="${d.pnl>=0?'positive':'negative'}">${money(d.pnl)}</strong></div>
+      <div><span>vs last week</span><strong class="${delta>=0?'positive':'negative'}">${d.prevTrades?money(delta):'—'}</strong></div>
+      <div><span>Avg R</span><strong>${d.avgR.toFixed(2)}R</strong></div>
+      <div><span>Rules followed</span><strong>${d.ruleRate}%</strong></div>
+    </div>
+    <p class="report-includes">PDF mein: summary, din-wise P&amp;L, equity curve, strategy, mistakes ki keemat, emotions, sessions, poori trade list aur trade notes.</p>
+    <label class="report-check"><input type="checkbox" id="report-screenshots" ${r.screenshots?'checked':''} ${shots?'':'disabled'}> Chart screenshots bhi daalo <small>(${shots} image${shots===1?'':'s'}${shots?' · PDF thodi badi hogi':''})</small></label>`
+    : `<div class="report-empty">Is hafte koi trade log nahi hua. ‹ Pichhla dabake purana hafta chuno.</div>`}
+    <p class="sm-error" id="report-status" role="status"></p>
+    <div class="sm-form-actions"><button type="button" class="btn-secondary" data-action="close-weekly-report">Cancel</button><button type="button" class="btn-primary" data-action="download-weekly-report" ${d.trades.length&&!r.busy?'':'disabled'}>${r.busy?'PDF ban rahi hai…':'⬇️ Download PDF'}</button></div>
+  </div></div>`;
+}
+let PDF_LIB_PROMISE=null;
+function loadScript(src){ return new Promise((res,rej)=>{ const s=document.createElement('script'); s.src=src; s.onload=res; s.onerror=()=>rej(new Error('PDF tool load nahi hua — internet check karke dobara try karo.')); document.head.appendChild(s); }); }
+function loadPdfLib(){
+  if(window.jspdf?.jsPDF?.API?.autoTable) return Promise.resolve(window.jspdf.jsPDF);
+  if(!PDF_LIB_PROMISE) PDF_LIB_PROMISE=loadScript('/vendor/jspdf.umd.min.js').then(()=>loadScript('/vendor/jspdf.plugin.autotable.min.js')).then(()=>window.jspdf.jsPDF).catch(e=>{ PDF_LIB_PROMISE=null; throw e; });
+  return PDF_LIB_PROMISE;
+}
+// Built-in PDF fonts can't draw ₹ or emoji, so text is made PDF-safe.
+function pdfText(v){
+  return String(v??'').replace(/₹/g,'Rs ').replace(/[–—]/g,'-').replace(/[‘’]/g,"'").replace(/[“”]/g,'"').replace(/…/g,'...').replace(/•/g,'-')
+    .replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF€]/g,'').replace(/[ \t]{2,}/g,' ').trim();
+}
+function pdfMoney(n){ n=Number(n)||0; const sym=pdfText(currencySymbol())||'Rs'; return `${n>=0?'+':'-'}${sym}${sym.length>1&&!sym.endsWith(' ')?' ':''}${fmtAmount(n)}`; }
+async function imageForPdf(src, maxW=1400){
+  const res=await fetch(imgUrl(src),{credentials:'same-origin'}); if(!res.ok) throw new Error('img '+res.status);
+  const bmp=await createImageBitmap(await res.blob());
+  const scale=Math.min(1, maxW/bmp.width), c=document.createElement('canvas'); c.width=Math.round(bmp.width*scale); c.height=Math.round(bmp.height*scale);
+  const g=c.getContext('2d'); g.fillStyle='#fff'; g.fillRect(0,0,c.width,c.height); g.drawImage(bmp,0,0,c.width,c.height); bmp.close&&bmp.close();
+  return { data:c.toDataURL('image/jpeg',.78), w:c.width, h:c.height };
+}
+async function buildWeeklyPdf(d, opts={}){
+  const jsPDF=await loadPdfLib();
+  const doc=new jsPDF({unit:'mm',format:'a4',compress:true});
+  const W=210, M=14, CW=W-2*M; const INK=[19,35,63], MUTED=[90,106,128], LINE=[226,231,238], GOLD=[233,161,0], GREEN=[11,154,106], RED=[224,65,63];
+  const col=v=>v>=0?GREEN:RED;
+  let y=0;
+  const ensure=h=>{ if(y+h>282){ doc.addPage(); y=18; } };
+  const heading=(txt,sub)=>{ ensure(16); doc.setFont('helvetica','bold'); doc.setFontSize(12); doc.setTextColor(...INK); doc.text(pdfText(txt),M,y); if(sub){ doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(...MUTED); doc.text(pdfText(sub),M,y+4.5); y+=4.5; } y+=4; };
+  const table=(head,body,colStyles={},extra={})=>{ doc.autoTable({ startY:y, head:[head.map(pdfText)], body:body.map(r=>r.map(c=>typeof c==='object'&&c!==null?{...c,content:pdfText(c.content)}:pdfText(c))), margin:{left:M,right:M}, theme:'grid',
+    styles:{font:'helvetica',fontSize:8,cellPadding:1.8,lineColor:LINE,lineWidth:.2,textColor:[15,27,45],overflow:'linebreak'}, headStyles:{fillColor:[237,242,248],textColor:INK,fontStyle:'bold'}, columnStyles:colStyles, ...extra });
+    y=doc.lastAutoTable.finalY+8; };
+  const pnlCell=v=>({content:pdfMoney(v), styles:{textColor:col(v),fontStyle:'bold',halign:'right'}});
+
+  // header band
+  doc.setFillColor(...INK); doc.rect(0,0,W,34,'F'); doc.setFillColor(...GOLD); doc.rect(0,34,W,1.2,'F');
+  doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(18); doc.text('Weekly Trading Report',M,15);
+  doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(200,213,230);
+  doc.text(pdfText(`${STATE.user?.name||'Trader'}  |  ${d.label}`),M,23);
+  doc.setFontSize(8); doc.text(pdfText(`Generated ${new Date().toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})}  |  Trader Co-Pilot`),M,29);
+  y=44;
+
+  // KPI boxes
+  const pf=d.profitFactor===Infinity?'All wins':d.profitFactor.toFixed(2);
+  const kpis=[['Net P&L',pdfMoney(d.pnl),col(d.pnl)],['Trades',`${d.closed.length}${d.open?` (+${d.open} open)`:''}`],['Win rate',`${d.winRate}%`],['Avg R',`${d.avgR.toFixed(2)}R`],
+    ['Profit factor',pf],['Rules followed',`${d.ruleRate}%`],['Avg win / loss',`${pdfMoney(d.avgWin)} / ${pdfMoney(d.avgLoss)}`],['vs last week',d.prevTrades?pdfMoney(d.pnl-d.prevPnl):'-',d.prevTrades?col(d.pnl-d.prevPnl):null]];
+  const bw=(CW-6)/4, bh=17;
+  kpis.forEach(([label,val,c],i)=>{ const x=M+(i%4)*(bw+2), yy=y+Math.floor(i/4)*(bh+2);
+    doc.setDrawColor(...LINE); doc.setFillColor(250,251,253); doc.roundedRect(x,yy,bw,bh,2,2,'FD');
+    doc.setFont('helvetica','normal'); doc.setFontSize(7); doc.setTextColor(...MUTED); doc.text(pdfText(label).toUpperCase(),x+3,yy+5.5);
+    doc.setFont('helvetica','bold'); doc.setFontSize(val.length>16?8.5:11.5); doc.setTextColor(...(c||INK)); doc.text(pdfText(val),x+3,yy+12.5); });
+  y+=2*bh+2+9;
+
+  // equity curve
+  heading('Equity curve (this week)', 'Har closed trade ke baad cumulative P&L');
+  const ch=42, cx=M, cy=y; doc.setDrawColor(...LINE); doc.setFillColor(250,251,253); doc.roundedRect(cx,cy,CW,ch,2,2,'FD');
+  if(d.curve.length){ const pts=[0,...d.curve], mn=Math.min(...pts), mx=Math.max(...pts), rg=(mx-mn)||1, px=i=>cx+6+i*((CW-12)/Math.max(1,pts.length-1)), py=v=>cy+ch-6-((v-mn)/rg)*(ch-12);
+    doc.setDrawColor(184,196,212); doc.setLineDashPattern([1,1],0); doc.line(cx+4,py(0),cx+CW-4,py(0)); doc.setLineDashPattern([],0);
+    doc.setDrawColor(31,58,99); doc.setLineWidth(.7); for(let i=1;i<pts.length;i++) doc.line(px(i-1),py(pts[i-1]),px(i),py(pts[i]));
+    doc.setFillColor(...GOLD); doc.circle(px(pts.length-1),py(pts.at(-1)),1.3,'F'); doc.setLineWidth(.2);
+    doc.setFontSize(7); doc.setTextColor(...MUTED); doc.text(pdfText(`High ${pdfMoney(mx)}   Low ${pdfMoney(mn)}`),cx+CW-4,cy+5,{align:'right'}); }
+  else { doc.setFontSize(8); doc.setTextColor(...MUTED); doc.text('Koi closed trade nahi.',cx+4,cy+8); }
+  y=cy+ch+9;
+
+  heading('Day by day');
+  table(['Day','Trades','Wins','Net P&L'], d.days.map(x=>[x.label,String(x.trades),String(x.wins),x.trades?pnlCell(x.pnl):{content:'-',styles:{halign:'right',textColor:MUTED}}]), {1:{halign:'center'},2:{halign:'center'},3:{halign:'right'}});
+  heading('By strategy');
+  table(['Strategy','Trades','Win rate','Avg R','Net P&L'], d.strategies.map(g=>[g.name,String(g.trades),`${g.winRate}%`,`${g.avgR.toFixed(2)}R`,pnlCell(g.pnl)]), {1:{halign:'center'},2:{halign:'center'},3:{halign:'center'},4:{halign:'right'}});
+  heading('Discipline', 'Rules follow kiye vs rules tode');
+  table(['','Trades','Net P&L'], [['Rules followed',String(d.followedN),pnlCell(d.followedPnl)],['Rules broken',String(d.brokenN),pnlCell(d.brokenPnl)]], {1:{halign:'center'},2:{halign:'right'}});
+  if(d.mistakes.length){ heading('Mistakes and their cost'); table(['Mistake','Times','Net P&L'], d.mistakes.map(g=>[g.name,String(g.trades),pnlCell(g.pnl)]), {1:{halign:'center'},2:{halign:'right'}}); }
+  heading('Emotions'); table(['Emotion','Trades','Win rate','Net P&L'], d.emotions.map(g=>[g.name,String(g.trades),`${g.winRate}%`,pnlCell(g.pnl)]), {1:{halign:'center'},2:{halign:'center'},3:{halign:'right'}});
+  if(d.sessions.length){ heading('Sessions (UTC)'); table(['Session','Trades','Win rate','Net P&L'], d.sessions.map(g=>[g.name,String(g.trades),`${g.winRate??0}%`,pnlCell(g.pnl)]), {1:{halign:'center'},2:{halign:'center'},3:{halign:'right'}}); }
+  if(d.best||d.worst){ heading('Best and worst trade'); table(['','Trade','When','P&L'], [d.best&&['Best',`${d.best.symbol||''} ${d.best.type||''} - ${tradeStrategyName(d.best)}`,formatTradeTime(d.best),pnlCell(Number(d.best.pnl)||0)], d.worst&&d.worst!==d.best&&['Worst',`${d.worst.symbol||''} ${d.worst.type||''} - ${tradeStrategyName(d.worst)}`,formatTradeTime(d.worst),pnlCell(Number(d.worst.pnl)||0)]].filter(Boolean), {3:{halign:'right'}}); }
+
+  // trade log
+  doc.addPage(); y=18;
+  heading('All trades this week', `${d.trades.length} trade${d.trades.length===1?'':'s'}`);
+  table(['When','Symbol','Side','Strategy','Entry','Exit','Qty','P&L','R','Mistake'],
+    d.trades.map(t=>[formatTradeTime(t),t.symbol||'-',t.type||'-',tradeStrategyName(t),String(t.entryPrice??'-'),String(t.exitPrice??'-'),String(t.quantity??'-'),
+      isOpenTrade(t)?{content:'Open',styles:{halign:'right',textColor:[201,138,0]}}:pnlCell(Number(t.pnl)||0), isOpenTrade(t)?'-':String(t.rr??'-'), t.mistake&&t.mistake!=='none'?mistakeLabel(t.mistake):'-']),
+    {0:{cellWidth:27},1:{fontStyle:'bold'},7:{halign:'right'},8:{halign:'center'}}, {styles:{font:'helvetica',fontSize:7,cellPadding:1.5,lineColor:LINE,lineWidth:.2,textColor:[15,27,45]}});
+  if(d.notes.length){ heading('Trade notes & lessons'); table(['Trade','Note'], d.notes.map(t=>[`${t.symbol||''}\n${formatTradeTime(t)}\n${isOpenTrade(t)?'Open':pdfMoney(Number(t.pnl)||0)}`, t.notes]), {0:{cellWidth:34,fontStyle:'bold'}}); }
+
+  // screenshots
+  if(opts.screenshots){
+    const withImgs=d.trades.filter(t=>tradeImages(t).length);
+    if(withImgs.length){ doc.addPage(); y=18; heading('Chart screenshots'); }
+    let done=0; const total=withImgs.reduce((a,t)=>a+Math.min(2,tradeImages(t).length),0);
+    for(const t of withImgs){
+      const imgs=tradeImages(t).slice(0,2);
+      ensure(70);   // keep the trade title on the same page as its first screenshot doc.setFont('helvetica','bold'); doc.setFontSize(9.5); doc.setTextColor(...INK);
+      doc.text(pdfText(`${t.symbol||''} ${t.type||''}  |  ${formatTradeTime(t)}  |  ${isOpenTrade(t)?'Open':pdfMoney(Number(t.pnl)||0)}`),M,y); y+=4;
+      for(const src of imgs){
+        opts.onProgress && opts.onProgress(++done,total);
+        try { const im=await imageForPdf(src); let w=CW, h=im.h*w/im.w; if(h>120){ h=120; w=im.w*h/im.h; } ensure(h+4); doc.addImage(im.data,'JPEG',M,y,w,h); y+=h+4; }
+        catch(_) { ensure(8); doc.setFont('helvetica','italic'); doc.setFontSize(8); doc.setTextColor(...MUTED); doc.text('(screenshot load nahi hua)',M,y+3); y+=7; }
+      }
+      y+=3;
+    }
+  }
+
+  // footer
+  const pages=doc.getNumberOfPages();
+  for(let i=1;i<=pages;i++){ doc.setPage(i); doc.setFont('helvetica','normal'); doc.setFontSize(7); doc.setTextColor(...MUTED); doc.text(pdfText(`Trader Co-Pilot  |  ${d.label}`),M,292); doc.text(`Page ${i} of ${pages}`,W-M,292,{align:'right'}); }
+  return doc;
+}
+async function downloadWeeklyReport(){
+  const r=STATE.report; if(!r||r.busy) return;
+  const d=weeklyReportData(r.start); if(!d.trades.length) return;
+  r.screenshots=!!$('#report-screenshots')?.checked; r.busy=true; renderWeeklyReportModal();
+  const status=()=>$('#report-status');
+  try{
+    const doc=await buildWeeklyPdf(d,{ screenshots:r.screenshots, onProgress:(i,n)=>{ const s=status(); if(s) s.textContent=`Screenshots jod rahe hain… ${i}/${n}`; } });
+    const name=`Trading-Report_${localDateKey(d.start)}_to_${localDateKey(d.end)}.pdf`;
+    const blob=doc.output('blob');
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove();
+    // iPhone home-screen apps ignore "download": open the PDF so it can be saved/shared from the viewer.
+    if(window.navigator.standalone) window.open(url,'_blank');
+    setTimeout(()=>URL.revokeObjectURL(url), 60000);
+    r.busy=false; renderWeeklyReportModal(); const s=status(); if(s){ s.style.color='var(--profit)'; s.textContent=`✓ ${name} download ho gayi (${Math.max(1,Math.round(blob.size/1024))} KB).`; }
+  }catch(e){
+    console.error(e); r.busy=false; renderWeeklyReportModal(); const s=status(); if(s) s.textContent='⚠ '+(e.message||'PDF nahi ban payi. Dobara try karo.');
+  }
+}
 
 /* ---------------- strategy manager ---------------- */
 function strategyUsage(name){
@@ -1721,6 +1917,11 @@ document.addEventListener('click', async (e) => {
   }
   else if (action==='retry-broken-image') { const box=btn.closest('.img-broken'); if(box){ const src=box.dataset.src.split('?')[0]; IMG_STATUS_CACHE.delete(src); IMG_RETRIED.add(src); const img=BROKEN_ORIGINALS.get(box)||document.createElement('img'); img.dataset.brokenHandled=''; img.style.visibility=''; img.src=src+(src.startsWith('data:')?'':(src.includes('?')?'&':'?')+'r='+Date.now()); box.replaceWith(img); } }
   else if (action==='check-all-images') { checkAllImages(); }
+  else if (action==='open-weekly-report') { openWeeklyReport(); }
+  else if (action==='close-weekly-report') { closeWeeklyReport(); }
+  else if (action==='report-backdrop') { if (e.target===btn) closeWeeklyReport(); }
+  else if (action==='report-week') { if(STATE.report?.busy) return; STATE.report.screenshots=!!$('#report-screenshots')?.checked || (!$('#report-screenshots') && STATE.report.screenshots); STATE.report.start=addDays(STATE.report.start, 7*Number(btn.dataset.step)); renderWeeklyReportModal(); }
+  else if (action==='download-weekly-report') { downloadWeeklyReport(); }
   else if (action==='open-strategy-manager') { openStrategyManager(btn.dataset.new ? 'new' : (btn.dataset.id || null)); }
   else if (action==='close-strategy-manager') { closeStrategyManager(); }
   else if (action==='sm-backdrop') { if (e.target===btn) closeStrategyManager(); }
@@ -1795,11 +1996,21 @@ $('#annotator-undo')?.addEventListener('click', undoAnnotator);
 $('#annotator-redo')?.addEventListener('click', redoAnnotator);
 $('#annotator-clear')?.addEventListener('click', clearAnnotator);
 $('#annotator-save')?.addEventListener('click', saveAnnotatedImage);
-$('#annotator-canvas')?.addEventListener('pointerdown', startAnnotator);
-$('#annotator-canvas')?.addEventListener('pointermove', moveAnnotator);
-$('#annotator-canvas')?.addEventListener('pointerup', endAnnotator);
-$('#annotator-canvas')?.addEventListener('pointercancel', endAnnotator);
-$('#annotator-canvas')?.addEventListener('pointerleave', e => { if(STATE.annotator.drawing) moveAnnotator(e); });
+// Gestures are read on the whole stage, so a second finger counts even if it lands beside the picture.
+const ANN_STAGE=$('#image-modal .annotator-stage');
+ANN_STAGE?.addEventListener('pointerdown', startAnnotator);
+ANN_STAGE?.addEventListener('pointermove', moveAnnotator);
+ANN_STAGE?.addEventListener('pointerup', endAnnotator);
+ANN_STAGE?.addEventListener('pointercancel', endAnnotator);
+$('#annotator-move')?.addEventListener('click', () => setAnnotatorMode('move'));
+$('#annotator-zoom-in')?.addEventListener('click', () => zoomAnnotatorBy(1.4));
+$('#annotator-zoom-out')?.addEventListener('click', () => zoomAnnotatorBy(1/1.4));
+$('#annotator-zoom-fit')?.addEventListener('click', resetAnnotatorView);
+$('#image-modal .annotator-stage')?.addEventListener('wheel', e => {
+  if($('#image-modal')?.style.display!=='flex') return;
+  e.preventDefault();
+  zoomAnnotatorAt(annView().scale*Math.exp(-e.deltaY*(e.ctrlKey?0.01:0.0025)), e.clientX, e.clientY);
+}, { passive:false });
 window.addEventListener('resize', () => { if ($('#image-modal')?.style.display==='flex') setupAnnotatorCanvas(); });
 
 document.addEventListener('focusin', (e) => {
@@ -1816,6 +2027,7 @@ document.addEventListener('keydown', (e) => {
     document.querySelector(`[data-action="${act}"]`)?.click(); return;
   }
   if (e.key==='Escape' && STATE.strategyManager?.open) { closeStrategyManager(); return; }
+  if (e.key==='Escape' && STATE.report?.open && !STATE.report.busy) { closeWeeklyReport(); return; }
   if (e.target?.id === 'log-custom-emotion' && e.key === 'Enter') {
     e.preventDefault();
     e.stopPropagation();
@@ -1950,6 +2162,8 @@ function setAnnotatorMode(mode){
   STATE.annotator.mode=mode;
   $('#annotator-pen')?.classList.toggle('active', mode==='pen');
   $('#annotator-eraser')?.classList.toggle('active', mode==='eraser');
+  $('#annotator-move')?.classList.toggle('active', mode==='move');
+  $('#image-modal .annotator-card')?.classList.toggle('mode-move', mode==='move');
 }
 const plainSrc=v=>String(v||'').split('?')[0];
 function openAnnotator(src,noteId=null,blockIndex=null,opts={}){
@@ -1971,20 +2185,83 @@ function openAnnotator(src,noteId=null,blockIndex=null,opts={}){
   $('#image-modal .annotator-card')?.classList.toggle('view-only', !canSave);
   const hint=$('#image-modal .annotator-hint'); if(hint) hint.textContent = canSave ? 'Pen se chart par draw karein · Eraser sirf drawing mitata hai, chart nahi' : 'Sirf dekhne ke liye — drawing History ya Notes se karein';
   STATE.annotator={src:src||baseSrc,baseSrc,noteId,blockIndex,tradeId,drawing:false,mode:'pen',color:$('#annotator-color')?.value||'#ef4444',size:Number($('#annotator-size')?.value)||4,pressure:!!$('#annotator-pressure')?.checked,strokes,history:[strokes.map(cloneStroke)],redo:[],activeStroke:null};
+  STATE.annotator.view={scale:1,x:0,y:0}; ANN_POINTERS.clear(); ANN_GESTURE=null;
   setAnnotatorMode('pen');
   img.src=imgUrl(baseSrc); modal.style.display='flex';
   img.onload=()=>setupAnnotatorCanvas();
   if(img.complete) setupAnnotatorCanvas();
 }
-function cloneStroke(stroke){ return {mode:stroke.mode||'pen',color:stroke.color||'#ef4444',size:Number(stroke.size)||4,points:(stroke.points||[]).map(p=>({x:Number(p.x),y:Number(p.y),pressure:Number.isFinite(p.pressure)?p.pressure:0.5}))}; }
+function cloneStroke(stroke){ return {mode:stroke.mode||'pen',color:stroke.color||'#ef4444',size:Number(stroke.size)>0?Number(stroke.size):4,points:(stroke.points||[]).map(p=>({x:Number(p.x),y:Number(p.y),pressure:Number.isFinite(p.pressure)?p.pressure:0.5}))}; }
+// Fit the whole image inside the visible stage (both in the popup and in full screen),
+// then lay the drawing canvas exactly over it.
+function fitAnnotatorImage(){
+  const img=$('#modal-image'), stage=$('#image-modal .annotator-stage'); if(!img||!stage||!img.naturalWidth) return;
+  const cs=getComputedStyle(stage);
+  const W=stage.clientWidth-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight);
+  const H=stage.clientHeight-parseFloat(cs.paddingTop)-parseFloat(cs.paddingBottom);
+  if(W<20||H<20) return;
+  const fs=isAnnotatorFullscreen();
+  const fit=Math.min(W/img.naturalWidth, H/img.naturalHeight, fs?4:1);
+  img.style.maxWidth='none'; img.style.maxHeight='none';
+  img.style.width=Math.max(1,Math.floor(img.naturalWidth*fit))+'px';
+  img.style.height=Math.max(1,Math.floor(img.naturalHeight*fit))+'px';
+}
 function setupAnnotatorCanvas(){
   const img=$('#modal-image'), canvas=$('#annotator-canvas'); if(!img||!canvas||!img.naturalWidth) return;
-  const rect=img.getBoundingClientRect();
-  canvas.width=img.naturalWidth; canvas.height=img.naturalHeight; canvas.style.width=rect.width+'px'; canvas.style.height=rect.height+'px';
+  fitAnnotatorImage();
+  canvas.width=img.naturalWidth; canvas.height=img.naturalHeight;
+  canvas.style.width=img.offsetWidth+'px'; canvas.style.height=img.offsetHeight+'px';
+  applyAnnotatorView();
   renderAnnotator();
 }
+/* ---- zoom & pan ----
+   Two fingers: pinch to zoom + move. Mouse wheel / +/- buttons: zoom. ✋ Move tool (or one
+   finger when only viewing, or a finger while an Apple Pencil is used): drag the picture.
+   Pen strokes keep their real position at any zoom. */
+const ANN_MIN_ZOOM=1, ANN_MAX_ZOOM=8;
+function annView(){ return STATE.annotator.view || (STATE.annotator.view={scale:1,x:0,y:0}); }
+function applyAnnotatorView(){
+  const wrap=$('#image-modal .annotator-canvas-wrap'); if(!wrap) return;
+  const v=annView(); clampAnnotatorView();
+  wrap.style.transformOrigin='0 0';
+  wrap.style.transform=`translate(${v.x}px, ${v.y}px) scale(${v.scale})`;
+  const z=$('#annotator-zoom-level'); if(z) z.textContent=Math.round(v.scale*100)+'%';
+  $('#image-modal .annotator-card')?.classList.toggle('is-zoomed', v.scale>1.01);
+}
+function clampAnnotatorView(){
+  const v=annView(), wrap=$('#image-modal .annotator-canvas-wrap'); if(!wrap) return;
+  v.scale=Math.min(ANN_MAX_ZOOM, Math.max(ANN_MIN_ZOOM, v.scale));
+  if(v.scale<=1.001){ v.x=0; v.y=0; return; }
+  // keep at least a quarter of the picture on screen
+  const w=wrap.offsetWidth*v.scale, h=wrap.offsetHeight*v.scale, mx=w*0.75, my=h*0.75;
+  v.x=Math.min(mx, Math.max(-mx, v.x)); v.y=Math.min(my, Math.max(-my, v.y));
+}
+function wrapLayoutOrigin(){ const wrap=$('#image-modal .annotator-canvas-wrap'), r=wrap.getBoundingClientRect(), v=annView(); return {L:r.left-v.x, T:r.top-v.y}; }
+function zoomAnnotatorAt(newScale, cx, cy){
+  const v=annView(), o=wrapLayoutOrigin();
+  newScale=Math.min(ANN_MAX_ZOOM, Math.max(ANN_MIN_ZOOM, newScale));
+  const px=(cx-o.L-v.x)/v.scale, py=(cy-o.T-v.y)/v.scale;   // image point under the focus
+  v.x=cx-o.L-newScale*px; v.y=cy-o.T-newScale*py; v.scale=newScale;
+  applyAnnotatorView();
+}
+function zoomAnnotatorBy(factor){ const st=$('#image-modal .annotator-stage').getBoundingClientRect(); zoomAnnotatorAt(annView().scale*factor, st.left+st.width/2, st.top+st.height/2); }
+function resetAnnotatorView(){ STATE.annotator.view={scale:1,x:0,y:0}; applyAnnotatorView(); }
+const ANN_POINTERS=new Map();
+let ANN_GESTURE=null;      // {type:'pinch'|'pan', ...}
+function annotatorCanDraw(){ return !$('#image-modal .annotator-card')?.classList.contains('view-only'); }
+function pointerShouldPan(e){
+  if(!annotatorCanDraw()) return true;
+  if(STATE.annotator.mode==='move') return true;
+  if(e.pointerType==='touch' && STATE.annotator.penSeen) return true;   // Apple Pencil draws, finger moves
+  return false;
+}
+function startPinch(){
+  const [a,b]=[...ANN_POINTERS.values()]; const v=annView(), o=wrapLayoutOrigin();
+  const mx=(a.x+b.x)/2, my=(a.y+b.y)/2;
+  ANN_GESTURE={type:'pinch', d0:Math.hypot(a.x-b.x,a.y-b.y)||1, s0:v.scale, px:(mx-o.L-v.x)/v.scale, py:(my-o.T-v.y)/v.scale};
+}
 function annotatorPoint(e){ const c=$('#annotator-canvas'),r=c.getBoundingClientRect(); return {x:(e.clientX-r.left)*(c.width/r.width),y:(e.clientY-r.top)*(c.height/r.height),pressure:Number.isFinite(e.pressure)&&e.pressure>0?e.pressure:.5}; }
-function strokeWidth(stroke,p){ return Math.max(.75, stroke.size*(STATE.annotator.pressure ? (.55 + (p.pressure||.5)*.9) : 1)); }
+function strokeWidth(stroke,p){ return Math.max(.35, stroke.size*(STATE.annotator.pressure ? (.55 + (p.pressure||.5)*.9) : 1)); }
 function drawSmoothStroke(ctx,stroke){
   const pts=stroke.points||[]; if(!pts.length)return;
   ctx.save(); ctx.lineCap='round'; ctx.lineJoin='round'; ctx.globalCompositeOperation=stroke.mode==='eraser'?'destination-out':'source-over'; ctx.strokeStyle=stroke.color||'#ef4444';
@@ -2000,16 +2277,49 @@ function renderAnnotator(){
 }
 function snapshotAnnotator(){ return (STATE.annotator.strokes||[]).map(cloneStroke); }
 function startAnnotator(e){
-  const c=$('#annotator-canvas'); if(!c||!STATE.annotator.baseSrc)return; e.preventDefault(); c.setPointerCapture?.(e.pointerId); STATE.annotator.drawing=true;
-  const p=annotatorPoint(e); STATE.annotator.activeStroke={mode:STATE.annotator.mode,color:STATE.annotator.color,size:STATE.annotator.size,points:[p]}; renderAnnotator();
-}
-function moveAnnotator(e){
-  if(!STATE.annotator.drawing||!STATE.annotator.activeStroke)return; e.preventDefault();
-  const events=e.getCoalescedEvents?e.getCoalescedEvents():[e]; for(const ev of events){ const p=annotatorPoint(ev); const pts=STATE.annotator.activeStroke.points; const last=pts[pts.length-1]; if(!last||Math.hypot(p.x-last.x,p.y-last.y)>=.35)pts.push(p); }
+  const c=$('#annotator-canvas'); if(!c||!STATE.annotator.baseSrc) return;
+  if(e.target.closest && e.target.closest('button')) return;           // zoom buttons
+  if(e.button>0) return;
+  e.preventDefault(); try { e.currentTarget.setPointerCapture?.(e.pointerId); } catch (_) {}
+  if(e.pointerType==='pen') STATE.annotator.penSeen=true;
+  ANN_POINTERS.set(e.pointerId,{x:e.clientX,y:e.clientY,type:e.pointerType});
+  if(ANN_POINTERS.size>=2){
+    // second finger: this is a zoom, not a drawing -> drop the half-started stroke
+    STATE.annotator.drawing=false; STATE.annotator.activeStroke=null; renderAnnotator();
+    startPinch(); return;
+  }
+  if(pointerShouldPan(e) || e.target!==c){ const v=annView(); ANN_GESTURE={type:'pan', sx:e.clientX, sy:e.clientY, x0:v.x, y0:v.y}; c.style.cursor='grabbing'; return; }
+  STATE.annotator.drawing=true;
+  // Size slider = thickness you see on screen, whatever the image size or zoom.
+  const p=annotatorPoint(e), img=$('#modal-image');
+  const screenPerImagePx=(img&&img.naturalWidth?img.offsetWidth/img.naturalWidth:1)*annView().scale;
+  STATE.annotator.activeStroke={mode:STATE.annotator.mode,color:STATE.annotator.color,size:STATE.annotator.size/(screenPerImagePx||1),points:[p]};
   renderAnnotator();
 }
-function endAnnotator(){
-  if(!STATE.annotator.drawing)return; STATE.annotator.drawing=false;
+function moveAnnotator(e){
+  if(ANN_POINTERS.has(e.pointerId)) ANN_POINTERS.set(e.pointerId,{x:e.clientX,y:e.clientY,type:e.pointerType});
+  if(ANN_GESTURE?.type==='pinch' && ANN_POINTERS.size>=2){
+    e.preventDefault();
+    const [a,b]=[...ANN_POINTERS.values()], g=ANN_GESTURE, v=annView(), o=wrapLayoutOrigin();
+    const mx=(a.x+b.x)/2, my=(a.y+b.y)/2, s2=Math.min(ANN_MAX_ZOOM, Math.max(ANN_MIN_ZOOM, g.s0*Math.hypot(a.x-b.x,a.y-b.y)/g.d0));
+    v.scale=s2; v.x=mx-o.L-s2*g.px; v.y=my-o.T-s2*g.py; applyAnnotatorView(); return;
+  }
+  if(ANN_GESTURE?.type==='pan'){ e.preventDefault(); const v=annView(), g=ANN_GESTURE; v.x=g.x0+(e.clientX-g.sx); v.y=g.y0+(e.clientY-g.sy); applyAnnotatorView(); return; }
+  if(!STATE.annotator.drawing||!STATE.annotator.activeStroke) return;
+  e.preventDefault();
+  const co=e.getCoalescedEvents?e.getCoalescedEvents():null; const events=co&&co.length?co:[e];   // some browsers give an empty list
+  for(const ev of events){ const p=annotatorPoint(ev); const pts=STATE.annotator.activeStroke.points; const last=pts[pts.length-1]; if(!last||Math.hypot(p.x-last.x,p.y-last.y)>=.35/annView().scale) pts.push(p); }
+  renderAnnotator();
+}
+function endAnnotator(e){
+  if(e && e.pointerId!==undefined) ANN_POINTERS.delete(e.pointerId);
+  const c=$('#annotator-canvas'); if(c) c.style.cursor='';
+  if(ANN_GESTURE){
+    if(ANN_GESTURE.type==='pinch' && ANN_POINTERS.size===1){ const [p]=[...ANN_POINTERS.values()]; const v=annView(); ANN_GESTURE={type:'pan', sx:p.x, sy:p.y, x0:v.x, y0:v.y}; return; }
+    if(ANN_POINTERS.size===0) ANN_GESTURE=null;
+    return;
+  }
+  if(!STATE.annotator.drawing) return; STATE.annotator.drawing=false;
   if(STATE.annotator.activeStroke?.points?.length){ STATE.annotator.strokes.push(cloneStroke(STATE.annotator.activeStroke)); STATE.annotator.history.push(snapshotAnnotator()); STATE.annotator.redo=[]; if(STATE.annotator.history.length>80)STATE.annotator.history.shift(); }
   STATE.annotator.activeStroke=null; renderAnnotator();
 }

@@ -109,3 +109,19 @@ This restores the WHOLE database (trades/notes saved after that time are rolled 
 - **Eraser fixed:** the eraser used to cut holes into the chart itself, so erased areas were saved as black patches. Drawing now lives on its own layer: the eraser only removes drawing, the chart underneath stays intact (verified pixel-by-pixel: old method saved black `0,1,0`, new saves the original chart colour).
 - **Drawing on trade screenshots now saves** (before, "Save Drawing" from History did nothing). The original screenshot and strokes are kept, so re-opening lets you edit; clearing all drawing and saving restores the original.
 - Popups opened just for viewing (e.g. log-form preview) hide the drawing tools.
+
+## Update 12 — Weekly report (PDF download)
+- **📄 Weekly report** button on the dashboard (under "Log New Trade") and in Trade History.
+- Pick the week (Mon–Sun) with ‹ Pichhla / Agla ›; a quick summary shows before downloading.
+- The PDF contains: summary (net P&L, trades, win rate, avg R, profit factor, rules followed, avg win/loss, change vs last week), equity curve, day-by-day P&L, by strategy, discipline (rules followed vs broken), mistakes and their cost, emotions, sessions, best/worst trade, the full trade list, trade notes, and (optional) chart screenshots.
+- File name: `Trading-Report_<monday>_to_<sunday>.pdf`. On an iPhone home-screen app the PDF opens in the viewer to save/share.
+- PDF library (jsPDF + AutoTable, MIT) is bundled in `/vendor` and loaded only when a report is made — no outside CDN needed; it is cached for offline use.
+- Built-in PDF fonts can't print ₹ or emoji: amounts show as "Rs", emoji are removed from notes in the PDF.
+
+## Update 13 — Zoom, pan and a proper full-screen fit for chart images
+- **Whole image always fits:** the picture is sized to the visible area in the popup and in full screen (on phones too); small images are enlarged in full screen. On phones the popup itself is full-screen and the toolbar is a single swipeable row, so the chart gets most of the screen.
+- **Pinch to zoom (two fingers) no longer draws.** Two fingers zoom and move the picture; the half-started line from the first finger is thrown away. After zooming, one finger draws exactly where you touch.
+- **✋ Move tool** to drag the picture with one finger/mouse. With an Apple Pencil, the Pencil draws and the finger moves the picture automatically.
+- **Zoom controls** on the picture: − / 100% (tap to fit) / +. Mouse wheel / trackpad pinch zooms on laptops (up to 800%).
+- Pen size now means the thickness you see on screen, at any zoom, so you can write small notes while zoomed in; lines stay in the right place on the saved image.
+- In view-only popups one finger simply moves the picture.

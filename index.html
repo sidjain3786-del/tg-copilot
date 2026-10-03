@@ -101,6 +101,7 @@
       <div class="annotator-toolbar">
         <button type="button" class="annotator-tool active" id="annotator-pen">✏️ Pen</button>
         <button type="button" class="annotator-tool" id="annotator-eraser">🧽 Eraser</button>
+        <button type="button" class="annotator-tool" id="annotator-move" title="Picture ko khiskao / zoom karo">✋ Move</button>
         <label class="annotator-color-wrap">Color <input type="color" id="annotator-color" value="#ef4444"></label>
         <label class="annotator-size-wrap">Size <input type="range" id="annotator-size" min="1" max="24" value="4"></label>
         <button type="button" class="annotator-tool" id="annotator-undo">↶ Undo</button>
@@ -111,6 +112,7 @@
       </div>
       <div class="modal-body annotator-stage">
         <div class="annotator-canvas-wrap"><img id="modal-image" src="" alt="Chart"><canvas id="annotator-canvas"></canvas></div>
+        <div class="annotator-zoom" aria-label="Zoom"><button type="button" id="annotator-zoom-out" aria-label="Zoom out">−</button><button type="button" id="annotator-zoom-fit" title="Poori image dikhao"><span id="annotator-zoom-level">100%</span></button><button type="button" id="annotator-zoom-in" aria-label="Zoom in">+</button></div>
       </div>
     </div>
   </div>
