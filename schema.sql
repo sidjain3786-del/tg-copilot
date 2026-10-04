@@ -71,3 +71,8 @@ CREATE TABLE IF NOT EXISTS user_activity (
   saves INTEGER NOT NULL DEFAULT 0,
   visits INTEGER NOT NULL DEFAULT 0
 );
+
+-- Quote of the Day (admin) + devices that want notifications + app settings (VAPID keys).
+CREATE TABLE IF NOT EXISTS quotes (id TEXT PRIMARY KEY, text TEXT NOT NULL, author TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, created_by TEXT, notified INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS push_subscriptions (endpoint TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at TEXT NOT NULL, last_ok_at TEXT, fails INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);

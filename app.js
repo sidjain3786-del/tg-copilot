@@ -284,7 +284,7 @@ function playDashboardIntro(){
   $$('.hero-today strong, .dashboard-kpi strong', content).forEach(el=>countUp(el));
 }
 // Motion is decoration: it must never be able to break rendering.
-function afterTabRender(){ try { playTabEnter(); playDashboardIntro(); } catch (e) { console.warn('motion skipped', e); } }
+function afterTabRender(){ try { if(LAST_RENDERED_TAB==='copilot' && STATE.activeTab!=='copilot') markQuoteSeen(); playTabEnter(); playDashboardIntro(); } catch (e) { console.warn('motion skipped', e); } }
 
 /* ---------------- auth flow ---------------- */
 let authMode = 'login';
@@ -311,7 +311,9 @@ function showApp(){
   applyDeepLink();
   if(STATE.activeTab==='admin' && !isAdmin()) STATE.activeTab='copilot';
   setTimeout(maybeShowPrivacyNotice, 1500);
-  setTimeout(()=>{ if(STATE.user) loadBlog(); }, 800); $('#loading-screen').style.display='none'; $('#auth-screen').style.display='none'; $('#app-screen').style.display='block'; render(); }
+  setTimeout(()=>{ if(STATE.user) loadBlog(); }, 800);
+  if(STATE.user && !STATE.quotes?.loaded) loadQuotes();
+  if(!PUSH.checked) checkPush(); $('#loading-screen').style.display='none'; $('#auth-screen').style.display='none'; $('#app-screen').style.display='block'; render(); }
 
 function setAuthMode(mode){
   authMode = mode;
@@ -349,7 +351,7 @@ $('#auth-form').addEventListener('submit', async (e) => {
 
 $('#logout-btn').addEventListener('click', async () => {
   try { await api('/api/logout', 'POST'); } catch (e) { console.warn('Logout request failed', e); }
-  IMAGE_URL_CACHE.clear(); IMAGE_STORE_AVAILABLE = true; STATE.blog = null; STATE.admin = null; $('#privacy-notice')?.remove();
+  IMAGE_URL_CACHE.clear(); IMAGE_STORE_AVAILABLE = true; STATE.blog = null; STATE.admin = null; STATE.quotes = null; $('#privacy-notice')?.remove();
   STATE.user = null; STATE.trades = []; STATE.notes = []; STATE.customStrategies = []; STATE.sessionNotes = {};
   setAuthMode('login');
   showAuth();
@@ -892,6 +894,7 @@ function renderCopilotTab(){
     </div>
     <div class="hero-actions"><button class="btn-cta" data-action="set-tab" data-tab="log">＋ Log New Trade</button><button type="button" class="btn-hero-ghost" data-action="open-weekly-report">📄 Weekly report</button></div>
   </section>
+  ${renderQuoteCard()}
 
   <div class="dashboard-kpis">
     <div class="card dashboard-kpi"><span class="uppercase-label">Total Trades</span><strong>${total}</strong><small>${wins} wins · ${losses} losses</small></div>
@@ -2128,6 +2131,7 @@ function renderAdminTab(){
       <div class="adm-head-actions"><button type="button" class="btn-secondary btn-small" data-action="admin-reload">↻ Refresh</button><button type="button" class="btn-secondary btn-small" data-action="admin-export">⬇️ CSV</button></div>
     </section>
     <div class="adm-kpis">${k.map(([l,v,c])=>`<div class="${c}"><span>${l}</span><strong>${v}</strong></div>`).join('')}</div>
+    ${renderAdminQuotePanel()}
     <section class="card adm-list">
       <div class="adm-tools">
         <input type="search" id="admin-search" value="${esc(a.search)}" placeholder="🔍 Naam ya email…" aria-label="Search traders">
@@ -2284,6 +2288,111 @@ function maybeShowPrivacyNotice(){
   document.body.appendChild(n);
 }
 
+
+/* ---------------- Quote of the Day + notifications ---------------- */
+function quoteState(){ return STATE.quotes || (STATE.quotes={ today:null, recent:[], loaded:false, subscribers:0, posting:false, progress:'' }); }
+async function loadQuotes(){
+  const q=quoteState();
+  try { const d=await api(`/api/quotes?limit=${isAdmin()?15:1}`); q.today=d.today; q.recent=d.recent||[]; q.subscribers=d.subscribers||0; q.loaded=true; }
+  catch(_) { q.loaded=true; }
+  if(STATE.activeTab==='copilot' || STATE.activeTab==='admin') rerenderQuoteCard();
+}
+function quoteSeen(){ try { return localStorage.getItem('tc_quote_seen')||''; } catch(_) { return ''; } }
+function markQuoteSeen(){ const q=quoteState(); if(q.today){ try { localStorage.setItem('tc_quote_seen', q.today.id); } catch(_) {} } }
+function quoteDateLabel(iso){ const d=new Date(iso); if(Number.isNaN(d.getTime())) return ''; const k=localDateKey(d), t=localDateKey(new Date()), y=localDateKey(addDays(new Date(),-1)); return k===t?'Aaj':k===y?'Kal':d.toLocaleDateString('en-IN',{day:'numeric',month:'short'}); }
+/* push support */
+const PUSH = { supported: 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window, subscribed:false, checked:false, busy:false };
+function urlB64ToUint8(b64){ const pad='='.repeat((4-b64.length%4)%4); const raw=atob((b64+pad).replace(/-/g,'+').replace(/_/g,'/')); return Uint8Array.from(raw,c=>c.charCodeAt(0)); }
+async function checkPush(){
+  if(!PUSH.supported){ PUSH.checked=true; return; }
+  try {
+    const reg=await navigator.serviceWorker.ready; const sub=await reg.pushManager.getSubscription();
+    PUSH.subscribed=!!sub && Notification.permission==='granted';
+    if(PUSH.subscribed) api('/api/push','POST',{endpoint:sub.endpoint}).catch(()=>{});   // keep server copy fresh
+  } catch(_) {}
+  PUSH.checked=true; rerenderQuoteCard();
+}
+async function enablePush(){
+  if(!PUSH.supported){
+    alert((isIOS() || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1)) && !isStandalone() ? '🔔 iPhone par notification ke liye pehle app ko Home Screen par add karo:\nSafari → Share ⬆️ → "Add to Home Screen". Phir wahan se app kholkar 🔔 dabao.' : '🔔 Is browser mein notifications nahi chalti. Chrome ya Edge use karo.');
+    return;
+  }
+  if(PUSH.busy) return; PUSH.busy=true; rerenderQuoteCard();
+  try{
+    const perm=await Notification.requestPermission();
+    if(perm!=='granted'){ alert('🔕 Notification ki permission nahi mili. Browser settings → Site settings → Notifications mein is site ko Allow karo.'); return; }
+    const reg=await navigator.serviceWorker.ready;
+    const { publicKey } = await api('/api/push');
+    let sub=await reg.pushManager.getSubscription();
+    if(!sub) sub=await reg.pushManager.subscribe({ userVisibleOnly:true, applicationServerKey:urlB64ToUint8(publicKey) });
+    await api('/api/push','POST',{endpoint:sub.endpoint});
+    PUSH.subscribed=true;
+  }catch(e){ alert('🔔 Notification on nahi ho paye: '+(e.message||e)); }
+  finally{ PUSH.busy=false; rerenderQuoteCard(); }
+}
+async function disablePush(){
+  try{ const reg=await navigator.serviceWorker.ready, sub=await reg.pushManager.getSubscription(); if(sub){ await api('/api/push','DELETE',{endpoint:sub.endpoint}).catch(()=>{}); await sub.unsubscribe(); } }catch(_) {}
+  PUSH.subscribed=false; rerenderQuoteCard();
+}
+function renderQuoteCard(){
+  const q=quoteState(); if(!q.today) return '<div id="quote-card" hidden></div>';
+  const t=q.today, isNew=quoteSeen()!==t.id;
+  const share=encodeURIComponent(`“${t.text}”${t.author?' — '+t.author:''}\n\n— Trading Gupshup`);
+  const bell = PUSH.subscribed ? `<button type="button" class="qotd-link" data-action="push-off" title="Notification band karo">🔔 On</button>`
+    : `<button type="button" class="qotd-bell" data-action="push-on" ${PUSH.busy?'disabled':''}>${PUSH.busy?'…':'🔔 Roz notification pao'}</button>`;
+  return `<section class="qotd" id="quote-card" aria-label="Quote of the Day">
+    <div class="qotd-top"><span class="qotd-label">💬 Quote of the Day ${isNew?'<span class="blog-badge new">Naya</span>':''}</span><span class="qotd-date">${esc(quoteDateLabel(t.createdAt))}</span></div>
+    <blockquote class="qotd-text">${esc(t.text)}</blockquote>
+    ${t.author?`<p class="qotd-author">— ${esc(t.author)}</p>`:''}
+    <div class="qotd-actions"><button type="button" class="qotd-link" data-action="quote-copy">📋 Copy</button><a class="qotd-link" href="https://wa.me/?text=${share}" target="_blank" rel="noopener">WhatsApp</a>${bell}</div>
+  </section>`;
+}
+function rerenderQuoteCard(){
+  const el=$('#quote-card'); if(el) el.outerHTML=renderQuoteCard();
+  const adm=$('#admin-quote'); if(adm) adm.outerHTML=renderAdminQuotePanel();
+}
+function renderAdminQuotePanel(){
+  const q=quoteState();
+  return `<section class="card adm-quote" id="admin-quote">
+    <div class="adm-quote-head"><h3 class="section-title">💬 Quote of the Day</h3><span class="adm-readonly">🔔 ${q.subscribers} device${q.subscribers===1?'':'s'} par notification on</span></div>
+    <textarea id="aq-text" rows="2" maxlength="500" placeholder="Aaj ka quote likho… e.g. Plan the trade, trade the plan.">${esc(q.draft||'')}</textarea>
+    <div class="adm-quote-row"><input id="aq-author" maxlength="80" placeholder="Kisne kaha (optional)" value="${esc(q.draftAuthor||'')}"><label class="report-check"><input type="checkbox" id="aq-notify" checked> Sabko notification bhejo</label><button type="button" class="btn-primary" data-action="admin-post-quote" ${q.posting?'disabled':''}>${q.posting?'Post ho raha hai…':'📣 Post karo'}</button></div>
+    ${q.progress?`<p class="adm-quote-progress" role="status">${q.progress}</p>`:''}
+    ${q.recent.length?`<details class="adm-quote-history"><summary>Pichhle quotes (${q.recent.length})</summary><ul>${q.recent.map(x=>`<li><div><q>${esc(x.text)}</q>${x.author?` <small>— ${esc(x.author)}</small>`:''}<small>${esc(quoteDateLabel(x.createdAt))} · 🔔 ${x.notified||0} bheje</small></div><button type="button" class="be-del" data-action="admin-delete-quote" data-id="${esc(x.id)}" aria-label="Delete quote">✕</button></li>`).join('')}</ul></details>`:''}
+  </section>`;
+}
+async function postQuote(){
+  const q=quoteState(); if(q.posting) return;
+  const text=($('#aq-text')?.value||'').trim(), author=($('#aq-author')?.value||'').trim(), notify=!!$('#aq-notify')?.checked;
+  if(text.length<3){ $('#aq-text')?.focus(); return; }
+  q.posting=true; q.progress='Quote save ho raha hai…'; q.draft=text; q.draftAuthor=author; rerenderQuoteCard();
+  try{
+    const r=await api('/api/quotes','POST',{text,author});
+    q.today=r.quote; q.recent=[r.quote,...q.recent]; q.draft=''; q.draftAuthor='';
+    if(notify && r.subscribers){
+      let offset=0, sent=0, gone=0, failed=0, total=r.subscribers, guard=0;
+      while(guard++<200){
+        q.progress=`🔔 Notification bhej rahe hain… ${sent}/${total}`; rerenderQuoteCard();
+        const b=await api('/api/quotes/notify','POST',{quoteId:r.quote.id, offset});
+        sent+=b.sent; gone+=b.gone; failed+=b.failed; total=b.total+gone; offset=b.nextOffset;
+        if(b.done) break;
+      }
+      r.quote.notified=sent;
+      q.progress=`✓ Quote post ho gaya · 🔔 ${sent} device${sent===1?'':'s'} par notification gaya${gone?` · ${gone} purane device hata diye`:''}${failed?` · ${failed} fail`:''}`;
+    } else q.progress = notify ? '✓ Quote post ho gaya. Abhi kisi ne notification on nahi kiya — sabko app mein dikhega.' : '✓ Quote post ho gaya (bina notification).';
+  }catch(e){ q.progress='⚠ '+(e.message||'Post nahi hua.'); }
+  finally{ q.posting=false; rerenderQuoteCard(); }
+}
+document.addEventListener('input', e=>{ const q=STATE.quotes; if(!q) return; if(e.target.id==='aq-text') q.draft=e.target.value; if(e.target.id==='aq-author') q.draftAuthor=e.target.value; });
+function handleQuoteClick(action, btn){
+  if(action==='push-on'){ enablePush(); return true; }
+  if(action==='push-off'){ if(confirm('Quote of the Day notification is device par band karein?')) disablePush(); return true; }
+  if(action==='quote-copy'){ const t=quoteState().today; if(t){ const txt=`“${t.text}”${t.author?' — '+t.author:''}`; (navigator.clipboard?.writeText(txt)||Promise.reject()).then(()=>{ btn.textContent='✓ Copied'; setTimeout(()=>{ if(btn.isConnected) btn.textContent='📋 Copy'; },1500); }).catch(()=>prompt('Copy karo:', txt)); markQuoteSeen(); } return true; }
+  if(action==='admin-post-quote'){ postQuote(); return true; }
+  if(action==='admin-delete-quote'){ if(!confirm('Yeh quote delete karein?')) return true; const id=btn.dataset.id; api(`/api/quotes/${encodeURIComponent(id)}`,'DELETE').then(()=>{ const q=quoteState(); q.recent=q.recent.filter(x=>x.id!==id); q.today=q.recent[0]||null; rerenderQuoteCard(); }).catch(e=>alert(e.message)); return true; }
+  return false;
+}
+
 /* ---------------- strategy manager ---------------- */
 function strategyUsage(name){
   return { trades: STATE.trades.filter(t=>sameName(t.strategy,name)).length, notes: STATE.notes.filter(n=>noteMatchesStrategy(n,name)).length, exactNotes: STATE.notes.filter(n=>sameName(n.strategy,name)).length };
@@ -2398,6 +2507,7 @@ document.addEventListener('click', async (e) => {
   if (action==='set-tab') { if (STATE.activeTab==='blog' && btn.dataset.tab!=='blog' && STATE.blog?.view==='edit' && !leaveBlogEditor()) return; if (btn.dataset.tab==='blog' && STATE.activeTab==='blog' && STATE.blog) { STATE.blog.view='list'; STATE.blog.current=null; } STATE.activeTab = btn.dataset.tab; render(); }
   else if (handleBlogClick(action, btn, e)) { /* blog */ }
   else if (handleAdminClick(action, btn)) { /* admin */ }
+  else if (handleQuoteClick(action, btn)) { /* quotes */ }
   else if (action==='privacy-ack') { try { localStorage.setItem('tc_privacy_ack_'+STATE.user.id, new Date().toISOString()); } catch(_) {} $('#privacy-notice')?.remove(); }
   else if (action==='select-mindset') { STATE.selectedMindsetId = btn.dataset.id; renderTabOnly(); }
   else if (action==='toggle-rule') { const i=btn.dataset.idx; STATE.checkedRules[i]=!STATE.checkedRules[i]; renderTabOnly(); }

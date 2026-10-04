@@ -176,3 +176,12 @@ This restores the WHOLE database (trades/notes saved after that time are rolled 
 - Server: `DELETE /api/admin/users/<id>`, `POST /api/admin/users/delete {ids}` (max 200); admin-only; refuses admin accounts and your own.
 - Look: dark header, status pills (Aaj active / Active / Gayab / Inactive / Naya / Admin), avatars, rules progress bar, KPI icons; phone layout shows traders as compact cards; bottom bar fits 8 tabs.
 - New files: `functions/_lib/admin-delete.js`, `functions/api/admin/users/delete.js`.
+
+## Update 20 — Quote of the Day + phone notifications
+- **Traders:** a "💬 Quote of the Day" card on the dashboard (under the hero) with a "Naya" badge, Copy and WhatsApp share. Button **🔔 Roz notification pao** turns on phone/desktop notifications for that device (tap 🔔 On to turn off).
+  - Android / laptop (Chrome, Edge, Firefox): works in the browser or installed app.
+  - iPhone: works only after "Add to Home Screen" (iOS 16.4+), opened from the home-screen icon — the app tells the user this.
+- **Admin:** Admin tab → "💬 Quote of the Day": write the quote + author, keep "Sabko notification bhejo" ticked, **📣 Post karo**. Shows how many devices have notifications on, live sending progress, result, and past quotes (delete ✕).
+- How it works: the server sends an empty Web Push "ping" to every subscribed device (in batches of 40, within Cloudflare limits); the service worker then fetches the newest quote and shows it. Expired devices are removed automatically. VAPID keys are created automatically on first use and stored in D1 — no setup needed.
+- Security: only admins can post / notify (403 otherwise); deleting a trader also removes their devices.
+- New files: `functions/_lib/push.js`, `functions/api/quotes/index.js`, `functions/api/quotes/[id].js`, `functions/api/quotes/notify.js`, `functions/api/push/index.js`. Tables `quotes`, `push_subscriptions`, `app_settings` are created automatically.
