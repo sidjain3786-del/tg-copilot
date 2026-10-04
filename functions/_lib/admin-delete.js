@@ -10,6 +10,7 @@ export async function deleteTrader(env, me, id) {
   await run('DELETE FROM user_data WHERE user_id = ?');
   await run('DELETE FROM user_session_notes WHERE user_id = ?');
   await run('DELETE FROM user_activity WHERE user_id = ?');
+  await run('DELETE FROM push_subscriptions WHERE user_id = ?');
   await env.DB.prepare('DELETE FROM login_attempts WHERE email = ?').bind(u.email).run().catch(() => null);
   await env.DB.prepare('DELETE FROM users WHERE id = ?').bind(u.id).run();
   let images = 0;
