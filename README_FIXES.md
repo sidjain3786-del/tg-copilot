@@ -148,3 +148,21 @@ This restores the WHOLE database (trades/notes saved after that time are rolled 
 - **Security:** only emails in `ADMIN_EMAILS` can create/edit/delete (server checks every request — 403 otherwise). Posts are stored as blocks, not HTML, so nothing typed can run as code (tested with `<script>` / `onerror` — shown as plain text).
 - Blog images are stored in R2 under `blog/` and served at `/api/blog-img/...` so every trader can see them.
 - New API: `GET/POST /api/blog`, `GET/PUT/DELETE /api/blog/<id>`, `POST /api/blog/upload`, `GET /api/blog-img/<file>`. `/api/me` and login now return `isAdmin`.
+
+## Update 16 — Direct links
+- `https://<your-site>/#admin` → opens the Blog post editor (admins only; others get the Blog with a message). Works even when logged out: log in and the editor opens.
+- `https://<your-site>/#blog` → opens the Blog. Any tab works too: `#log`, `#notes`, `#history`, `#analysis`, `#risk`.
+
+## Update 17 — Paste a whole article into the blog editor
+- Blog editor → "📋 Poora article paste karke format karo": paste text (or pick a .txt / .md file) and press **Blocks banao**. It fills title, summary, tags and creates all blocks.
+- Format: `# Title`, `Summary: …`, `Tags: a, b`, `## Heading`, `### Sub-heading`, `> quote`, `- list item` (also `•`, `1.`), `💡 tip` (or `Tip:`), `---` divider, `![caption](https://image-link)`, inline `**bold**`, `*italic*`, `[link](https://…)`. Plain text works too — every blank line starts a new paragraph.
+
+## Update 18 — Admin dashboard (mentors see traders' progress)
+- New **🛠️ Admin** tab, visible only to `ADMIN_EMAILS`. `https://<site>/#admin` now opens this dashboard (the blog editor is at `#blog/new` or Blog → ＋ New post).
+- **Overview:** total traders, active today, active in 7 days, new this week, trades in 7 days, and how many have been away 7+ days.
+- **Traders table:** last active, trades (total / this week), net P&L (total / 7 days), win %, rules % with ↑↓ trend vs last week, top mistake, notes. Search, sort, filters (Active, 7+ din se gayab, Naye, Rules < 60%, Loss mein, 0 trades) and CSV export.
+- **Trader page (read-only):** KPIs, equity curve, 12-week journaling heatmap, strategies / mistakes (with money cost) / emotions, every trade with quick notes and chart screenshots, notes (opened read-only), and their playbook.
+- **Transparency:** signup screen says mentors can see the journal; existing traders get a one-time "Aapka journal mentors ko dikhta hai" notice (Samajh gaya).
+- Tracking: new `user_activity` table (last visit, last save, visit/save counts) — created automatically.
+- Security: `/api/admin/*` returns 403 for non-admins; admins may open traders' chart images, traders still only their own.
+- New files: `functions/_lib/stats.js`, `functions/api/admin/users/index.js`, `functions/api/admin/users/[id].js`.

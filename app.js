@@ -296,6 +296,7 @@ function applyDeepLink(){
   const h=(location.hash||'').replace(/^#\/?/,'').toLowerCase();
   if(!h) return false;
   const tabs=TABS.map(t=>t.id);
+  if(h==='admin' && isAdmin()){ STATE.activeTab='admin'; history.replaceState(null,'',location.pathname+location.search); return true; }
   if(h==='admin' || h==='blog/new'){
     STATE.activeTab='blog'; const b=blogState(); b.current=null;
     if(isAdmin()){ b.editing=newBlogDraft(); b.view='edit'; b.preview=false; b.dirty=false; }
@@ -308,6 +309,8 @@ function applyDeepLink(){
 window.addEventListener('hashchange', ()=>{ if(STATE.user && applyDeepLink()) render(); });
 function showApp(){
   applyDeepLink();
+  if(STATE.activeTab==='admin' && !isAdmin()) STATE.activeTab='copilot';
+  setTimeout(maybeShowPrivacyNotice, 1500);
   setTimeout(()=>{ if(STATE.user) loadBlog(); }, 800); $('#loading-screen').style.display='none'; $('#auth-screen').style.display='none'; $('#app-screen').style.display='block'; render(); }
 
 function setAuthMode(mode){
@@ -315,6 +318,7 @@ function setAuthMode(mode){
   $('#auth-name-field').style.display = mode==='signup' ? 'block' : 'none';
   $('#auth-subtitle').textContent = mode==='signup' ? 'Naya account banao' : 'Apne account mein login karo';
   $('#auth-submit').textContent = mode==='signup' ? 'Sign Up' : 'Login';
+  const pn=$('#auth-privacy'); if(pn) pn.style.display = mode==='signup' ? 'block' : 'none';
   $('#auth-toggle-text').textContent = mode==='signup' ? 'Pehle se account hai?' : 'Account nahi hai?';
   $('#auth-toggle-btn').textContent = mode==='signup' ? 'Login' : 'Sign Up';
   $('#auth-error').style.display = 'none';
@@ -345,7 +349,7 @@ $('#auth-form').addEventListener('submit', async (e) => {
 
 $('#logout-btn').addEventListener('click', async () => {
   try { await api('/api/logout', 'POST'); } catch (e) { console.warn('Logout request failed', e); }
-  IMAGE_URL_CACHE.clear(); IMAGE_STORE_AVAILABLE = true; STATE.blog = null;
+  IMAGE_URL_CACHE.clear(); IMAGE_STORE_AVAILABLE = true; STATE.blog = null; STATE.admin = null; $('#privacy-notice')?.remove();
   STATE.user = null; STATE.trades = []; STATE.notes = []; STATE.customStrategies = []; STATE.sessionNotes = {};
   setAuthMode('login');
   showAuth();
@@ -813,18 +817,21 @@ const TABS = [
   {id:'history', label:'📜 Trade History Log'},
   {id:'analysis', label:'📊 Daily & Session Analysis'},
   {id:'risk', label:'🛡️ Risk Center'},
-  {id:'blog', label:'📰 Blog'}
+  {id:'blog', label:'📰 Blog'},
+  {id:'admin', label:'🛠️ Admin'}
 ];
+function visibleTabs(){ return TABS.filter(t=>t.id!=='admin' || isAdmin()); }
 function renderTabNav(){
-  $('#tab-nav').innerHTML = TABS.map(t =>
+  $('#tab-nav').innerHTML = visibleTabs().map(t =>
     `<button class="tab-btn ${STATE.activeTab===t.id?'active':''}" data-action="set-tab" data-tab="${t.id}">${t.label}${t.id==='blog'&&STATE.blog?.loaded&&blogUnreadCount()?`<span class="tab-dot" aria-label="${blogUnreadCount()} new posts">${blogUnreadCount()}</span>`:''}</button>`
   ).join('');
   try { placeTabIndicator(); } catch (e) { console.warn('indicator skipped', e); }
-  const mobileIcons = {copilot:'⚡',log:'➕',notes:'🧠',history:'📜',analysis:'📊',risk:'🛡️',blog:'📰'};
-  const mobileLabels = {copilot:'Co-Pilot',log:'Log',notes:'Notes',history:'History',analysis:'Analysis',risk:'Risk',blog:'Blog'};
+  const mobileIcons = {copilot:'⚡',log:'➕',notes:'🧠',history:'📜',analysis:'📊',risk:'🛡️',blog:'📰',admin:'🛠️'};
+  const mobileLabels = {copilot:'Co-Pilot',log:'Log',notes:'Notes',history:'History',analysis:'Analysis',risk:'Risk',blog:'Blog',admin:'Admin'};
   const unread = STATE.blog?.loaded ? blogUnreadCount() : 0;
   const mobile = $('#mobile-tab-nav');
-  if (mobile) mobile.innerHTML = TABS.map(t =>
+  if (mobile) mobile.style.gridTemplateColumns = `repeat(${visibleTabs().length}, 1fr)`;
+  if (mobile) mobile.innerHTML = visibleTabs().map(t =>
     `<button class="mobile-tab-btn ${STATE.activeTab===t.id?'active':''}" data-action="set-tab" data-tab="${t.id}"><span class="mobile-tab-icon">${mobileIcons[t.id]}${t.id==='blog'&&unread?'<i class="tab-dot-mini" aria-hidden="true"></i>':''}</span><span>${mobileLabels[t.id]}</span></button>`
   ).join('');
 }
@@ -2033,6 +2040,192 @@ document.addEventListener('change', e=>{
 document.addEventListener('keydown', e=>{ if((e.key==='Enter'||e.key===' ') && e.target.matches?.('.blog-card')){ e.preventDefault(); e.target.click(); } });
 window.addEventListener('beforeunload', e=>{ if(STATE.blog?.dirty){ e.preventDefault(); e.returnValue=''; } });
 
+
+/* ---------------- admin dashboard ----------------
+   Mentors (ADMIN_EMAILS) see every trader's progress and journal, read-only.
+   Traders are told about this at signup and with a one-time notice in the app. */
+function adminState(){ return STATE.admin || (STATE.admin={ users:[], loaded:false, loading:false, error:'', filter:'all', sort:'active', search:'', view:'list', detail:null, detailTab:'trades', openNote:null }); }
+function timeAgo(iso){
+  if(!iso) return '—'; const d=new Date(iso); if(Number.isNaN(d.getTime())) return '—';
+  const s=(Date.now()-d.getTime())/1000;
+  if(s<60) return 'abhi'; if(s<3600) return `${Math.floor(s/60)} min pehle`; if(s<86400) return `${Math.floor(s/3600)} ghante pehle`;
+  const days=Math.floor(s/86400); if(days<30) return `${days} din pehle`;
+  return d.toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});
+}
+const DAY_MS=86400000;
+function lastActive(u){ return [u.lastSeenAt,u.lastSaveAt].filter(Boolean).sort().pop()||null; }
+function daysSince(iso){ return iso ? (Date.now()-new Date(iso).getTime())/DAY_MS : Infinity; }
+async function loadAdminUsers(force=false){
+  const a=adminState(); if(a.loading || (a.loaded&&!force)) return;
+  a.loading=true; a.error='';
+  try { const d=await api('/api/admin/users'); a.users=d.users||[]; a.loaded=true; a.generatedAt=d.generatedAt; }
+  catch(e){ a.error=e.message||'Load nahi hua.'; }
+  finally { a.loading=false; }
+  if(STATE.activeTab==='admin') renderTabOnly();
+}
+function adminFilters(){ return [['all','Sab'],['active7','Active (7 din)'],['inactive','7+ din se gayab'],['new','Naye (7 din)'],['lowrules','Rules < 60%'],['losing','Loss mein'],['notrades','0 trades']]; }
+function adminFiltered(){
+  const a=adminState(), q=a.search.trim().toLowerCase();
+  let list=a.users.filter(u=>!q || `${u.name} ${u.email}`.toLowerCase().includes(q));
+  const f=a.filter;
+  if(f==='active7') list=list.filter(u=>daysSince(lastActive(u))<=7);
+  if(f==='inactive') list=list.filter(u=>daysSince(lastActive(u))>7);
+  if(f==='new') list=list.filter(u=>daysSince(u.createdAt)<=7);
+  if(f==='lowrules') list=list.filter(u=>u.closed>0 && u.ruleRate<60);
+  if(f==='losing') list=list.filter(u=>u.pnl<0);
+  if(f==='notrades') list=list.filter(u=>!u.trades);
+  const by={ active:(x,y)=>String(lastActive(y)||'').localeCompare(String(lastActive(x)||'')), trades:(x,y)=>y.trades-x.trades, trades7:(x,y)=>y.trades7-x.trades7, pnl:(x,y)=>y.pnl-x.pnl, rules:(x,y)=>x.ruleRate-y.ruleRate, win:(x,y)=>y.winRate-x.winRate, joined:(x,y)=>String(y.createdAt).localeCompare(String(x.createdAt)) }[a.sort];
+  return by?list.sort(by):list;
+}
+function ruleTrend(u){
+  if(u.ruleRate7===null || u.ruleRatePrev7===null) return '';
+  const d=u.ruleRate7-u.ruleRatePrev7; if(Math.abs(d)<5) return '<span class="adm-trend flat" title="Pichhle hafte jaisa">→</span>';
+  return d>0?`<span class="adm-trend up" title="Pichhle hafte se +${d}%">↑</span>`:`<span class="adm-trend down" title="Pichhle hafte se ${d}%">↓</span>`;
+}
+function renderAdminTab(){
+  if(!isAdmin()) return `<section class="card"><p class="card-sub">Yeh section sirf admin ke liye hai.</p></section>`;
+  const a=adminState();
+  if(a.view==='user') return renderAdminUser();
+  if(!a.loaded){ setTimeout(()=>loadAdminUsers(),0); return `<section class="card adm-head"><h2 class="section-title">🛠️ Admin</h2><p class="card-sub">${a.error?esc(a.error):'Traders ka data load ho raha hai…'}</p>${a.error?'<button class="btn-secondary btn-small" data-action="admin-reload">Dobara try karo</button>':''}</section>`; }
+  const U=a.users.filter(u=>!u.isAdmin), all=a.users;
+  const k=[
+    ['Total traders', U.length, ''],
+    ['Aaj active', U.filter(u=>daysSince(lastActive(u))<=1).length, ''],
+    ['Active (7 din)', U.filter(u=>daysSince(lastActive(u))<=7).length, ''],
+    ['Naye (7 din)', U.filter(u=>daysSince(u.createdAt)<=7).length, ''],
+    ['Trades (7 din)', U.reduce((s,u)=>s+u.trades7,0), ''],
+    ['7+ din se gayab', U.filter(u=>daysSince(lastActive(u))>7).length, 'warn']
+  ];
+  const list=adminFiltered();
+  const row=u=>{ const la=lastActive(u), stale=daysSince(la)>7;
+    return `<tr data-action="admin-open-user" data-id="${esc(u.id)}" tabindex="0">
+      <td><strong>${esc(u.name||'—')}</strong>${u.isAdmin?' <span class="blog-badge live">Admin</span>':''}<small>${esc(u.email)}</small></td>
+      <td class="${stale?'adm-stale':''}">${esc(timeAgo(la))}<small>joined ${esc(timeAgo(u.createdAt))}</small></td>
+      <td class="num">${u.trades}<small>${u.trades7} is hafte</small></td>
+      <td class="num ${u.pnl>=0?'positive':'negative'}">${u.closed?money(u.pnl):'—'}<small class="${u.pnl7>=0?'positive':'negative'}">${u.trades7?`${money(u.pnl7)} (7d)`:''}</small></td>
+      <td class="num">${u.closed?u.winRate+'%':'—'}</td>
+      <td class="num">${u.closed?`${u.ruleRate}% ${ruleTrend(u)}`:'—'}</td>
+      <td>${u.topMistake?`<span class="journal-chip chip-warn">${esc(mistakeLabel(u.topMistake.id))} ×${u.topMistake.count}</span>`:'<small>—</small>'}</td>
+      <td class="num">${u.notes}</td>
+    </tr>`; };
+  return `<section class="card adm-head">
+      <div><h2 class="section-title">🛠️ Admin — traders ki progress</h2><p class="card-sub">Har trader ka journal (sirf padhne ke liye). Updated ${esc(timeAgo(a.generatedAt))}.</p></div>
+      <div class="adm-head-actions"><button type="button" class="btn-secondary btn-small" data-action="admin-reload">↻ Refresh</button><button type="button" class="btn-secondary btn-small" data-action="admin-export">⬇️ CSV</button></div>
+    </section>
+    <div class="adm-kpis">${k.map(([l,v,c])=>`<div class="${c}"><span>${l}</span><strong>${v}</strong></div>`).join('')}</div>
+    <section class="card adm-list">
+      <div class="adm-tools">
+        <input type="search" id="admin-search" value="${esc(a.search)}" placeholder="🔍 Naam ya email…" aria-label="Search traders">
+        <label class="adm-sort"><span class="sr-only">Sort</span><select id="admin-sort">${[['active','Last active'],['trades7','Is hafte ke trades'],['trades','Total trades'],['pnl','Net P&L'],['win','Win rate'],['rules','Rules % (kam pehle)'],['joined','Naye pehle']].map(([v,l])=>`<option value="${v}" ${a.sort===v?'selected':''}>${l}</option>`).join('')}</select></label>
+      </div>
+      <div class="blog-tag-row adm-filters">${adminFilters().map(([v,l])=>`<button type="button" class="${a.filter===v?'active':''}" data-action="admin-filter" data-filter="${v}">${l}</button>`).join('')}</div>
+      <p class="adm-count">${list.length} trader${list.length===1?'':'s'}</p>
+      ${list.length?`<div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>Trader</th><th>Last active</th><th class="num">Trades</th><th class="num">Net P&amp;L</th><th class="num">Win</th><th class="num">Rules</th><th>Top mistake</th><th class="num">Notes</th></tr></thead><tbody>${list.map(row).join('')}</tbody></table></div>`:`<p class="pb-empty">Is filter mein koi trader nahi.</p>`}
+    </section>`;
+}
+async function openAdminUser(id){
+  const a=adminState(); a.view='user'; a.detail={loading:true, id}; a.detailTab='trades'; a.openNote=null;
+  renderTabOnly(); window.scrollTo({top:0,behavior:REDUCED_MOTION?'auto':'smooth'});
+  try { const d=await api(`/api/admin/users/${encodeURIComponent(id)}`); a.detail=d; }
+  catch(e){ a.detail={error:e.message||'Load nahi hua.', id}; }
+  if(STATE.activeTab==='admin'&&a.view==='user') renderTabOnly();
+}
+function heatmap(trades){
+  const today=new Date(); today.setHours(0,0,0,0);
+  const start=addDays(weekStartOf(today),-7*11), counts={};
+  trades.forEach(t=>{ const k=tradeLocalDate(t); if(k) counts[k]=(counts[k]||0)+1; });
+  let cells='';
+  for(let w=0;w<12;w++){ for(let d=0;d<7;d++){ const day=addDays(start,w*7+d), k=localDateKey(day), c=counts[k]||0, future=day>today;
+    cells+=`<i class="lv${future?'x':Math.min(4,c)}" title="${esc(fmtDay(day,{weekday:'short',day:'numeric',month:'short'}))}: ${c} trade${c===1?'':'s'}" style="grid-column:${w+1};grid-row:${d+1}"></i>`; } }
+  return `<div class="adm-heat" aria-label="Last 12 weeks trading activity">${cells}</div><div class="adm-heat-legend"><span>Kam</span><i class="lv0"></i><i class="lv1"></i><i class="lv2"></i><i class="lv3"></i><i class="lv4"></i><span>Zyada</span></div>`;
+}
+function miniCurve(trades){
+  const closed=trades.filter(t=>!isOpenTrade(t)).sort((x,y)=>tradeSortTime(x)-tradeSortTime(y));
+  if(closed.length<2) return '<p class="pb-empty">Curve ke liye kam se kam 2 closed trades chahiye.</p>';
+  let run=0; const pts=[0,...closed.map(t=>(run+=Number(t.pnl)||0))]; const w=600,h=140,p=10, mn=Math.min(...pts), mx=Math.max(...pts), rg=(mx-mn)||1;
+  const xy=pts.map((v,i)=>`${(p+i*(w-2*p)/(pts.length-1)).toFixed(1)},${(h-p-(v-mn)/rg*(h-2*p)).toFixed(1)}`).join(' '), zy=(h-p-(0-mn)/rg*(h-2*p)).toFixed(1);
+  return `<svg class="adm-curve" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="Equity curve"><line x1="${p}" y1="${zy}" x2="${w-p}" y2="${zy}" stroke="#B8C4D4" stroke-dasharray="4 4"/><polyline points="${xy}" fill="none" stroke="${run>=0?'#0B9A6A':'#E0413F'}" stroke-width="2.5" vector-effect="non-scaling-stroke"/></svg>`;
+}
+function renderAdminUser(){
+  const a=adminState(), d=a.detail;
+  const back=`<button type="button" class="btn-secondary btn-small" data-action="admin-back">‹ Sab traders</button>`;
+  if(!d || d.loading) return `<section class="card">${back}<p class="card-sub" style="margin-top:1rem">Journal load ho raha hai…</p></section>`;
+  if(d.error) return `<section class="card">${back}<p class="sm-error" style="margin-top:1rem">${esc(d.error)}</p></section>`;
+  const u=d.user, s=d.stats, trades=[...d.trades].sort((x,y)=>tradeSortTime(y)-tradeSortTime(x));
+  const closed=trades.filter(t=>!isOpenTrade(t));
+  const group=key=>{ const m={}; closed.forEach(t=>{ const k=key(t); if(!k) return; const g=m[k]||(m[k]={k,n:0,w:0,p:0}); g.n++; if((Number(t.pnl)||0)>0) g.w++; g.p+=Number(t.pnl)||0; }); return Object.values(m); };
+  const strategies=group(t=>t.strategy||'—').sort((x,y)=>y.p-x.p), mistakes=group(t=>t.mistake&&t.mistake!=='none'?mistakeLabel(t.mistake):null).sort((x,y)=>x.p-y.p), emotions=group(t=>emotionText(t)).sort((x,y)=>y.n-x.n);
+  const tbl=(rows,cols)=>rows.length?`<table class="adm-mini"><tbody>${rows.map(cols).join('')}</tbody></table>`:'<p class="pb-empty">—</p>';
+  const tradeRow=t=>{ const open=isOpenTrade(t), v=Number(t.pnl)||0, imgs=tradeImages(t);
+    return `<div class="adm-trade"><div class="adm-trade-main"><strong>${esc(t.symbol||'—')}</strong> <span class="pb-dir ${t.type==='SHORT'?'short':'long'}">${esc(t.type||'')}</span><small>${esc(formatTradeTime(t))} · ${esc(tradeStrategyName(t))} · ${esc(emotionText(t))}</small>
+      ${t.mistake&&t.mistake!=='none'?`<span class="journal-chip chip-warn">${esc(mistakeLabel(t.mistake))}</span>`:''}${t.notes?`<p class="history-quick-note"><span>Note</span>${esc(t.notes)}</p>`:''}
+      ${imgs.length?`<div class="adm-thumbs">${imgs.slice(0,4).map(src=>`<img src="${esc(imgUrl(src))}" alt="Chart" loading="lazy" data-action="admin-view-image" data-src="${esc(src)}">`).join('')}</div>`:''}</div>
+      <b class="${open?'':(v>=0?'positive':'negative')}">${open?'Open':money(v)}<small>${open?'':esc(String(t.rr??'—'))+' R'}</small></b></div>`; };
+  const noteBody=n=>normalizeNoteBlocks(n).map(b=>b.type==='image'?(b.src?`<img src="${esc(imgUrl(b.src))}" alt="" loading="lazy" data-action="admin-view-image" data-src="${esc(b.src)}">`:''):`<div class="adm-note-text">${b.html?sanitizeNoteHtml(b.html):esc(b.text||'').replace(/\n/g,'<br>')}</div>`).join('');
+  const notes=[...d.notes].sort((x,y)=>String(y.updatedAt||y.date||'').localeCompare(String(x.updatedAt||x.date||'')));
+  return `<section class="card adm-user">
+    <div class="blog-post-top">${back}<span class="adm-readonly">👁 Sirf dekhne ke liye</span></div>
+    <div class="adm-user-head"><div class="adm-avatar" aria-hidden="true">${esc((u.name||u.email||'?').trim()[0]?.toUpperCase()||'?')}</div><div><h2>${esc(u.name||'—')}</h2><p>${esc(u.email)} · joined ${esc(timeAgo(u.createdAt))} · last active ${esc(timeAgo([u.lastSeenAt,u.lastSaveAt].filter(Boolean).sort().pop()))} · ${u.visits} visits</p></div></div>
+    <div class="pb-stats adm-stats">
+      <div><span>Trades</span><strong>${s.closed}${s.open?`<small> +${s.open} open</small>`:''}</strong></div>
+      <div><span>Net P&amp;L</span><strong class="${s.pnl>=0?'positive':'negative'}">${money(s.pnl)}</strong></div>
+      <div><span>Win rate</span><strong>${s.winRate}%</strong></div>
+      <div><span>Avg R</span><strong>${s.avgR}R</strong></div>
+      <div><span>Rules followed</span><strong>${s.ruleRate}% ${ruleTrend(s)}</strong></div>
+      <div><span>Is hafte</span><strong>${s.trades7} trades</strong><small class="${s.pnl7>=0?'positive':'negative'}">${s.trades7?money(s.pnl7):''}</small></div>
+    </div>
+    <div class="adm-grid">
+      <div><h4>Equity curve</h4>${miniCurve(trades)}</div>
+      <div><h4>Journaling activity (12 hafte)</h4>${heatmap(trades)}</div>
+    </div>
+    <div class="adm-grid adm-grid-3">
+      <div><h4>Strategies</h4>${tbl(strategies,g=>`<tr><td>${esc(g.k)}</td><td>${g.n} · ${Math.round(g.w/g.n*100)}%</td><td class="${g.p>=0?'positive':'negative'}">${money(g.p)}</td></tr>`)}</div>
+      <div><h4>Mistakes (kitne ki padi)</h4>${tbl(mistakes,g=>`<tr><td>${esc(g.k)}</td><td>×${g.n}</td><td class="${g.p>=0?'positive':'negative'}">${money(g.p)}</td></tr>`)}</div>
+      <div><h4>Emotions</h4>${tbl(emotions,g=>`<tr><td>${esc(g.k)}</td><td>${g.n} · ${Math.round(g.w/g.n*100)}%</td><td class="${g.p>=0?'positive':'negative'}">${money(g.p)}</td></tr>`)}</div>
+    </div>
+    <div class="adm-tabs" role="tablist">
+      <button type="button" role="tab" class="${a.detailTab==='trades'?'active':''}" data-action="admin-detail-tab" data-tab="trades">Trades (${trades.length})</button>
+      <button type="button" role="tab" class="${a.detailTab==='notes'?'active':''}" data-action="admin-detail-tab" data-tab="notes">Notes (${notes.length})</button>
+      <button type="button" role="tab" class="${a.detailTab==='strategies'?'active':''}" data-action="admin-detail-tab" data-tab="strategies">Playbook (${(d.customStrategies||[]).length})</button>
+    </div>
+    ${a.detailTab==='trades' ? (trades.length?`<div class="adm-trades">${trades.slice(0,a.tradeLimit||30).map(tradeRow).join('')}</div>${trades.length>(a.tradeLimit||30)?`<button type="button" class="btn-secondary btn-small adm-more" data-action="admin-more-trades">Aur dikhao (${trades.length-(a.tradeLimit||30)} baaki)</button>`:''}`:'<p class="pb-empty">Abhi koi trade nahi.</p>')
+      : a.detailTab==='notes' ? (notes.length?`<div class="adm-notes">${notes.map(n=>`<div class="adm-note ${a.openNote===n.id?'open':''}"><button type="button" data-action="admin-toggle-note" data-id="${esc(n.id)}"><strong>${esc(n.title||'Untitled note')}</strong><small>${esc(n.concept||'')}${n.strategy?' · '+esc(n.strategy):''} · ${esc(timeAgo(n.updatedAt||n.date))}</small></button>${a.openNote===n.id?`<div class="adm-note-body">${noteBody(n)}</div>`:''}</div>`).join('')}</div>`:'<p class="pb-empty">Abhi koi note nahi.</p>')
+      : ((d.customStrategies||[]).length?`<div class="adm-notes">${d.customStrategies.map(x=>normalizeCustomStrategy(x)).map(x=>`<div class="adm-note open"><div class="adm-note-body"><strong>${esc(x.name)}</strong>${x.entryCriteria?`<p><b>Entry:</b> ${esc(x.entryCriteria)}</p>`:''}${x.exitCriteria?`<p><b>Exit:</b> ${esc(x.exitCriteria)}</p>`:''}${(x.rules||[]).length?`<ul>${x.rules.map(r=>`<li>${esc(r)}</li>`).join('')}</ul>`:''}</div></div>`).join('')}</div>`:'<p class="pb-empty">Koi strategy save nahi.</p>')}
+  </section>`;
+}
+function exportAdminCsv(){
+  const rows=[['Name','Email','Joined','Last active','Trades','Trades (7d)','Closed','Net P&L','P&L (7d)','Win %','Avg R','Rules %','Top mistake','Notes','Visits']];
+  adminFiltered().forEach(u=>rows.push([u.name,u.email,u.createdAt,lastActive(u)||'',u.trades,u.trades7,u.closed,u.pnl,u.pnl7,u.winRate,u.avgR,u.ruleRate,u.topMistake?mistakeLabel(u.topMistake.id):'',u.notes,u.visits]));
+  const csv=rows.map(r=>r.map(v=>{ const s=String(v??''); return /[",\n]/.test(s)?`"${s.replace(/"/g,'""')}"`:s; }).join(',')).join('\n');
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv'})); a.download=`traders-${localDateKey(new Date())}.csv`; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+}
+function handleAdminClick(action, btn){
+  const a=adminState();
+  if(action==='admin-reload'){ a.loaded=false; a.error=''; renderTabOnly(); loadAdminUsers(true); return true; }
+  if(action==='admin-filter'){ a.filter=btn.dataset.filter; renderTabOnly(); return true; }
+  if(action==='admin-open-user'){ openAdminUser(btn.dataset.id); return true; }
+  if(action==='admin-back'){ a.view='list'; a.detail=null; a.tradeLimit=30; renderTabOnly(); return true; }
+  if(action==='admin-detail-tab'){ a.detailTab=btn.dataset.tab; renderTabOnly(); return true; }
+  if(action==='admin-toggle-note'){ a.openNote=a.openNote===btn.dataset.id?null:btn.dataset.id; renderTabOnly(); return true; }
+  if(action==='admin-more-trades'){ a.tradeLimit=(a.tradeLimit||30)+30; renderTabOnly(); return true; }
+  if(action==='admin-view-image'){ openAnnotator(btn.dataset.src,null,null,{}); return true; }
+  if(action==='admin-export'){ exportAdminCsv(); return true; }
+  return false;
+}
+document.addEventListener('input', e=>{ if(e.target.id!=='admin-search') return; const a=adminState(); a.search=e.target.value; clearTimeout(a.t); a.t=setTimeout(()=>{ const pos=e.target.selectionStart; renderTabOnly(); const s=$('#admin-search'); if(s){ s.focus(); try{s.setSelectionRange(pos,pos);}catch(_){} } },200); });
+document.addEventListener('change', e=>{ if(e.target.id==='admin-sort'){ adminState().sort=e.target.value; renderTabOnly(); } });
+document.addEventListener('keydown', e=>{ if(e.key==='Enter' && e.target.matches?.('tr[data-action="admin-open-user"]')) e.target.click(); });
+
+/* one-time transparency notice for traders */
+function maybeShowPrivacyNotice(){
+  if(!STATE.user || isAdmin()) return;
+  try { if(localStorage.getItem('tc_privacy_ack_'+STATE.user.id)) return; } catch(_) { return; }
+  if($('#privacy-notice')) return;
+  const n=document.createElement('div'); n.id='privacy-notice'; n.className='privacy-notice'; n.setAttribute('role','dialog'); n.setAttribute('aria-live','polite');
+  n.innerHTML=`<strong>ℹ️ Aapka journal mentors ko dikhta hai</strong><p>Trading Gupshup ke mentors aapke trades, notes aur progress dekh sakte hain — taaki aapko sahi guidance de sakein. Aapka password kisi ko nahi dikhta.</p><button type="button" class="btn-primary btn-small" data-action="privacy-ack">Samajh gaya</button>`;
+  document.body.appendChild(n);
+}
+
 /* ---------------- strategy manager ---------------- */
 function strategyUsage(name){
   return { trades: STATE.trades.filter(t=>sameName(t.strategy,name)).length, notes: STATE.notes.filter(n=>noteMatchesStrategy(n,name)).length, exactNotes: STATE.notes.filter(n=>sameName(n.strategy,name)).length };
@@ -2121,6 +2314,7 @@ function render(){
   else if (STATE.activeTab==='analysis') content.innerHTML = renderAnalysisTab();
   else if (STATE.activeTab==='risk') { content.innerHTML = renderRiskCenter(); bindRiskSettings(); updateRiskCalculator(); }
   else if (STATE.activeTab==='blog') { content.innerHTML = renderBlogTab(); if(blogState().view==='list'&&blogState().loaded) markBlogSeen(); }
+  else if (STATE.activeTab==='admin') content.innerHTML = renderAdminTab();
   afterTabRender();
 }
 function renderTabOnly(){ // re-render just the active tab (after in-tab interactions)
@@ -2132,6 +2326,7 @@ function renderTabOnly(){ // re-render just the active tab (after in-tab interac
   else if (STATE.activeTab==='analysis') content.innerHTML = renderAnalysisTab();
   else if (STATE.activeTab==='risk') { content.innerHTML = renderRiskCenter(); bindRiskSettings(); updateRiskCalculator(); }
   else if (STATE.activeTab==='blog') content.innerHTML = renderBlogTab();
+  else if (STATE.activeTab==='admin') content.innerHTML = renderAdminTab();
   renderTabNav();
   afterTabRender();
 }
@@ -2144,6 +2339,8 @@ document.addEventListener('click', async (e) => {
 
   if (action==='set-tab') { if (STATE.activeTab==='blog' && btn.dataset.tab!=='blog' && STATE.blog?.view==='edit' && !leaveBlogEditor()) return; if (btn.dataset.tab==='blog' && STATE.activeTab==='blog' && STATE.blog) { STATE.blog.view='list'; STATE.blog.current=null; } STATE.activeTab = btn.dataset.tab; render(); }
   else if (handleBlogClick(action, btn, e)) { /* blog */ }
+  else if (handleAdminClick(action, btn)) { /* admin */ }
+  else if (action==='privacy-ack') { try { localStorage.setItem('tc_privacy_ack_'+STATE.user.id, new Date().toISOString()); } catch(_) {} $('#privacy-notice')?.remove(); }
   else if (action==='select-mindset') { STATE.selectedMindsetId = btn.dataset.id; renderTabOnly(); }
   else if (action==='toggle-rule') { const i=btn.dataset.idx; STATE.checkedRules[i]=!STATE.checkedRules[i]; renderTabOnly(); }
   else if (action==='set-inspection') { STATE.inspectionTab = btn.dataset.value; renderTabOnly(); }

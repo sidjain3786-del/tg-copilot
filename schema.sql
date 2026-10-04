@@ -62,3 +62,12 @@ CREATE TABLE IF NOT EXISTS blog_posts (
   published_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_blog_status_pub ON blog_posts (status, published_at);
+
+-- Last activity per trader (shown to admins/mentors in the Admin dashboard).
+CREATE TABLE IF NOT EXISTS user_activity (
+  user_id TEXT PRIMARY KEY,
+  last_seen_at TEXT,
+  last_save_at TEXT,
+  saves INTEGER NOT NULL DEFAULT 0,
+  visits INTEGER NOT NULL DEFAULT 0
+);
