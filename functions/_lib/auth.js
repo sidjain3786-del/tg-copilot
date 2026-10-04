@@ -50,6 +50,8 @@ export async function ensureSchema(env) {
   if (schemaReady) return;
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS user_session_notes (user_id TEXT PRIMARY KEY, notes TEXT NOT NULL DEFAULT '{}', updated_at TEXT NOT NULL, FOREIGN KEY (user_id) REFERENCES users(id))`).run();
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS login_attempts (email TEXT PRIMARY KEY, failures INTEGER NOT NULL DEFAULT 0, window_start TEXT NOT NULL)`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS blog_posts (id TEXT PRIMARY KEY, slug TEXT UNIQUE NOT NULL, title TEXT NOT NULL, excerpt TEXT NOT NULL DEFAULT '', cover TEXT NOT NULL DEFAULT '', tags TEXT NOT NULL DEFAULT '[]', blocks TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'draft', author_id TEXT, author_name TEXT, read_minutes INTEGER NOT NULL DEFAULT 1, views INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, published_at TEXT)`).run();
+  await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_blog_status_pub ON blog_posts (status, published_at)`).run();
   schemaReady = true;
 }
 
@@ -105,3 +107,10 @@ export function parseColumn(text, fallback) {
 }
 
 export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+// Admins are set in Cloudflare Pages → Settings → Variables: ADMIN_EMAILS = "a@x.com, b@y.com"
+export function isAdminUser(user, env) {
+  if (!user || !user.email) return false;
+  const list = String(env.ADMIN_EMAILS || '').split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
+  return list.includes(String(user.email).toLowerCase());
+}
