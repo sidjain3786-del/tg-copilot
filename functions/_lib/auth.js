@@ -52,6 +52,7 @@ export async function ensureSchema(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS login_attempts (email TEXT PRIMARY KEY, failures INTEGER NOT NULL DEFAULT 0, window_start TEXT NOT NULL)`).run();
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS blog_posts (id TEXT PRIMARY KEY, slug TEXT UNIQUE NOT NULL, title TEXT NOT NULL, excerpt TEXT NOT NULL DEFAULT '', cover TEXT NOT NULL DEFAULT '', tags TEXT NOT NULL DEFAULT '[]', blocks TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'draft', author_id TEXT, author_name TEXT, read_minutes INTEGER NOT NULL DEFAULT 1, views INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, published_at TEXT)`).run();
   await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_blog_status_pub ON blog_posts (status, published_at)`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS user_activity (user_id TEXT PRIMARY KEY, last_seen_at TEXT, last_save_at TEXT, saves INTEGER NOT NULL DEFAULT 0, visits INTEGER NOT NULL DEFAULT 0)`).run();
   schemaReady = true;
 }
 
@@ -107,6 +108,21 @@ export function parseColumn(text, fallback) {
 }
 
 export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+// Activity for the admin dashboard (traders are told mentors can see their journal).
+export async function touchActivity(env, userId, kind) {
+  try {
+    await ensureSchema(env);
+    const now = new Date().toISOString();
+    if (kind === 'save') {
+      await env.DB.prepare(`INSERT INTO user_activity (user_id, last_seen_at, last_save_at, saves, visits) VALUES (?, ?, ?, 1, 0)
+        ON CONFLICT(user_id) DO UPDATE SET last_seen_at = excluded.last_seen_at, last_save_at = excluded.last_save_at, saves = saves + 1`).bind(userId, now, now).run();
+    } else {
+      await env.DB.prepare(`INSERT INTO user_activity (user_id, last_seen_at, visits) VALUES (?, ?, 1)
+        ON CONFLICT(user_id) DO UPDATE SET last_seen_at = excluded.last_seen_at, visits = visits + 1`).bind(userId, now).run();
+    }
+  } catch (e) { console.error('activity', e); }
+}
 
 // Admins are set in Cloudflare Pages → Settings → Variables: ADMIN_EMAILS = "a@x.com, b@y.com"
 export function isAdminUser(user, env) {
