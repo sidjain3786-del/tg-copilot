@@ -1,4 +1,4 @@
-import { getUserFromRequest, json } from '../../_lib/auth.js';
+import { getUserFromRequest, json, isAdminUser } from '../../_lib/auth.js';
 
 // Serves a chart image from R2. Users can only read images inside their own folder.
 // Self-heal: if a stored file is base64 / data-URL TEXT instead of real image bytes,
@@ -36,7 +36,8 @@ export async function onRequestGet({ request, env, params }) {
   if (!env.IMAGES) return json({ error: 'Image storage not configured' }, { status: 501 });
 
   const parts = Array.isArray(params.path) ? params.path : [params.path];
-  if (parts.length !== 2 || parts[0] !== user.id || !/^[0-9a-f-]{36}\.(jpg|png|webp|gif)$/.test(parts[1])) {
+  const owner = parts[0] === user.id || isAdminUser(user, env);   // admins (mentors) can view traders' charts
+  if (parts.length !== 2 || !owner || !/^[A-Za-z0-9-]{1,64}$/.test(parts[0]) || !/^[0-9a-f-]{36}\.(jpg|png|webp|gif)$/.test(parts[1])) {
     return json({ error: 'Not found' }, { status: 404 });
   }
   const key = parts.join('/');
