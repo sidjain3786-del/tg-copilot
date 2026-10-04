@@ -1,4 +1,4 @@
-import { hashPassword, createSession, sessionCookie, json, readJson, EMAIL_RE } from '../_lib/auth.js';
+import { hashPassword, createSession, sessionCookie, json, readJson, EMAIL_RE, isAdminUser } from '../_lib/auth.js';
 
 export async function onRequestPost({ request, env }) {
   try {
@@ -33,7 +33,7 @@ export async function onRequestPost({ request, env }) {
     ).bind(id, '[]', '[]', '[]', createdAt).run();
 
     const sessionId = await createSession(env, id);
-    return json({ id, email: cleanEmail, name }, { headers: { 'Set-Cookie': sessionCookie(sessionId) } });
+    return json({ id, email: cleanEmail, name, isAdmin: isAdminUser({ email: cleanEmail }, env) }, { headers: { 'Set-Cookie': sessionCookie(sessionId) } });
   } catch (e) {
     console.error('signup error', e);
     return json({ error: 'Sign up failed. Please try again.' }, { status: 500 });

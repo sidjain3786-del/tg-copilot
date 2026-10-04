@@ -1,4 +1,4 @@
-import { hashPassword, createSession, sessionCookie, json, readJson, safeEqual, ensureSchema } from '../_lib/auth.js';
+import { hashPassword, createSession, sessionCookie, json, readJson, safeEqual, ensureSchema, isAdminUser } from '../_lib/auth.js';
 
 const MAX_FAILURES = 8;              // failed attempts allowed...
 const WINDOW_MS = 15 * 60 * 1000;    // ...per 15 minutes, per email
@@ -30,7 +30,7 @@ export async function onRequestPost({ request, env }) {
     await env.DB.prepare('DELETE FROM login_attempts WHERE email = ?').bind(cleanEmail).run();
     const sessionId = await createSession(env, user.id);
     return json(
-      { id: user.id, email: user.email, name: user.name },
+      { id: user.id, email: user.email, name: user.name, isAdmin: isAdminUser(user, env) },
       { headers: { 'Set-Cookie': sessionCookie(sessionId) } }
     );
   } catch (e) {
