@@ -291,7 +291,23 @@ let authMode = 'login';
 
 function showLoading(){ $('#loading-screen').style.display='flex'; $('#auth-screen').style.display='none'; $('#app-screen').style.display='none'; }
 function showAuth(){ $('#loading-screen').style.display='none'; $('#auth-screen').style.display='flex'; $('#app-screen').style.display='none'; }
+// Deep links: /#blog opens the Blog, /#admin opens the Blog post editor (admins only).
+function applyDeepLink(){
+  const h=(location.hash||'').replace(/^#\/?/,'').toLowerCase();
+  if(!h) return false;
+  const tabs=TABS.map(t=>t.id);
+  if(h==='admin' || h==='blog/new'){
+    STATE.activeTab='blog'; const b=blogState(); b.current=null;
+    if(isAdmin()){ b.editing=newBlogDraft(); b.view='edit'; b.preview=false; b.dirty=false; }
+    else { b.view='list'; setTimeout(()=>alert('Yeh admin link hai. Aapka email ADMIN_EMAILS mein nahi hai, isliye sirf Blog khula hai.'),300); }
+  } else if(tabs.includes(h)) { STATE.activeTab=h; if(h==='blog'){ const b=blogState(); b.view='list'; b.current=null; } }
+  else return false;
+  history.replaceState(null,'',location.pathname+location.search);   // clean URL after opening
+  return true;
+}
+window.addEventListener('hashchange', ()=>{ if(STATE.user && applyDeepLink()) render(); });
 function showApp(){
+  applyDeepLink();
   setTimeout(()=>{ if(STATE.user) loadBlog(); }, 800); $('#loading-screen').style.display='none'; $('#auth-screen').style.display='none'; $('#app-screen').style.display='block'; render(); }
 
 function setAuthMode(mode){
@@ -1847,6 +1863,35 @@ function renderBlogPost(p){
     <div class="blog-post-end"><button type="button" class="btn-secondary" data-action="blog-back">‹ Aur posts padho</button></div>
   </article>`;
 }
+// Paste a whole post as simple text and turn it into blocks:
+// # Title · Summary: … · Tags: a, b · ## Heading · ### Sub · > quote · - list · 💡 tip · --- · ![caption](https://img)
+function parseBlogText(raw){
+  const out={ title:'', excerpt:'', tags:'', blocks:[] };
+  const lines=String(raw||'').replace(/\r/g,'').split('\n');
+  let para=[], list=null;
+  const flushPara=()=>{ if(para.length){ out.blocks.push({type:'p', text:para.join(' ').trim()}); para=[]; } };
+  const flushList=()=>{ if(list){ out.blocks.push({type:'list', items:list}); list=null; } };
+  const flush=()=>{ flushPara(); flushList(); };
+  for(const rawLine of lines){
+    const line=rawLine.trim();
+    if(!line){ flush(); continue; }
+    let m;
+    if(!out.title && (m=/^#\s+(.+)/.exec(line))){ flush(); out.title=m[1].trim(); continue; }
+    if((m=/^summary\s*:\s*(.+)/i.exec(line)) && !out.blocks.length){ flush(); out.excerpt=m[1].trim(); continue; }
+    if((m=/^tags\s*:\s*(.+)/i.exec(line)) && !out.blocks.length){ flush(); out.tags=m[1].trim(); continue; }
+    if((m=/^###\s+(.+)/.exec(line))){ flush(); out.blocks.push({type:'h3', text:m[1].trim()}); continue; }
+    if((m=/^##?\s+(.+)/.exec(line))){ flush(); out.blocks.push({type:'h2', text:m[1].trim()}); continue; }
+    if(/^(-{3,}|\*{3,}|_{3,})$/.test(line)){ flush(); out.blocks.push({type:'divider'}); continue; }
+    if((m=/^!\[([^\]]*)\]\((https:\/\/[^\s)]+)\)$/.exec(line))){ flush(); out.blocks.push({type:'img', src:m[2], caption:m[1]}); continue; }
+    if((m=/^>\s?(.*)/.exec(line))){ flush(); const last=out.blocks.at(-1); if(last&&last.type==='quote'&&last._open) last.text+=' '+m[1]; else out.blocks.push({type:'quote', text:m[1], _open:true}); continue; }
+    if((m=/^(?:💡|(?:tip|note)\s*:)\s*(.+)/i.exec(line))){ flush(); out.blocks.push({type:'callout', text:m[1].trim()}); continue; }
+    if((m=/^(?:[-*•]|\d+[.)])\s+(.+)/.exec(line))){ flushPara(); (list||(list=[])).push(m[1].trim()); continue; }
+    flushList(); para.push(line);
+  }
+  flush();
+  out.blocks.forEach(b=>delete b._open);
+  return out;
+}
 function newBlogDraft(){ return { id:null, title:'', excerpt:'', cover:'', tags:'', status:'draft', blocks:[{type:'p',text:''}] }; }
 function renderBlogEditor(){
   const b=blogState(), d=b.editing;
@@ -1863,6 +1908,12 @@ function renderBlogEditor(){
     <div class="blog-post-top"><button type="button" class="btn-secondary btn-small" data-action="blog-editor-close">‹ Wapas</button>
       <div class="blog-admin-actions"><span class="blog-badge ${d.status==='published'?'live':'draft'}">${d.status==='published'?'Live':'Draft'}</span><button type="button" class="btn-secondary btn-small" data-action="blog-preview">${b.preview?'✏️ Edit':'👁 Preview'}</button></div></div>
     ${b.preview ? `<div class="blog-post blog-preview">${preview.cover?`<img class="blog-post-cover" src="${blogImgSrc(preview.cover)}" alt="">`:''}<header><h1>${esc(preview.title||'Untitled')}</h1><p class="blog-post-meta">${esc(preview.authorName||'')} · ${preview.readMinutes} min read</p></header><div class="blog-body">${renderBlogBlocks(preview.blocks)}</div></div>` : `
+    <details class="be-import" ${d.blocks.length<=1&&!(d.blocks[0]?.text)&&!d.title?'open':''}>
+      <summary>📋 Poora article paste karke format karo</summary>
+      <p class="be-import-help">Word / Google Docs / ChatGPT se text paste karo. Format: <code># Title</code>, <code>Summary: …</code>, <code>Tags: a, b</code>, <code>## Heading</code>, <code>&gt; quote</code>, <code>- list</code>, <code>💡 tip</code>, <code>---</code>, <code>**bold**</code>. Saada text bhi chalega — har khaali line par naya paragraph.</p>
+      <textarea id="blog-import-text" rows="6" placeholder="# Mera title&#10;Summary: …&#10;Tags: Psychology&#10;&#10;Pehla paragraph…"></textarea>
+      <div class="be-img-actions"><button type="button" class="btn-primary btn-small" data-action="blog-import">Blocks banao</button><label class="btn-secondary btn-small be-import-file">📄 .txt / .md file<input type="file" id="blog-import-file" accept=".txt,.md,text/plain,text/markdown" hidden></label></div>
+    </details>
     <input class="be-title" data-blog-field="title" value="${esc(d.title)}" placeholder="Post ka title…" maxlength="160">
     <div class="be-row"><label>Short summary <small>(list mein dikhega — khaali chhodo to pehla paragraph)</small><textarea data-blog-field="excerpt" rows="2" maxlength="400">${esc(d.excerpt)}</textarea></label></div>
     <div class="be-row be-row-2"><label>Tags <small>(comma se alag: Psychology, ORB)</small><input data-blog-field="tags" value="${esc(d.tags)}" placeholder="Psychology, Risk"></label>
@@ -1904,6 +1955,17 @@ function setBlogImage(target, index, url){
   if(target==='cover') d.cover=url; else if(d.blocks[index]) d.blocks[index].src=url;
   blogState().dirty=true; renderTabOnly();
 }
+function importBlogText(text){
+  const b=blogState(), d=b.editing; if(!d) return;
+  const r=parseBlogText(text);
+  if(!r.blocks.length && !r.title){ alert('Kuch text paste karo.'); return; }
+  const hasContent=d.blocks.some(x=>(x.text||'').trim()||(x.items||[]).some(Boolean)||x.src);
+  if(hasContent && !confirm('Abhi ka content in naye blocks se badal jayega. Continue?')) return;
+  if(r.title) d.title=r.title; if(r.excerpt) d.excerpt=r.excerpt; if(r.tags) d.tags=r.tags;
+  d.blocks=r.blocks.length?r.blocks:[{type:'p',text:''}];
+  b.dirty=true; renderTabOnly();
+  const st=$('#blog-status'); if(st){ st.style.color='var(--profit)'; st.textContent=`✓ ${r.blocks.length} blocks ban gaye. 👁 Preview dekh lo, phir Publish.`; }
+}
 async function saveBlogPost(status){
   const b=blogState(), d=b.editing, st=$('#blog-status'); if(!d) return;
   if(!d.title.trim()){ if(st) st.textContent='Title likho.'; $('.be-title')?.focus(); return; }
@@ -1943,6 +2005,7 @@ function handleBlogClick(action, btn, e){
   if(action==='blog-image-link'){ const key=btn.dataset.target==='cover'?'cover':btn.dataset.index; const input=document.querySelector(`[data-blog-link="${key}"]`); const link=input?.value.trim(); if(!link){ input?.focus(); return true; } const label=btn.textContent; btn.disabled=true; btn.textContent='…'; blogUploadImage({url:link}).then(u=>setBlogImage(btn.dataset.target, Number(btn.dataset.index), u)).catch(err=>{ alert('🔗 '+err.message); btn.disabled=false; btn.textContent=label; }); return true; }
   if(action==='blog-cover-remove'){ b.editing.cover=''; b.dirty=true; renderTabOnly(); return true; }
   if(action==='blog-save'){ saveBlogPost(btn.dataset.status); return true; }
+  if(action==='blog-import'){ importBlogText($('#blog-import-text')?.value||''); return true; }
   if(action==='blog-delete'){ deleteBlogPost(); return true; }
   if(action==='view-blog-image'){ openAnnotator(btn.dataset.src,null,null,{}); return true; }
   return false;
@@ -1960,6 +2023,7 @@ document.addEventListener('input', e=>{
   }
 });
 document.addEventListener('change', e=>{
+  if(e.target.id==='blog-import-file' && e.target.files?.length){ e.target.files[0].text().then(t=>{ const ta=$('#blog-import-text'); if(ta) ta.value=t; importBlogText(t); }); e.target.value=''; return; }
   if(e.target.id!=='blog-image-file' || !e.target.files?.length) return;
   const f=e.target.files[0], target=e.target.dataset.target, index=Number(e.target.dataset.index);
   const st=$('#blog-status'); if(st){ st.style.color=''; st.textContent='Image upload ho rahi hai…'; }

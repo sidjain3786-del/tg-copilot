@@ -547,3 +547,9 @@ button[disabled] { opacity: .65; cursor: progress; }
 .be-actions > div { display: flex; gap: .5rem; }
 .blog-preview { padding: 0; }
 @media (max-width: 700px) { .be-row-2 { grid-template-columns: 1fr; } .blog-post { padding: 1rem; } .blog-body { font-size: .98rem; } .be-actions > div { width: 100%; } .be-actions > div .btn-primary, .be-actions > div .btn-secondary { flex: 1; } }
+.be-import { border: 1px dashed var(--ink-line); border-radius: var(--r-sm); padding: .6rem .75rem; margin-bottom: 1rem; background: #FAFBFD; }
+.be-import summary { cursor: pointer; font-weight: 700; font-size: .85rem; color: var(--ink); }
+.be-import-help { font-size: .74rem; color: var(--muted); line-height: 1.55; margin: .5rem 0; }
+.be-import-help code { background: var(--ink-tint); padding: 0 .25rem; border-radius: 3px; font-size: .7rem; }
+.be-import textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--line); border-radius: 8px; padding: .55rem .65rem; font: inherit; font-size: .82rem; resize: vertical; }
+.be-import-file { cursor: pointer; display: inline-flex; align-items: center; }
