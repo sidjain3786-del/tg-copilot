@@ -2044,7 +2044,7 @@ window.addEventListener('beforeunload', e=>{ if(STATE.blog?.dirty){ e.preventDef
 /* ---------------- admin dashboard ----------------
    Mentors (ADMIN_EMAILS) see every trader's progress and journal, read-only.
    Traders are told about this at signup and with a one-time notice in the app. */
-function adminState(){ return STATE.admin || (STATE.admin={ users:[], loaded:false, loading:false, error:'', filter:'all', sort:'active', search:'', view:'list', detail:null, detailTab:'trades', openNote:null }); }
+function adminState(){ return STATE.admin || (STATE.admin={ users:[], loaded:false, loading:false, error:'', filter:'all', sort:'active', search:'', view:'list', detail:null, detailTab:'trades', openNote:null, selected:new Set(), confirm:null }); }
 function timeAgo(iso){
   if(!iso) return '—'; const d=new Date(iso); if(Number.isNaN(d.getTime())) return '—';
   const s=(Date.now()-d.getTime())/1000;
@@ -2058,12 +2058,21 @@ function daysSince(iso){ return iso ? (Date.now()-new Date(iso).getTime())/DAY_M
 async function loadAdminUsers(force=false){
   const a=adminState(); if(a.loading || (a.loaded&&!force)) return;
   a.loading=true; a.error='';
-  try { const d=await api('/api/admin/users'); a.users=d.users||[]; a.loaded=true; a.generatedAt=d.generatedAt; }
+  try { const d=await api('/api/admin/users'); a.users=d.users||[]; a.loaded=true; a.generatedAt=d.generatedAt; const ids=new Set(a.users.map(u=>u.id)); [...a.selected].forEach(id=>{ if(!ids.has(id)) a.selected.delete(id); }); }
   catch(e){ a.error=e.message||'Load nahi hua.'; }
   finally { a.loading=false; }
   if(STATE.activeTab==='admin') renderTabOnly();
 }
-function adminFilters(){ return [['all','Sab'],['active7','Active (7 din)'],['inactive','7+ din se gayab'],['new','Naye (7 din)'],['lowrules','Rules < 60%'],['losing','Loss mein'],['notrades','0 trades']]; }
+function traderStatus(u){
+  if(u.isAdmin) return ['admin','Admin'];
+  if(daysSince(u.createdAt)<=7 && !u.trades) return ['new','Naya'];
+  const d=daysSince(lastActive(u));
+  if(d<=1) return ['live','Aaj active']; if(d<=7) return ['ok','Active']; if(d<=30) return ['away','Gayab']; return ['gone','Inactive'];
+}
+const isEmptyAccount=u=>!u.isAdmin && !u.trades && !u.notes;
+const canDelete=u=>!u.isAdmin && u.id!==STATE.user?.id;
+function initials(u){ return esc(((u.name||u.email||'?').trim().split(/\s+/).map(x=>x[0]).join('').slice(0,2)||'?').toUpperCase()); }
+function adminFilters(){ return [['all','Sab'],['empty','Khaali accounts'],['active7','Active (7 din)'],['inactive','7+ din se gayab'],['new','Naye (7 din)'],['lowrules','Rules < 60%'],['losing','Loss mein'],['notrades','0 trades']]; }
 function adminFiltered(){
   const a=adminState(), q=a.search.trim().toLowerCase();
   let list=a.users.filter(u=>!q || `${u.name} ${u.email}`.toLowerCase().includes(q));
@@ -2074,6 +2083,7 @@ function adminFiltered(){
   if(f==='lowrules') list=list.filter(u=>u.closed>0 && u.ruleRate<60);
   if(f==='losing') list=list.filter(u=>u.pnl<0);
   if(f==='notrades') list=list.filter(u=>!u.trades);
+  if(f==='empty') list=list.filter(isEmptyAccount);
   const by={ active:(x,y)=>String(lastActive(y)||'').localeCompare(String(lastActive(x)||'')), trades:(x,y)=>y.trades-x.trades, trades7:(x,y)=>y.trades7-x.trades7, pnl:(x,y)=>y.pnl-x.pnl, rules:(x,y)=>x.ruleRate-y.ruleRate, win:(x,y)=>y.winRate-x.winRate, joined:(x,y)=>String(y.createdAt).localeCompare(String(x.createdAt)) }[a.sort];
   return by?list.sort(by):list;
 }
@@ -2089,26 +2099,31 @@ function renderAdminTab(){
   if(!a.loaded){ setTimeout(()=>loadAdminUsers(),0); return `<section class="card adm-head"><h2 class="section-title">🛠️ Admin</h2><p class="card-sub">${a.error?esc(a.error):'Traders ka data load ho raha hai…'}</p>${a.error?'<button class="btn-secondary btn-small" data-action="admin-reload">Dobara try karo</button>':''}</section>`; }
   const U=a.users.filter(u=>!u.isAdmin), all=a.users;
   const k=[
-    ['Total traders', U.length, ''],
-    ['Aaj active', U.filter(u=>daysSince(lastActive(u))<=1).length, ''],
-    ['Active (7 din)', U.filter(u=>daysSince(lastActive(u))<=7).length, ''],
-    ['Naye (7 din)', U.filter(u=>daysSince(u.createdAt)<=7).length, ''],
-    ['Trades (7 din)', U.reduce((s,u)=>s+u.trades7,0), ''],
-    ['7+ din se gayab', U.filter(u=>daysSince(lastActive(u))>7).length, 'warn']
+    ['👥 Total traders', U.length, ''],
+    ['🟢 Aaj active', U.filter(u=>daysSince(lastActive(u))<=1).length, ''],
+    ['📅 Active (7 din)', U.filter(u=>daysSince(lastActive(u))<=7).length, ''],
+    ['✨ Naye (7 din)', U.filter(u=>daysSince(u.createdAt)<=7).length, ''],
+    ['📈 Trades (7 din)', U.reduce((s,u)=>s+u.trades7,0), ''],
+    ['😴 7+ din se gayab', U.filter(u=>daysSince(lastActive(u))>7).length, 'warn']
   ];
   const list=adminFiltered();
-  const row=u=>{ const la=lastActive(u), stale=daysSince(la)>7;
-    return `<tr data-action="admin-open-user" data-id="${esc(u.id)}" tabindex="0">
-      <td><strong>${esc(u.name||'—')}</strong>${u.isAdmin?' <span class="blog-badge live">Admin</span>':''}<small>${esc(u.email)}</small></td>
-      <td class="${stale?'adm-stale':''}">${esc(timeAgo(la))}<small>joined ${esc(timeAgo(u.createdAt))}</small></td>
+  const sel=a.selected;
+  const row=u=>{ const la=lastActive(u), [st,stl]=traderStatus(u), deletable=canDelete(u);
+    return `<tr data-action="admin-open-user" data-id="${esc(u.id)}" tabindex="0" class="${sel.has(u.id)?'is-selected':''}">
+      <td class="adm-check">${deletable?`<input type="checkbox" data-action="admin-select" data-id="${esc(u.id)}" ${sel.has(u.id)?'checked':''} aria-label="Select ${esc(u.name||u.email)}">`:''}</td>
+      <td><div class="adm-who"><span class="adm-ava" aria-hidden="true">${initials(u)}</span><div><strong>${esc(u.name||'—')}</strong><small>${esc(u.email)}</small></div></div></td>
+      <td><span class="adm-pill ${st}">${stl}</span><small>${esc(timeAgo(la))}</small></td>
       <td class="num">${u.trades}<small>${u.trades7} is hafte</small></td>
       <td class="num ${u.pnl>=0?'positive':'negative'}">${u.closed?money(u.pnl):'—'}<small class="${u.pnl7>=0?'positive':'negative'}">${u.trades7?`${money(u.pnl7)} (7d)`:''}</small></td>
       <td class="num">${u.closed?u.winRate+'%':'—'}</td>
-      <td class="num">${u.closed?`${u.ruleRate}% ${ruleTrend(u)}`:'—'}</td>
+      <td class="num">${u.closed?`<span class="adm-bar" style="--v:${u.ruleRate}%"><i></i></span>${u.ruleRate}% ${ruleTrend(u)}`:'—'}</td>
       <td>${u.topMistake?`<span class="journal-chip chip-warn">${esc(mistakeLabel(u.topMistake.id))} ×${u.topMistake.count}</span>`:'<small>—</small>'}</td>
       <td class="num">${u.notes}</td>
     </tr>`; };
+  const selectable=list.filter(canDelete), allSel=selectable.length>0 && selectable.every(u=>sel.has(u.id));
+  const empties=a.users.filter(isEmptyAccount).filter(canDelete).length;
   return `<section class="card adm-head">
+      ${a.toast?`<div class="adm-toast" role="status">${a.toast}</div>`:''}
       <div><h2 class="section-title">🛠️ Admin — traders ki progress</h2><p class="card-sub">Har trader ka journal (sirf padhne ke liye). Updated ${esc(timeAgo(a.generatedAt))}.</p></div>
       <div class="adm-head-actions"><button type="button" class="btn-secondary btn-small" data-action="admin-reload">↻ Refresh</button><button type="button" class="btn-secondary btn-small" data-action="admin-export">⬇️ CSV</button></div>
     </section>
@@ -2120,8 +2135,40 @@ function renderAdminTab(){
       </div>
       <div class="blog-tag-row adm-filters">${adminFilters().map(([v,l])=>`<button type="button" class="${a.filter===v?'active':''}" data-action="admin-filter" data-filter="${v}">${l}</button>`).join('')}</div>
       <p class="adm-count">${list.length} trader${list.length===1?'':'s'}</p>
-      ${list.length?`<div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>Trader</th><th>Last active</th><th class="num">Trades</th><th class="num">Net P&amp;L</th><th class="num">Win</th><th class="num">Rules</th><th>Top mistake</th><th class="num">Notes</th></tr></thead><tbody>${list.map(row).join('')}</tbody></table></div>`:`<p class="pb-empty">Is filter mein koi trader nahi.</p>`}
-    </section>`;
+      ${empties?`<div class="adm-cleanup"><span>🧹 <b>${empties}</b> khaali account${empties===1?'':'s'} (0 trades, 0 notes) — test / temporary ho sakte hain.</span><button type="button" class="btn-secondary btn-small" data-action="admin-select-empty">Sab select karo</button></div>`:''}
+      ${list.length?`<div class="adm-table-wrap"><table class="adm-table"><thead><tr><th class="adm-check">${selectable.length?`<input type="checkbox" data-action="admin-select-all" ${allSel?'checked':''} aria-label="Select all">`:''}</th><th>Trader</th><th>Status</th><th class="num">Trades</th><th class="num">Net P&amp;L</th><th class="num">Win</th><th class="num">Rules</th><th>Top mistake</th><th class="num">Notes</th></tr></thead><tbody>${list.map(row).join('')}</tbody></table></div>`:`<p class="pb-empty">Is filter mein koi trader nahi.</p>`}
+    </section>
+    ${sel.size?`<div class="adm-bulkbar" role="region" aria-label="Selected traders"><span><b>${sel.size}</b> selected</span><button type="button" class="btn-secondary btn-small" data-action="admin-clear-selection">Hatao</button><button type="button" class="btn-danger" data-action="admin-delete-selected">🗑️ Delete ${sel.size}</button></div>`:''}
+    ${renderAdminConfirm()}`;
+}
+function renderAdminConfirm(){
+  const a=adminState(), c=a.confirm; if(!c) return '';
+  const users=c.ids.map(id=>a.users.find(u=>u.id===id) || (a.detail?.user?.id===id?{...a.detail.user,...a.detail.stats}:null)).filter(Boolean);
+  const trades=users.reduce((x,u)=>x+(u.trades||0),0), notes=users.reduce((x,u)=>x+(u.notes||0),0);
+  const risky=trades>0||notes>0||users.length>1;
+  return `<div class="edit-overlay sm-overlay" data-action="admin-confirm-backdrop"><div class="edit-modal sm-modal adm-confirm" role="alertdialog" aria-modal="true" aria-labelledby="adm-confirm-title">
+    <div class="adm-confirm-icon" aria-hidden="true">🗑️</div>
+    <h2 id="adm-confirm-title">${users.length===1?`${esc(users[0].name||users[0].email)} ko delete karein?`:`${users.length} traders delete karein?`}</h2>
+    <p class="card-sub">Account, saare trades, notes, playbook, activity aur chart images hamesha ke liye mit jaayenge. Yeh wapas nahi hoga.</p>
+    <ul class="adm-confirm-list">${users.slice(0,6).map(u=>`<li><span class="adm-ava" aria-hidden="true">${initials(u)}</span><div><strong>${esc(u.name||'—')}</strong><small>${esc(u.email)} · ${u.trades||0} trades · ${u.notes||0} notes</small></div></li>`).join('')}${users.length>6?`<li class="more">+ ${users.length-6} aur</li>`:''}</ul>
+    ${trades||notes?`<div class="adm-confirm-warn">⚠️ Inme <b>${trades}</b> trades aur <b>${notes}</b> notes hain — yeh asli traders ho sakte hain.</div>`:''}
+    ${risky?`<label class="adm-confirm-type">Pakka karne ke liye <b>DELETE</b> likho<input id="adm-confirm-input" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="DELETE"></label>`:''}
+    <p class="sm-error" id="adm-confirm-status" role="status">${c.error?esc(c.error):''}</p>
+    <div class="sm-form-actions"><button type="button" class="btn-secondary" data-action="admin-confirm-cancel" ${c.busy?'disabled':''}>Cancel</button><button type="button" class="btn-danger adm-confirm-go" data-action="admin-confirm-delete" ${risky||c.busy?'disabled':''}>${c.busy?'Delete ho raha hai…':`Haan, delete karo`}</button></div>
+  </div></div>`;
+}
+async function runAdminDelete(){
+  const a=adminState(), c=a.confirm; if(!c||c.busy) return;
+  c.busy=true; c.error=''; renderTabOnly();
+  try{
+    const r = c.ids.length===1 ? await api(`/api/admin/users/${encodeURIComponent(c.ids[0])}`,'DELETE') : await api('/api/admin/users/delete','POST',{ids:c.ids});
+    const deleted = c.ids.length===1 ? (r.ok?1:0) : r.deleted, failed = c.ids.length===1 ? (r.ok?[]:[r]) : (r.failed||[]);
+    const gone=new Set(c.ids.filter(id=>!failed.some(f=>f.id===id)));
+    a.users=a.users.filter(u=>!gone.has(u.id)); gone.forEach(id=>a.selected.delete(id));
+    a.confirm=null; if(a.view==='user' && gone.has(a.detail?.user?.id)){ a.view='list'; a.detail=null; }
+    a.toast=`✓ ${deleted} trader${deleted===1?'':'s'} delete ho gaye${failed.length?` · ${failed.length} nahi hue (${esc(failed[0].error||'')})`:''}`;
+    renderTabOnly(); setTimeout(()=>{ a.toast=''; if(STATE.activeTab==='admin') renderTabOnly(); }, 4000);
+  }catch(e){ c.busy=false; c.error=e.message||'Delete nahi hua.'; renderTabOnly(); }
 }
 async function openAdminUser(id){
   const a=adminState(); a.view='user'; a.detail={loading:true, id}; a.detailTab='trades'; a.openNote=null;
@@ -2164,7 +2211,7 @@ function renderAdminUser(){
   const noteBody=n=>normalizeNoteBlocks(n).map(b=>b.type==='image'?(b.src?`<img src="${esc(imgUrl(b.src))}" alt="" loading="lazy" data-action="admin-view-image" data-src="${esc(b.src)}">`:''):`<div class="adm-note-text">${b.html?sanitizeNoteHtml(b.html):esc(b.text||'').replace(/\n/g,'<br>')}</div>`).join('');
   const notes=[...d.notes].sort((x,y)=>String(y.updatedAt||y.date||'').localeCompare(String(x.updatedAt||x.date||'')));
   return `<section class="card adm-user">
-    <div class="blog-post-top">${back}<span class="adm-readonly">👁 Sirf dekhne ke liye</span></div>
+    <div class="blog-post-top">${back}<div class="blog-admin-actions"><span class="adm-readonly">👁 Sirf dekhne ke liye</span>${canDelete({...u,isAdmin:a.users.find(x=>x.id===u.id)?.isAdmin})?`<button type="button" class="btn-danger btn-small" data-action="admin-delete-one" data-id="${esc(u.id)}">🗑️ Delete trader</button>`:''}</div></div>
     <div class="adm-user-head"><div class="adm-avatar" aria-hidden="true">${esc((u.name||u.email||'?').trim()[0]?.toUpperCase()||'?')}</div><div><h2>${esc(u.name||'—')}</h2><p>${esc(u.email)} · joined ${esc(timeAgo(u.createdAt))} · last active ${esc(timeAgo([u.lastSeenAt,u.lastSaveAt].filter(Boolean).sort().pop()))} · ${u.visits} visits</p></div></div>
     <div class="pb-stats adm-stats">
       <div><span>Trades</span><strong>${s.closed}${s.open?`<small> +${s.open} open</small>`:''}</strong></div>
@@ -2191,7 +2238,7 @@ function renderAdminUser(){
     ${a.detailTab==='trades' ? (trades.length?`<div class="adm-trades">${trades.slice(0,a.tradeLimit||30).map(tradeRow).join('')}</div>${trades.length>(a.tradeLimit||30)?`<button type="button" class="btn-secondary btn-small adm-more" data-action="admin-more-trades">Aur dikhao (${trades.length-(a.tradeLimit||30)} baaki)</button>`:''}`:'<p class="pb-empty">Abhi koi trade nahi.</p>')
       : a.detailTab==='notes' ? (notes.length?`<div class="adm-notes">${notes.map(n=>`<div class="adm-note ${a.openNote===n.id?'open':''}"><button type="button" data-action="admin-toggle-note" data-id="${esc(n.id)}"><strong>${esc(n.title||'Untitled note')}</strong><small>${esc(n.concept||'')}${n.strategy?' · '+esc(n.strategy):''} · ${esc(timeAgo(n.updatedAt||n.date))}</small></button>${a.openNote===n.id?`<div class="adm-note-body">${noteBody(n)}</div>`:''}</div>`).join('')}</div>`:'<p class="pb-empty">Abhi koi note nahi.</p>')
       : ((d.customStrategies||[]).length?`<div class="adm-notes">${d.customStrategies.map(x=>normalizeCustomStrategy(x)).map(x=>`<div class="adm-note open"><div class="adm-note-body"><strong>${esc(x.name)}</strong>${x.entryCriteria?`<p><b>Entry:</b> ${esc(x.entryCriteria)}</p>`:''}${x.exitCriteria?`<p><b>Exit:</b> ${esc(x.exitCriteria)}</p>`:''}${(x.rules||[]).length?`<ul>${x.rules.map(r=>`<li>${esc(r)}</li>`).join('')}</ul>`:''}</div></div>`).join('')}</div>`:'<p class="pb-empty">Koi strategy save nahi.</p>')}
-  </section>`;
+  </section>${renderAdminConfirm()}`;
 }
 function exportAdminCsv(){
   const rows=[['Name','Email','Joined','Last active','Trades','Trades (7d)','Closed','Net P&L','P&L (7d)','Win %','Avg R','Rules %','Top mistake','Notes','Visits']];
@@ -2210,8 +2257,19 @@ function handleAdminClick(action, btn){
   if(action==='admin-more-trades'){ a.tradeLimit=(a.tradeLimit||30)+30; renderTabOnly(); return true; }
   if(action==='admin-view-image'){ openAnnotator(btn.dataset.src,null,null,{}); return true; }
   if(action==='admin-export'){ exportAdminCsv(); return true; }
+  if(action==='admin-select'){ const id=btn.dataset.id; btn.checked?a.selected.add(id):a.selected.delete(id); renderTabOnly(); return true; }
+  if(action==='admin-select-all'){ const ids=adminFiltered().filter(canDelete).map(u=>u.id); const all=ids.every(id=>a.selected.has(id)); ids.forEach(id=>all?a.selected.delete(id):a.selected.add(id)); renderTabOnly(); return true; }
+  if(action==='admin-select-empty'){ a.users.filter(isEmptyAccount).filter(canDelete).forEach(u=>a.selected.add(u.id)); a.filter='empty'; renderTabOnly(); return true; }
+  if(action==='admin-clear-selection'){ a.selected.clear(); renderTabOnly(); return true; }
+  if(action==='admin-delete-selected'){ a.confirm={ids:[...a.selected]}; renderTabOnly(); setTimeout(()=>$('#adm-confirm-input')?.focus(),50); return true; }
+  if(action==='admin-delete-one'){ a.confirm={ids:[btn.dataset.id]}; renderTabOnly(); setTimeout(()=>$('#adm-confirm-input')?.focus(),50); return true; }
+  if(action==='admin-confirm-cancel'){ if(!a.confirm?.busy){ a.confirm=null; renderTabOnly(); } return true; }
+  if(action==='admin-confirm-backdrop'){ return true; }
+  if(action==='admin-confirm-delete'){ runAdminDelete(); return true; }
   return false;
 }
+document.addEventListener('input', e=>{ if(e.target.id==='adm-confirm-input'){ const b=$('.adm-confirm-go'); if(b && !adminState().confirm?.busy) b.disabled = e.target.value.trim().toUpperCase()!=='DELETE'; } });
+document.addEventListener('keydown', e=>{ if(e.key==='Escape' && STATE.admin?.confirm && !STATE.admin.confirm.busy){ STATE.admin.confirm=null; renderTabOnly(); } });
 document.addEventListener('input', e=>{ if(e.target.id!=='admin-search') return; const a=adminState(); a.search=e.target.value; clearTimeout(a.t); a.t=setTimeout(()=>{ const pos=e.target.selectionStart; renderTabOnly(); const s=$('#admin-search'); if(s){ s.focus(); try{s.setSelectionRange(pos,pos);}catch(_){} } },200); });
 document.addEventListener('change', e=>{ if(e.target.id==='admin-sort'){ adminState().sort=e.target.value; renderTabOnly(); } });
 document.addEventListener('keydown', e=>{ if(e.key==='Enter' && e.target.matches?.('tr[data-action="admin-open-user"]')) e.target.click(); });

@@ -166,3 +166,13 @@ This restores the WHOLE database (trades/notes saved after that time are rolled 
 - Tracking: new `user_activity` table (last visit, last save, visit/save counts) — created automatically.
 - Security: `/api/admin/*` returns 403 for non-admins; admins may open traders' chart images, traders still only their own.
 - New files: `functions/_lib/stats.js`, `functions/api/admin/users/index.js`, `functions/api/admin/users/[id].js`.
+
+## Update 19 — Admin: delete traders + design polish
+- Checkbox on every trader (admins and yourself can't be selected), "select all" in the header, and a floating bar "N selected · 🗑️ Delete N".
+- 🧹 **Khaali accounts** banner + filter: finds accounts with 0 trades and 0 notes (test / temporary sign-ups) and selects them in one tap.
+- **Delete trader** button on a trader's page too.
+- Safe confirmation: shows who will be deleted with their trade/note counts, warns if they have data, and asks you to type **DELETE** when deleting several or any account with data. Esc / Cancel backs out.
+- Deleting removes the account, sessions, journal, session notes, activity, login attempts and their chart images in R2. The person can't log in any more.
+- Server: `DELETE /api/admin/users/<id>`, `POST /api/admin/users/delete {ids}` (max 200); admin-only; refuses admin accounts and your own.
+- Look: dark header, status pills (Aaj active / Active / Gayab / Inactive / Naya / Admin), avatars, rules progress bar, KPI icons; phone layout shows traders as compact cards; bottom bar fits 8 tabs.
+- New files: `functions/_lib/admin-delete.js`, `functions/api/admin/users/delete.js`.
