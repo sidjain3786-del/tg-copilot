@@ -291,7 +291,8 @@ let authMode = 'login';
 
 function showLoading(){ $('#loading-screen').style.display='flex'; $('#auth-screen').style.display='none'; $('#app-screen').style.display='none'; }
 function showAuth(){ $('#loading-screen').style.display='none'; $('#auth-screen').style.display='flex'; $('#app-screen').style.display='none'; }
-function showApp(){ $('#loading-screen').style.display='none'; $('#auth-screen').style.display='none'; $('#app-screen').style.display='block'; render(); }
+function showApp(){
+  setTimeout(()=>{ if(STATE.user) loadBlog(); }, 800); $('#loading-screen').style.display='none'; $('#auth-screen').style.display='none'; $('#app-screen').style.display='block'; render(); }
 
 function setAuthMode(mode){
   authMode = mode;
@@ -328,7 +329,7 @@ $('#auth-form').addEventListener('submit', async (e) => {
 
 $('#logout-btn').addEventListener('click', async () => {
   try { await api('/api/logout', 'POST'); } catch (e) { console.warn('Logout request failed', e); }
-  IMAGE_URL_CACHE.clear(); IMAGE_STORE_AVAILABLE = true;
+  IMAGE_URL_CACHE.clear(); IMAGE_STORE_AVAILABLE = true; STATE.blog = null;
   STATE.user = null; STATE.trades = []; STATE.notes = []; STATE.customStrategies = []; STATE.sessionNotes = {};
   setAuthMode('login');
   showAuth();
@@ -795,18 +796,20 @@ const TABS = [
   {id:'notes', label:'🧾 Notes & Learnings'},
   {id:'history', label:'📜 Trade History Log'},
   {id:'analysis', label:'📊 Daily & Session Analysis'},
-  {id:'risk', label:'🛡️ Risk Center'}
+  {id:'risk', label:'🛡️ Risk Center'},
+  {id:'blog', label:'📰 Blog'}
 ];
 function renderTabNav(){
   $('#tab-nav').innerHTML = TABS.map(t =>
-    `<button class="tab-btn ${STATE.activeTab===t.id?'active':''}" data-action="set-tab" data-tab="${t.id}">${t.label}</button>`
+    `<button class="tab-btn ${STATE.activeTab===t.id?'active':''}" data-action="set-tab" data-tab="${t.id}">${t.label}${t.id==='blog'&&STATE.blog?.loaded&&blogUnreadCount()?`<span class="tab-dot" aria-label="${blogUnreadCount()} new posts">${blogUnreadCount()}</span>`:''}</button>`
   ).join('');
   try { placeTabIndicator(); } catch (e) { console.warn('indicator skipped', e); }
-  const mobileIcons = {copilot:'⚡',log:'➕',notes:'🧠',history:'📜',analysis:'📊',risk:'🛡️'};
-  const mobileLabels = {copilot:'Co-Pilot',log:'Log Trade',notes:'Notes',history:'History',analysis:'Analysis',risk:'Risk'};
+  const mobileIcons = {copilot:'⚡',log:'➕',notes:'🧠',history:'📜',analysis:'📊',risk:'🛡️',blog:'📰'};
+  const mobileLabels = {copilot:'Co-Pilot',log:'Log',notes:'Notes',history:'History',analysis:'Analysis',risk:'Risk',blog:'Blog'};
+  const unread = STATE.blog?.loaded ? blogUnreadCount() : 0;
   const mobile = $('#mobile-tab-nav');
   if (mobile) mobile.innerHTML = TABS.map(t =>
-    `<button class="mobile-tab-btn ${STATE.activeTab===t.id?'active':''}" data-action="set-tab" data-tab="${t.id}"><span class="mobile-tab-icon">${mobileIcons[t.id]}</span><span>${mobileLabels[t.id]}</span></button>`
+    `<button class="mobile-tab-btn ${STATE.activeTab===t.id?'active':''}" data-action="set-tab" data-tab="${t.id}"><span class="mobile-tab-icon">${mobileIcons[t.id]}${t.id==='blog'&&unread?'<i class="tab-dot-mini" aria-hidden="true"></i>':''}</span><span>${mobileLabels[t.id]}</span></button>`
   ).join('');
 }
 
@@ -1019,7 +1022,7 @@ function renderLogTab(){
         <div class="field grid-3 fast-journal-time-fields">
           <div><label>Trade Date &amp; Time <span class="optional-label">used for session analysis</span></label><input type="datetime-local" id="log-trade-datetime" value="${esc(localDateTimeInputValue())}"></div>
           <div><label>Exit Reason <span class="optional-label">optional</span></label><input type="text" id="log-exit-reason" placeholder="Target, SL, manual, time, news..."></div>
-          <div><label>Quick Note <span class="optional-label">optional</span></label><textarea id="log-notes" rows="2" placeholder="Kya sahi hua? Kya improve karna hai?"></textarea></div>
+          <div><label class="voice-label">Quick Note <span class="optional-label">optional</span><button type="button" class="voice-btn voice-btn-inline" data-action="voice-type" data-voice-for="log-notes" title="Bolkar likho" aria-label="Voice typing" aria-pressed="false">🎤</button></label><textarea id="log-notes" rows="2" placeholder="Kya sahi hua? Kya improve karna hai? (🎤 se bol bhi sakte ho)"></textarea></div>
         </div>
 
         <div class="fast-journal-emotion">
@@ -1185,6 +1188,7 @@ function renderNotesTab(){
               <select class="note-font-size" data-note-font-size aria-label="Text size"><option value="14px">14</option><option value="16px" selected>16</option><option value="18px">18</option><option value="22px">22</option><option value="28px">28</option></select>
               <button type="button" class="note-format-btn note-highlight-btn" data-note-format="highlight" title="Highlight selected text">🖍️</button>
               <button type="button" class="note-format-btn" data-note-format="clear-format" title="Clear formatting">Tx</button>
+              <button type="button" class="note-format-btn voice-btn" data-action="voice-type" data-voice-for="${esc(active.id)}:${i}" title="Bolkar likho (voice typing)" aria-label="Voice typing" aria-pressed="false">🎤</button>
             </div>
             <div class="note-live-editor-text" contenteditable="true" spellcheck="true" data-live-note-text="${active.id}" data-index="${i}" data-placeholder="Write something…">${b.html||''}</div>
             <button type="button" class="note-text-remove" data-action="remove-live-note-block" data-note-id="${active.id}" data-index="${i}" title="Remove text">×</button>
@@ -1314,7 +1318,7 @@ function renderEditTradeModal(id){
     <div class="field grid-3"><div><label>Symbol</label><input id="edit-symbol" value="${esc(t.symbol)}"></div><div><label>Direction</label><select id="edit-type"><option ${t.type==='LONG'?'selected':''}>LONG</option><option ${t.type==='SHORT'?'selected':''}>SHORT</option></select></div><div><label>Quantity</label><input type="number" step="any" id="edit-qty" value="${t.quantity??''}"></div></div>
     <div class="field grid-3"><div><label>Entry</label><input type="number" step="any" id="edit-entry" value="${t.entryPrice??''}"></div><div><label>Exit</label><input type="number" step="any" id="edit-exit" value="${t.exitPrice??''}"></div><div><label>SL</label><input type="number" step="any" id="edit-sl" value="${t.stopLoss??''}"></div></div>
     <div class="field grid-3"><div><label>Trade date &amp; time</label><input type="datetime-local" id="edit-trade-datetime" value="${esc(tradeTimeInputValue(t))}"></div><div><label>Strategy</label><select id="edit-strategy">${editStrategyOptions(t)}</select></div><div><label>Mistake</label><select id="edit-mistake">${MISTAKE_OPTIONS.map(x=>`<option value="${x[0]}" ${(t.mistake||'none')===x[0]?'selected':''}>${esc(x[1])}</option>`).join('')}</select></div></div>
-    <div class="field grid-2"><div><label>Execution quality</label><select id="edit-quality">${[1,2,3,4,5].map(n=>`<option value="${n}" ${Number(t.quality||3)===n?'selected':''}>${'⭐'.repeat(n)} ${n}/5</option>`).join('')}</select></div><div><label>Quick note</label><textarea id="edit-notes" rows="2" placeholder="Kya sahi hua? Kya improve karna hai?">${esc(t.notes||'')}</textarea></div></div>
+    <div class="field grid-2"><div><label>Execution quality</label><select id="edit-quality">${[1,2,3,4,5].map(n=>`<option value="${n}" ${Number(t.quality||3)===n?'selected':''}>${'⭐'.repeat(n)} ${n}/5</option>`).join('')}</select></div><div><label class="voice-label">Quick note<button type="button" class="voice-btn voice-btn-inline" data-action="voice-type" data-voice-for="edit-notes" title="Bolkar likho" aria-label="Voice typing" aria-pressed="false">🎤</button></label><textarea id="edit-notes" rows="2" placeholder="Kya sahi hua? Kya improve karna hai?">${esc(t.notes||'')}</textarea></div></div>
     <div class="field"><label>Emotion(s)</label><div class="emotion-pills edit-emotions">${presets.map(x=>`<button type="button" class="emotion-pill ${(tradeEmotions(t).includes(x))?'selected':''}" data-action="toggle-edit-emotion" data-value="${esc(x)}">${esc(x)}</button>`).join('')}</div><input type="text" id="edit-custom-emotion" value="${esc(tradeEmotions(t).filter(x=>!presets.includes(x)).join(', '))}" placeholder="Custom emotions, comma separated"></div>
     <div class="field grid-2"><div><label>Exit Reason</label><input id="edit-exit-reason" value="${esc(t.exitReason||'')}" placeholder="Target / SL / manual / time..."></div><div><label>Images</label><div class="edit-images-list" id="edit-images-list">${imgs.map((src,i)=>`<div class="edit-image-item"><img src="${esc(imgUrl(src))}" data-src="${esc(src)}"><button type="button" data-action="remove-edit-image" data-index="${i}">×</button></div>`).join('')}<label class="edit-add-image">+ Add<input type="file" id="edit-multi-image-file" accept="image/*" multiple style="display:none"></label></div></div></div>
     <div class="edit-modal-actions"><button type="button" class="btn-secondary" data-action="cancel-edit-trade">Cancel</button><button type="button" class="btn-primary" data-action="update-trade" data-id="${esc(id)}">💾 Update Trade</button></div>
@@ -1654,6 +1658,317 @@ async function downloadWeeklyReport(){
   }
 }
 
+
+/* ---------------- voice typing ----------------
+   Like the keyboard mic: speak and the words are typed into the note.
+   Uses the browser's speech recognition (Chrome / Edge / Android / Safari).
+   Commands: "full stop" . | "comma" , | "question mark" ? | "new line" ↵ */
+const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+const VOICE = { rec:null, target:null, kind:null, lang:(()=>{ try { return localStorage.getItem('tc_voice_lang') || 'en-IN'; } catch(_) { return 'en-IN'; } })(), btn:null, wantStop:false, startedAt:0, typed:false };
+const VOICE_COMMANDS = [
+  [/\s*\b(full ?stop|period|purn ?viram)\b\s*/gi, '. '],
+  [/\s*\b(comma|koma)\b\s*/gi, ', '],
+  [/\s*\b(question mark|prashn ?chinh)\b\s*/gi, '? '],
+  [/\s*\b(exclamation mark)\b\s*/gi, '! '],
+  [/\s*\b(new ?line|next ?line|nayi line|agli line)\b\s*/gi, '\n']
+];
+function voiceCleanup(text, prevChar){
+  let t=' '+text.trim()+' ';
+  VOICE_COMMANDS.forEach(([re,rep])=>{ t=t.replace(re, rep); });
+  t=t.replace(/[ \t]+\n/g,'\n').replace(/\n[ \t]+/g,'\n').replace(/ +([.,?!])/g,'$1').replace(/[ \t]{2,}/g,' ').replace(/^ +/,'');
+  const startSentence = !prevChar || /[.?!\n]\s*$/.test(prevChar);
+  if(startSentence) t=t.replace(/^([a-z])/, c=>c.toUpperCase());
+  t=t.replace(/([.?!]\s+|\n)([a-z])/g, (m,a,c)=>a+c.toUpperCase());
+  const needSpace = prevChar && !/\s$/.test(prevChar) && !/^[\n.,?!]/.test(t);
+  return (needSpace?' ':'') + t.replace(/[ \t]+$/,'');
+}
+function charBeforeCaret(el){
+  if(el.tagName==='TEXTAREA'||el.tagName==='INPUT') return el.value.slice(0, el.selectionStart ?? el.value.length).slice(-2);
+  const sel=window.getSelection(); if(!sel||!sel.rangeCount||!el.contains(sel.anchorNode)) return (el.innerText||'').slice(-2);
+  const r=sel.getRangeAt(0).cloneRange(); r.selectNodeContents(el); r.setEnd(sel.anchorNode, sel.anchorOffset); return r.toString().slice(-2);
+}
+function placeCaretAtEnd(el){ el.focus(); const r=document.createRange(); r.selectNodeContents(el); r.collapse(false); const s=window.getSelection(); s.removeAllRanges(); s.addRange(r); }
+function voiceInsert(text){
+  const el=VOICE.target; if(!el||!el.isConnected||!text) return;
+  const prev=charBeforeCaret(el), out=voiceCleanup(text, prev); if(!out.trim() && out!=='\n') return;
+  VOICE.typed=true;
+  if(el.tagName==='TEXTAREA'||el.tagName==='INPUT'){
+    const s=el.selectionStart ?? el.value.length, e2=el.selectionEnd ?? s;
+    el.setRangeText(out, s, e2, 'end'); el.dispatchEvent(new Event('input',{bubbles:true})); return;
+  }
+  if(document.activeElement!==el){ if(el._savedRange){ el.focus(); const s=window.getSelection(); s.removeAllRanges(); s.addRange(el._savedRange); } else placeCaretAtEnd(el); }
+  const parts=out.split('\n');
+  parts.forEach((part,i)=>{
+    if(i>0){ if(!document.execCommand('insertLineBreak')) document.execCommand('insertHTML', false, '<br>'); }
+    if(part && !document.execCommand('insertText', false, part)){
+      const sel=window.getSelection(), r=sel.getRangeAt(0); r.deleteContents(); r.insertNode(document.createTextNode(part)); r.collapse(false);
+    }
+  });
+  noteSelectionStore(el);
+  el.dispatchEvent(new Event('input',{bubbles:true}));
+}
+function voiceBubble(text, state){
+  let b=$('#voice-bubble');
+  if(!b){ b=document.createElement('div'); b.id='voice-bubble'; b.className='voice-bubble'; b.setAttribute('role','status'); b.innerHTML=`<span class="voice-dot" aria-hidden="true"></span><span class="voice-text"></span><button type="button" class="voice-lang" data-action="voice-lang" title="Bhasha badlo"></button><button type="button" class="voice-stop" data-action="voice-stop">Stop</button>`; document.body.appendChild(b); }
+  b.querySelector('.voice-text').textContent=text;
+  b.querySelector('.voice-lang').textContent = VOICE.lang==='hi-IN' ? 'हिंदी' : 'EN/Hinglish';
+  b.dataset.state=state||'listening';
+  b.hidden=false;
+}
+function hideVoiceBubble(){ const b=$('#voice-bubble'); if(b) b.hidden=true; }
+function setVoiceButtons(on){ $$('[data-action="voice-type"]').forEach(x=>{ const mine = on && VOICE.target && x.dataset.voiceFor && (x.dataset.voiceFor===VOICE.target.id || x.dataset.voiceFor===`${VOICE.target.dataset.liveNoteText}:${VOICE.target.dataset.index}`); x.classList.toggle('is-listening', !!mine); x.setAttribute('aria-pressed', mine?'true':'false'); }); }
+function stopVoice(){ VOICE.wantStop=true; try { VOICE.rec?.stop(); } catch(_) {} }
+function voiceTargetFor(btn){
+  const key=btn.dataset.voiceFor||'';
+  if(key.includes(':')){ const [id,idx]=key.split(':'); return document.querySelector(`[data-live-note-text="${CSS.escape(id)}"][data-index="${CSS.escape(idx)}"]`); }
+  return document.getElementById(key);
+}
+function startVoice(btn){
+  if(!SpeechRec){ alert('🎤 Is browser mein voice typing nahi chalti.\n\nChrome (Android / laptop), Edge ya iPhone Safari use karo — ya keyboard ka 🎤 mic button dabao.'); return; }
+  if(!window.isSecureContext){ alert('🎤 Voice typing ke liye site https par honi chahiye.'); return; }
+  const target=voiceTargetFor(btn); if(!target) return;
+  if(VOICE.rec){ const same=VOICE.target===target; stopVoice(); if(same) return; }
+  VOICE.target=target; VOICE.wantStop=false; VOICE.typed=false; VOICE.startedAt=Date.now();
+  if(target.isContentEditable && !target.contains(window.getSelection()?.anchorNode) && !target._savedRange) placeCaretAtEnd(target);
+  const rec=new SpeechRec(); VOICE.rec=rec;
+  rec.lang=VOICE.lang; rec.continuous=true; rec.interimResults=true; rec.maxAlternatives=1;
+  rec.onstart=()=>{ setVoiceButtons(true); voiceBubble('Bolo… main likh raha hoon', 'listening'); };
+  rec.onresult=(ev)=>{
+    let interim='';
+    for(let i=ev.resultIndex;i<ev.results.length;i++){
+      const r=ev.results[i], txt=r[0]?.transcript||'';
+      if(r.isFinal) voiceInsert(txt); else interim+=txt;
+    }
+    voiceBubble(interim ? interim : 'Bolo… main likh raha hoon', 'listening');
+  };
+  rec.onerror=(ev)=>{
+    const msg = ev.error==='not-allowed'||ev.error==='service-not-allowed' ? 'Mic ki permission nahi mili. Browser settings mein is site ko Microphone allow karo.'
+      : ev.error==='no-speech' ? 'Kuch sunai nahi diya. Mic ke paas bolke dobara try karo.'
+      : ev.error==='network' ? 'Voice typing ke liye internet chahiye.'
+      : ev.error==='audio-capture' ? 'Mic nahi mila. Koi aur app mic use to nahi kar raha?'
+      : ev.error==='aborted' ? '' : `Voice typing ruk gayi (${ev.error}).`;
+    if(msg){ voiceBubble(msg,'error'); VOICE.wantStop=true; setTimeout(()=>{ if(!VOICE.rec) hideVoiceBubble(); }, 3500); }
+  };
+  rec.onend=()=>{
+    // Android Chrome stops after a pause; keep listening until the user taps Stop (max 5 min).
+    if(!VOICE.wantStop && Date.now()-VOICE.startedAt < 5*60*1000 && VOICE.target?.isConnected){ try { rec.start(); return; } catch(_) {} }
+    VOICE.rec=null; setVoiceButtons(false);
+    const b=$('#voice-bubble'); if(b && b.dataset.state!=='error') hideVoiceBubble();
+    VOICE.target=null;
+  };
+  try { rec.start(); } catch(e){ VOICE.rec=null; alert('🎤 Voice typing shuru nahi ho payi: '+(e.message||e)); }
+}
+function toggleVoiceLang(){
+  VOICE.lang = VOICE.lang==='hi-IN' ? 'en-IN' : 'hi-IN';
+  try { localStorage.setItem('tc_voice_lang', VOICE.lang); } catch(_) {}
+  if(VOICE.rec && VOICE.target){ const t=VOICE.target, btn=$$('[data-action="voice-type"]').find(x=>voiceTargetFor(x)===t); stopVoice(); setTimeout(()=>{ if(btn) startVoice(btn); }, 350); }
+  else voiceBubble(VOICE.lang==='hi-IN'?'Ab Hindi (देवनागरी) mein likhega':'Ab English / Hinglish mein likhega','listening');
+}
+// keep the caret in the note when the mic button is pressed
+document.addEventListener('mousedown', e=>{ if(e.target.closest('[data-action="voice-type"],#voice-bubble button')) e.preventDefault(); });
+
+
+/* ---------------- blog ----------------
+   Admin (ADMIN_EMAILS) writes posts; every trader reads them in the app.
+   Posts are blocks (paragraph, heading, image, quote, list, tip, divider) —
+   inline **bold**, *italic* and [link](https://…) only, so posts can't carry code. */
+const BLOG_BLOCKS = [
+  ['p','¶ Paragraph'],['h2','H Heading'],['h3','h Sub-heading'],['img','🖼 Image'],['list','• List'],['quote','❝ Quote'],['callout','💡 Tip box'],['divider','— Divider']
+];
+function blogState(){ return STATE.blog || (STATE.blog = { posts:[], loaded:false, loading:false, hasMore:false, view:'list', current:null, editing:null, preview:false, tag:'ALL', search:'', dirty:false }); }
+function isAdmin(){ return !!STATE.user?.isAdmin; }
+function blogSeenAt(){ try { return localStorage.getItem('tc_blog_seen') || ''; } catch(_) { return ''; } }
+function markBlogSeen(){ const top=blogState().posts.filter(p=>p.status==='published').map(p=>p.publishedAt).sort().pop(); if(top){ try { localStorage.setItem('tc_blog_seen', top); } catch(_) {} } }
+function blogUnreadCount(){ const seen=blogSeenAt(); return blogState().posts.filter(p=>p.status==='published' && (!seen || p.publishedAt>seen)).length; }
+function inlineMd(text){
+  // escape first, then allow a tiny safe subset
+  let h=esc(text);
+  h=h.replace(/\[([^\]]{1,200})\]\((https?:\/\/[^\s)]{1,500})\)/g,(m,t,u)=>`<a href="${u}" target="_blank" rel="noopener noreferrer nofollow">${t}</a>`);
+  h=h.replace(/\*\*([^*]{1,500})\*\*/g,'<strong>$1</strong>').replace(/(^|[^*])\*([^*\n]{1,300})\*(?!\*)/g,'$1<em>$2</em>');
+  return h.replace(/\n/g,'<br>');
+}
+function blogImgSrc(src){ return esc(src||''); }
+function renderBlogBlocks(blocks){
+  return (blocks||[]).map(b=>{
+    if(b.type==='h2') return `<h2>${inlineMd(b.text)}</h2>`;
+    if(b.type==='h3') return `<h3>${inlineMd(b.text)}</h3>`;
+    if(b.type==='quote') return `<blockquote>${inlineMd(b.text)}</blockquote>`;
+    if(b.type==='callout') return `<div class="blog-callout"><span aria-hidden="true">💡</span><div>${inlineMd(b.text)}</div></div>`;
+    if(b.type==='list') return `<ul>${(b.items||[]).map(x=>`<li>${inlineMd(x)}</li>`).join('')}</ul>`;
+    if(b.type==='divider') return `<hr>`;
+    if(b.type==='img') return b.src?`<figure><img src="${blogImgSrc(b.src)}" alt="${esc(b.caption||'')}" loading="lazy" data-action="view-blog-image" data-src="${esc(b.src)}">${b.caption?`<figcaption>${esc(b.caption)}</figcaption>`:''}</figure>`:'';
+    return `<p>${inlineMd(b.text)}</p>`;
+  }).join('');
+}
+function fmtBlogDate(iso){ if(!iso) return ''; const d=new Date(iso); return Number.isNaN(d.getTime())?'':d.toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}); }
+async function loadBlog(force=false){
+  const b=blogState(); if(b.loading || (b.loaded && !force)) return;
+  b.loading=true;
+  try { const d=await api(`/api/blog?limit=50${isAdmin()?'&all=1':''}`); b.posts=d.posts||[]; b.hasMore=!!d.hasMore; b.loaded=true; b.error=''; }
+  catch(e){ b.error=e.message||'Blog load nahi hua.'; }
+  finally { b.loading=false; }
+  if(STATE.activeTab==='blog' && b.view==='list') { renderTabOnly(); markBlogSeen(); }
+  else renderTabNav();
+}
+function blogTags(){ const s=new Set(); blogState().posts.forEach(p=>(p.tags||[]).forEach(t=>s.add(t))); return [...s].sort(); }
+function renderBlogTab(){
+  const b=blogState();
+  if(b.view==='edit' && isAdmin()) return renderBlogEditor();
+  if(b.view==='post' && b.current) return renderBlogPost(b.current);
+  if(!b.loaded){ setTimeout(()=>loadBlog(),0); return `<section class="card blog-head"><h2 class="section-title">📰 Trader's Blog</h2><p class="card-sub">${b.error?esc(b.error):'Load ho raha hai…'}</p>${b.error?'<button class="btn-secondary btn-small" data-action="blog-reload">Dobara try karo</button>':''}</section>`; }
+  const q=b.search.trim().toLowerCase();
+  const list=b.posts.filter(p=>(b.tag==='ALL'||(p.tags||[]).includes(b.tag)) && (!q || [p.title,p.excerpt,(p.tags||[]).join(' ')].join(' ').toLowerCase().includes(q)));
+  const seen=blogSeenAt(), tags=blogTags();
+  const card=p=>`<article class="blog-card ${p.status==='draft'?'is-draft':''}" data-action="open-blog-post" data-id="${esc(p.id)}" tabindex="0" role="button" aria-label="${esc(p.title)}">
+      ${p.cover?`<div class="blog-card-cover"><img src="${blogImgSrc(p.cover)}" alt="" loading="lazy"></div>`:`<div class="blog-card-cover blog-card-cover-empty" aria-hidden="true">📰</div>`}
+      <div class="blog-card-body">
+        <div class="blog-card-meta">${p.status==='draft'?'<span class="blog-badge draft">Draft</span>':''}${p.status==='published'&&(!seen||p.publishedAt>seen)?'<span class="blog-badge new">New</span>':''}<span>${fmtBlogDate(p.publishedAt||p.updatedAt)}</span><span>· ${p.readMinutes} min read</span></div>
+        <h3>${esc(p.title)}</h3>
+        <p>${esc(p.excerpt)}</p>
+        ${(p.tags||[]).length?`<div class="blog-tags">${p.tags.map(t=>`<span>#${esc(t)}</span>`).join('')}</div>`:''}
+      </div>
+    </article>`;
+  return `<section class="blog-head card">
+      <div><h2 class="section-title">📰 Trader's Blog</h2><p class="card-sub">Setups, psychology aur market lessons — padho, seekho, apply karo.</p></div>
+      ${isAdmin()?`<button type="button" class="btn-primary" data-action="new-blog-post">＋ New post</button>`:''}
+    </section>
+    <div class="blog-filters">
+      <input type="search" id="blog-search" value="${esc(b.search)}" placeholder="🔍 Blog mein search karo…" aria-label="Search blog">
+      ${tags.length?`<div class="blog-tag-row"><button type="button" class="${b.tag==='ALL'?'active':''}" data-action="blog-tag" data-tag="ALL">All</button>${tags.map(t=>`<button type="button" class="${b.tag===t?'active':''}" data-action="blog-tag" data-tag="${esc(t)}">#${esc(t)}</button>`).join('')}</div>`:''}
+    </div>
+    ${list.length?`<div class="blog-grid">${list.map(card).join('')}</div>`:`<div class="card blog-empty">${b.posts.length?'Is search/tag mein koi post nahi.':(isAdmin()?'Abhi koi post nahi. ＋ New post se pehli post likho.':'Abhi koi post nahi aayi. Jaldi aayegi!')}</div>`}`;
+}
+function renderBlogPost(p){
+  return `<article class="blog-post card">
+    <div class="blog-post-top"><button type="button" class="btn-secondary btn-small" data-action="blog-back">‹ Sab posts</button>${isAdmin()?`<div class="blog-admin-actions"><span class="blog-badge ${p.status==='draft'?'draft':'live'}">${p.status==='draft'?'Draft':'Live'}</span><span class="blog-views">👁 ${p.views||0}</span><button type="button" class="btn-secondary btn-small" data-action="edit-blog-post" data-id="${esc(p.id)}">✏️ Edit</button></div>`:''}</div>
+    ${p.cover?`<img class="blog-post-cover" src="${blogImgSrc(p.cover)}" alt="" data-action="view-blog-image" data-src="${esc(p.cover)}">`:''}
+    <header><h1>${esc(p.title)}</h1><p class="blog-post-meta">${esc(p.authorName||'Admin')} · ${fmtBlogDate(p.publishedAt||p.updatedAt)} · ${p.readMinutes} min read</p>${(p.tags||[]).length?`<div class="blog-tags">${p.tags.map(t=>`<span>#${esc(t)}</span>`).join('')}</div>`:''}</header>
+    <div class="blog-body">${renderBlogBlocks(p.blocks)}</div>
+    <div class="blog-post-end"><button type="button" class="btn-secondary" data-action="blog-back">‹ Aur posts padho</button></div>
+  </article>`;
+}
+function newBlogDraft(){ return { id:null, title:'', excerpt:'', cover:'', tags:'', status:'draft', blocks:[{type:'p',text:''}] }; }
+function renderBlogEditor(){
+  const b=blogState(), d=b.editing;
+  const blockEditor=(blk,i)=>{
+    const head=`<div class="be-head"><span>${esc((BLOG_BLOCKS.find(x=>x[0]===blk.type)||[0,blk.type])[1])}</span><div><button type="button" data-action="blog-block-move" data-index="${i}" data-dir="-1" aria-label="Move up" ${i===0?'disabled':''}>↑</button><button type="button" data-action="blog-block-move" data-index="${i}" data-dir="1" aria-label="Move down" ${i===d.blocks.length-1?'disabled':''}>↓</button><button type="button" data-action="blog-block-del" data-index="${i}" aria-label="Delete block">✕</button></div></div>`;
+    if(blk.type==='divider') return `<div class="be-block">${head}<hr></div>`;
+    if(blk.type==='img') return `<div class="be-block">${head}${blk.src?`<img class="be-img" src="${blogImgSrc(blk.src)}" alt="">`:''}<div class="be-img-actions"><button type="button" class="btn-secondary btn-small" data-action="blog-pick-image" data-target="block" data-index="${i}">📁 ${blk.src?'Badlo':'Upload'}</button><input type="url" placeholder="🔗 ya image / TradingView link…" data-blog-link="${i}"><button type="button" class="btn-secondary btn-small" data-action="blog-image-link" data-target="block" data-index="${i}">Add</button></div><input class="be-caption" data-block-index="${i}" data-block-field="caption" value="${esc(blk.caption||'')}" placeholder="Caption (optional)"></div>`;
+    const ph={p:'Likhna shuru karo… (**bold**, *italic*, [link](https://…))',h2:'Heading',h3:'Sub-heading',quote:'Quote…',callout:'Tip / important baat…',list:'Har point nayi line mein'}[blk.type];
+    const val=blk.type==='list'?(blk.items||[]).join('\n'):(blk.text||'');
+    return `<div class="be-block be-${blk.type}">${head}<textarea data-block-index="${i}" data-block-field="${blk.type==='list'?'items':'text'}" rows="${blk.type==='h2'||blk.type==='h3'?1:blk.type==='p'?4:3}" placeholder="${esc(ph)}">${esc(val)}</textarea></div>`;
+  };
+  const preview={...d, tags:String(d.tags||'').split(',').map(x=>x.trim()).filter(Boolean), blocks:d.blocks.map(x=>x.type==='list'?{...x,items:(x.items||[]).filter(Boolean)}:x), authorName:STATE.user?.name, readMinutes:Math.max(1,Math.round(d.blocks.map(x=>x.text||(x.items||[]).join(' ')).join(' ').split(/\s+/).filter(Boolean).length/200)), publishedAt:new Date().toISOString()};
+  return `<section class="card blog-editor">
+    <div class="blog-post-top"><button type="button" class="btn-secondary btn-small" data-action="blog-editor-close">‹ Wapas</button>
+      <div class="blog-admin-actions"><span class="blog-badge ${d.status==='published'?'live':'draft'}">${d.status==='published'?'Live':'Draft'}</span><button type="button" class="btn-secondary btn-small" data-action="blog-preview">${b.preview?'✏️ Edit':'👁 Preview'}</button></div></div>
+    ${b.preview ? `<div class="blog-post blog-preview">${preview.cover?`<img class="blog-post-cover" src="${blogImgSrc(preview.cover)}" alt="">`:''}<header><h1>${esc(preview.title||'Untitled')}</h1><p class="blog-post-meta">${esc(preview.authorName||'')} · ${preview.readMinutes} min read</p></header><div class="blog-body">${renderBlogBlocks(preview.blocks)}</div></div>` : `
+    <input class="be-title" data-blog-field="title" value="${esc(d.title)}" placeholder="Post ka title…" maxlength="160">
+    <div class="be-row"><label>Short summary <small>(list mein dikhega — khaali chhodo to pehla paragraph)</small><textarea data-blog-field="excerpt" rows="2" maxlength="400">${esc(d.excerpt)}</textarea></label></div>
+    <div class="be-row be-row-2"><label>Tags <small>(comma se alag: Psychology, ORB)</small><input data-blog-field="tags" value="${esc(d.tags)}" placeholder="Psychology, Risk"></label>
+      <div class="be-cover"><span>Cover image</span>${d.cover?`<img src="${blogImgSrc(d.cover)}" alt="">`:''}<div class="be-img-actions"><button type="button" class="btn-secondary btn-small" data-action="blog-pick-image" data-target="cover">📁 ${d.cover?'Badlo':'Upload'}</button>${d.cover?`<button type="button" class="btn-secondary btn-small" data-action="blog-cover-remove">Hatao</button>`:''}<input type="url" placeholder="🔗 image link…" data-blog-link="cover"><button type="button" class="btn-secondary btn-small" data-action="blog-image-link" data-target="cover">Add</button></div></div></div>
+    <div class="be-blocks">${d.blocks.map(blockEditor).join('')}</div>
+    <div class="be-add">${BLOG_BLOCKS.map(([t,l])=>`<button type="button" class="btn-secondary btn-small" data-action="blog-block-add" data-type="${t}">${l}</button>`).join('')}</div>
+    <input type="file" id="blog-image-file" accept="image/*" hidden>`}
+    <p class="sm-error" id="blog-status" role="status"></p>
+    <div class="be-actions">
+      ${d.id?`<button type="button" class="btn-danger btn-small" data-action="blog-delete">Delete</button>`:'<span></span>'}
+      <div>${d.status==='published'?`<button type="button" class="btn-secondary" data-action="blog-save" data-status="draft">Unpublish</button><button type="button" class="btn-primary" data-action="blog-save" data-status="published">Update post</button>`:`<button type="button" class="btn-secondary" data-action="blog-save" data-status="draft">Save draft</button><button type="button" class="btn-primary" data-action="blog-save" data-status="published">🚀 Publish</button>`}</div>
+    </div>
+  </section>`;
+}
+async function openBlogPost(id){
+  const b=blogState(); b.view='post'; b.current=b.posts.find(p=>p.id===id)||null;
+  renderTabOnly(); window.scrollTo({top:0,behavior:REDUCED_MOTION?'auto':'smooth'});
+  try { const d=await api(`/api/blog/${encodeURIComponent(id)}`); b.current=d.post; const i=b.posts.findIndex(p=>p.id===id); if(i>=0) b.posts[i]={...b.posts[i], views:d.post.views}; if(STATE.activeTab==='blog'&&b.view==='post') renderTabOnly(); }
+  catch(e){ if(!b.current?.blocks){ b.view='list'; renderTabOnly(); alert(e.message||'Post load nahi hui.'); } }
+}
+async function editBlogPost(id){
+  const b=blogState();
+  let p=b.current?.id===id&&b.current.blocks?b.current:null;
+  if(!p){ try { p=(await api(`/api/blog/${encodeURIComponent(id)}`)).post; } catch(e){ alert(e.message); return; } }
+  b.editing={ id:p.id, title:p.title, excerpt:p.excerpt, cover:p.cover, tags:(p.tags||[]).join(', '), status:p.status, blocks:(p.blocks&&p.blocks.length?structuredClone(p.blocks):[{type:'p',text:''}]) };
+  b.view='edit'; b.preview=false; b.dirty=false; renderTabOnly();
+}
+function leaveBlogEditor(){
+  const b=blogState();
+  if(b.dirty && !confirm('Save nahi kiya hua badlav chala jayega. Wapas jaayein?')) return false;
+  b.editing=null; b.dirty=false; b.view=b.current?'post':'list'; return true;
+}
+async function blogUploadImage(payload){
+  const res=await fetch('/api/blog/upload',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify(payload)});
+  const d=await res.json().catch(()=>({})); if(!res.ok) throw new Error(d.error||'Image upload nahi hui.'); return d.url;
+}
+function setBlogImage(target, index, url){
+  const d=blogState().editing; if(!d) return;
+  if(target==='cover') d.cover=url; else if(d.blocks[index]) d.blocks[index].src=url;
+  blogState().dirty=true; renderTabOnly();
+}
+async function saveBlogPost(status){
+  const b=blogState(), d=b.editing, st=$('#blog-status'); if(!d) return;
+  if(!d.title.trim()){ if(st) st.textContent='Title likho.'; $('.be-title')?.focus(); return; }
+  if(status==='published' && !d.blocks.some(x=>(x.text||'').trim()||(x.items||[]).some(Boolean)||x.src)){ if(st) st.textContent='Publish karne se pehle kuch content likho.'; return; }
+  const body={ title:d.title, excerpt:d.excerpt, cover:d.cover, tags:d.tags, status, blocks:d.blocks.map(x=>x.type==='list'?{type:'list',items:(x.items||[]).map(s=>s.trim()).filter(Boolean)}:x) };
+  $$('[data-action="blog-save"]').forEach(x=>x.disabled=true); if(st){ st.style.color=''; st.textContent='Save ho raha hai…'; }
+  try{
+    const res=d.id ? await api(`/api/blog/${encodeURIComponent(d.id)}`,'PUT',body) : await api('/api/blog','POST',body);
+    const p=res.post; d.id=p.id; d.status=p.status; b.dirty=false;
+    const i=b.posts.findIndex(x=>x.id===p.id); const summary={...p}; delete summary.blocks;
+    if(i>=0) b.posts[i]=summary; else b.posts.unshift(summary);
+    b.current=p;
+    if(status==='published'){ b.editing=null; b.view='post'; renderTabOnly(); window.scrollTo({top:0}); }
+    else { renderTabOnly(); const s2=$('#blog-status'); if(s2){ s2.style.color='var(--profit)'; s2.textContent='✓ Draft save ho gaya (readers ko nahi dikhega).'; } }
+  }catch(e){ const s2=$('#blog-status'); if(s2){ s2.style.color=''; s2.textContent='⚠ '+(e.message||'Save nahi hua.'); } $$('[data-action="blog-save"]').forEach(x=>x.disabled=false); }
+}
+async function deleteBlogPost(){
+  const b=blogState(), d=b.editing; if(!d?.id) return;
+  if(!confirm(`"${d.title||'Yeh post'}" hamesha ke liye delete karein?`)) return;
+  try { await api(`/api/blog/${encodeURIComponent(d.id)}`,'DELETE'); b.posts=b.posts.filter(p=>p.id!==d.id); b.editing=null; b.current=null; b.dirty=false; b.view='list'; renderTabOnly(); }
+  catch(e){ alert(e.message||'Delete nahi hua.'); }
+}
+function handleBlogClick(action, btn, e){
+  const b=blogState();
+  if(action==='open-blog-post'){ openBlogPost(btn.dataset.id); return true; }
+  if(action==='blog-back'){ b.view='list'; b.current=null; renderTabOnly(); markBlogSeen(); return true; }
+  if(action==='blog-reload'){ b.error=''; loadBlog(true); return true; }
+  if(action==='blog-tag'){ b.tag=btn.dataset.tag; renderTabOnly(); return true; }
+  if(action==='new-blog-post'){ b.editing=newBlogDraft(); b.view='edit'; b.preview=false; b.dirty=false; b.current=null; renderTabOnly(); setTimeout(()=>$('.be-title')?.focus(),30); return true; }
+  if(action==='edit-blog-post'){ editBlogPost(btn.dataset.id); return true; }
+  if(action==='blog-editor-close'){ if(leaveBlogEditor()) renderTabOnly(); return true; }
+  if(action==='blog-preview'){ b.preview=!b.preview; renderTabOnly(); return true; }
+  if(action==='blog-block-add'){ const t=btn.dataset.type; b.editing.blocks.push(t==='list'?{type:'list',items:['']}:t==='img'?{type:'img',src:'',caption:''}:t==='divider'?{type:'divider'}:{type:t,text:''}); b.dirty=true; renderTabOnly(); setTimeout(()=>{ const els=$$('.be-blocks textarea'); els.at(-1)?.focus(); },30); return true; }
+  if(action==='blog-block-del'){ b.editing.blocks.splice(Number(btn.dataset.index),1); if(!b.editing.blocks.length) b.editing.blocks.push({type:'p',text:''}); b.dirty=true; renderTabOnly(); return true; }
+  if(action==='blog-block-move'){ const i=Number(btn.dataset.index), j=i+Number(btn.dataset.dir), arr=b.editing.blocks; if(j>=0&&j<arr.length){ [arr[i],arr[j]]=[arr[j],arr[i]]; b.dirty=true; renderTabOnly(); } return true; }
+  if(action==='blog-pick-image'){ const f=$('#blog-image-file'); if(f){ f.dataset.target=btn.dataset.target; f.dataset.index=btn.dataset.index||''; f.click(); } return true; }
+  if(action==='blog-image-link'){ const key=btn.dataset.target==='cover'?'cover':btn.dataset.index; const input=document.querySelector(`[data-blog-link="${key}"]`); const link=input?.value.trim(); if(!link){ input?.focus(); return true; } const label=btn.textContent; btn.disabled=true; btn.textContent='…'; blogUploadImage({url:link}).then(u=>setBlogImage(btn.dataset.target, Number(btn.dataset.index), u)).catch(err=>{ alert('🔗 '+err.message); btn.disabled=false; btn.textContent=label; }); return true; }
+  if(action==='blog-cover-remove'){ b.editing.cover=''; b.dirty=true; renderTabOnly(); return true; }
+  if(action==='blog-save'){ saveBlogPost(btn.dataset.status); return true; }
+  if(action==='blog-delete'){ deleteBlogPost(); return true; }
+  if(action==='view-blog-image'){ openAnnotator(btn.dataset.src,null,null,{}); return true; }
+  return false;
+}
+document.addEventListener('input', e=>{
+  const b=STATE.blog; if(!b) return;
+  if(e.target.id==='blog-search'){ b.search=e.target.value; clearTimeout(b.searchTimer); b.searchTimer=setTimeout(()=>{ const pos=e.target.selectionStart; renderTabOnly(); const s=$('#blog-search'); if(s){ s.focus(); try{s.setSelectionRange(pos,pos);}catch(_){} } },200); return; }
+  if(!b.editing) return;
+  if(e.target.dataset.blogField){ b.editing[e.target.dataset.blogField]=e.target.value; b.dirty=true; return; }
+  if(e.target.dataset.blockIndex!==undefined && e.target.dataset.blockField){
+    const blk=b.editing.blocks[Number(e.target.dataset.blockIndex)]; if(!blk) return;
+    if(e.target.dataset.blockField==='items') blk.items=e.target.value.split('\n'); else blk[e.target.dataset.blockField]=e.target.value;
+    b.dirty=true;
+    if(e.target.tagName==='TEXTAREA'){ e.target.style.height='auto'; e.target.style.height=Math.min(e.target.scrollHeight+2,600)+'px'; }
+  }
+});
+document.addEventListener('change', e=>{
+  if(e.target.id!=='blog-image-file' || !e.target.files?.length) return;
+  const f=e.target.files[0], target=e.target.dataset.target, index=Number(e.target.dataset.index);
+  const st=$('#blog-status'); if(st){ st.style.color=''; st.textContent='Image upload ho rahi hai…'; }
+  readAndCompressImage(f).then(dataUrl=>blogUploadImage({dataUrl})).then(u=>setBlogImage(target,index,u)).catch(err=>{ const s=$('#blog-status'); if(s) s.textContent='⚠ '+(err.message||'Upload nahi hua.'); });
+  e.target.value='';
+});
+document.addEventListener('keydown', e=>{ if((e.key==='Enter'||e.key===' ') && e.target.matches?.('.blog-card')){ e.preventDefault(); e.target.click(); } });
+window.addEventListener('beforeunload', e=>{ if(STATE.blog?.dirty){ e.preventDefault(); e.returnValue=''; } });
+
 /* ---------------- strategy manager ---------------- */
 function strategyUsage(name){
   return { trades: STATE.trades.filter(t=>sameName(t.strategy,name)).length, notes: STATE.notes.filter(n=>noteMatchesStrategy(n,name)).length, exactNotes: STATE.notes.filter(n=>sameName(n.strategy,name)).length };
@@ -1741,6 +2056,7 @@ function render(){
   else if (STATE.activeTab==='history') content.innerHTML = renderHistoryTab();
   else if (STATE.activeTab==='analysis') content.innerHTML = renderAnalysisTab();
   else if (STATE.activeTab==='risk') { content.innerHTML = renderRiskCenter(); bindRiskSettings(); updateRiskCalculator(); }
+  else if (STATE.activeTab==='blog') { content.innerHTML = renderBlogTab(); if(blogState().view==='list'&&blogState().loaded) markBlogSeen(); }
   afterTabRender();
 }
 function renderTabOnly(){ // re-render just the active tab (after in-tab interactions)
@@ -1751,6 +2067,7 @@ function renderTabOnly(){ // re-render just the active tab (after in-tab interac
   else if (STATE.activeTab==='history') content.innerHTML = renderHistoryTab();
   else if (STATE.activeTab==='analysis') content.innerHTML = renderAnalysisTab();
   else if (STATE.activeTab==='risk') { content.innerHTML = renderRiskCenter(); bindRiskSettings(); updateRiskCalculator(); }
+  else if (STATE.activeTab==='blog') content.innerHTML = renderBlogTab();
   renderTabNav();
   afterTabRender();
 }
@@ -1761,7 +2078,8 @@ document.addEventListener('click', async (e) => {
   if (!btn) return;
   const action = btn.dataset.action;
 
-  if (action==='set-tab') { STATE.activeTab = btn.dataset.tab; render(); }
+  if (action==='set-tab') { if (STATE.activeTab==='blog' && btn.dataset.tab!=='blog' && STATE.blog?.view==='edit' && !leaveBlogEditor()) return; if (btn.dataset.tab==='blog' && STATE.activeTab==='blog' && STATE.blog) { STATE.blog.view='list'; STATE.blog.current=null; } STATE.activeTab = btn.dataset.tab; render(); }
+  else if (handleBlogClick(action, btn, e)) { /* blog */ }
   else if (action==='select-mindset') { STATE.selectedMindsetId = btn.dataset.id; renderTabOnly(); }
   else if (action==='toggle-rule') { const i=btn.dataset.idx; STATE.checkedRules[i]=!STATE.checkedRules[i]; renderTabOnly(); }
   else if (action==='set-inspection') { STATE.inspectionTab = btn.dataset.value; renderTabOnly(); }
@@ -1917,6 +2235,9 @@ document.addEventListener('click', async (e) => {
   }
   else if (action==='retry-broken-image') { const box=btn.closest('.img-broken'); if(box){ const src=box.dataset.src.split('?')[0]; IMG_STATUS_CACHE.delete(src); IMG_RETRIED.add(src); const img=BROKEN_ORIGINALS.get(box)||document.createElement('img'); img.dataset.brokenHandled=''; img.style.visibility=''; img.src=src+(src.startsWith('data:')?'':(src.includes('?')?'&':'?')+'r='+Date.now()); box.replaceWith(img); } }
   else if (action==='check-all-images') { checkAllImages(); }
+  else if (action==='voice-type') { startVoice(btn); }
+  else if (action==='voice-stop') { stopVoice(); }
+  else if (action==='voice-lang') { toggleVoiceLang(); }
   else if (action==='open-weekly-report') { openWeeklyReport(); }
   else if (action==='close-weekly-report') { closeWeeklyReport(); }
   else if (action==='report-backdrop') { if (e.target===btn) closeWeeklyReport(); }

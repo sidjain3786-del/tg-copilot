@@ -125,3 +125,26 @@ This restores the WHOLE database (trades/notes saved after that time are rolled 
 - **Zoom controls** on the picture: − / 100% (tap to fit) / +. Mouse wheel / trackpad pinch zooms on laptops (up to 800%).
 - Pen size now means the thickness you see on screen, at any zoom, so you can write small notes while zoomed in; lines stay in the right place on the saved image.
 - In view-only popups one finger simply moves the picture.
+
+## Update 14 — Voice typing (🎤)
+- 🎤 button on every text block in Notes, on the Log Trade quick note and on the Edit Trade quick note. Tap, speak, words are typed where the cursor is (like the keyboard mic). Tap again or "Stop" to finish.
+- What you're saying shows live in a small bar at the bottom; only the final words go into the note, then it autosaves.
+- Spoken commands: "full stop" → . · "comma" → , · "question mark" → ? · "new line" / "next line" → new line. Sentences start with a capital letter automatically.
+- Language button in the bar: **EN/Hinglish** (default, Latin letters like your notes) ⇄ **हिंदी** (Devanagari). Choice is remembered.
+- Keeps listening through pauses (Android stops after silence; the app restarts it) for up to 5 minutes.
+- Clear messages for: mic permission denied, no speech, no internet, browser not supported (Firefox — use the keyboard mic there).
+- Uses the browser's built-in speech recognition (Chrome/Edge/Android/Safari). Needs internet and mic permission; audio is processed by the browser's speech service (Google in Chrome).
+
+## Update 15 — Blog for traders
+### One-time setup
+1. Cloudflare dashboard → your Pages project → **Settings → Variables and Secrets** → add `ADMIN_EMAILS` = the admin's login email (several: comma-separated, e.g. `a@x.com, b@y.com`). Add it for Production (and Preview if you use it).
+2. Redeploy. The `blog_posts` table is created automatically (it is also in `schema.sql`).
+3. The admin logs out and in once (or just reloads) — a **＋ New post** button appears in the 📰 Blog tab.
+
+### What it does
+- New **📰 Blog** tab (desktop tabs + phone bottom bar). Red dot / count when there are posts the trader hasn't seen.
+- **Readers:** post cards with cover, date, read time, tags; search and tag filter; clean reading view (big readable text, tap images to zoom/full screen). Drafts are never shown to readers.
+- **Admin editor:** title, short summary, tags, cover image (upload or link), and content blocks — Paragraph, Heading, Sub-heading, Image (upload or TradingView/image link), Bullet list, Quote, 💡 Tip box, Divider — with ↑ ↓ to reorder and ✕ to remove. Inline **bold**, *italic*, [link](https://…). Preview, Save draft, Publish, Update, Unpublish, Delete; warning before leaving with unsaved changes. View count per post.
+- **Security:** only emails in `ADMIN_EMAILS` can create/edit/delete (server checks every request — 403 otherwise). Posts are stored as blocks, not HTML, so nothing typed can run as code (tested with `<script>` / `onerror` — shown as plain text).
+- Blog images are stored in R2 under `blog/` and served at `/api/blog-img/...` so every trader can see them.
+- New API: `GET/POST /api/blog`, `GET/PUT/DELETE /api/blog/<id>`, `POST /api/blog/upload`, `GET /api/blog-img/<file>`. `/api/me` and login now return `isAdmin`.

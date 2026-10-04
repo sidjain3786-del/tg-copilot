@@ -42,3 +42,23 @@ CREATE TABLE IF NOT EXISTS login_attempts (
   failures INTEGER NOT NULL DEFAULT 0,
   window_start TEXT NOT NULL
 );
+
+-- Blog posts written by admins (ADMIN_EMAILS env var) and read by all traders.
+CREATE TABLE IF NOT EXISTS blog_posts (
+  id TEXT PRIMARY KEY,
+  slug TEXT UNIQUE NOT NULL,
+  title TEXT NOT NULL,
+  excerpt TEXT NOT NULL DEFAULT '',
+  cover TEXT NOT NULL DEFAULT '',
+  tags TEXT NOT NULL DEFAULT '[]',
+  blocks TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'draft',
+  author_id TEXT,
+  author_name TEXT,
+  read_minutes INTEGER NOT NULL DEFAULT 1,
+  views INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  published_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_blog_status_pub ON blog_posts (status, published_at);
