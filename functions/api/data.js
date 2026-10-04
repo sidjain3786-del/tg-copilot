@@ -1,4 +1,4 @@
-import { getUserFromRequest, json, readJson, parseColumn, ensureSchema } from '../_lib/auth.js';
+import { getUserFromRequest, json, readJson, parseColumn, ensureSchema, touchActivity } from '../_lib/auth.js';
 
 const LEGACY_DEFAULT_STRATEGY_NAMES = new Set([
   'Asian High/Low Liquidity Sweep (AMD)',
@@ -115,6 +115,7 @@ export async function onRequestPost({ request, env }) {
         .bind(user.id, sessionNotesJson, updatedAt).run();
     }
 
+    await touchActivity(env, user.id, 'save');
     return json({ ok: true, updatedAt });
   } catch (e) {
     console.error('data POST error', e);
