@@ -55,6 +55,7 @@ export async function ensureSchema(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS quotes (id TEXT PRIMARY KEY, text TEXT NOT NULL, author TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, created_by TEXT, notified INTEGER NOT NULL DEFAULT 0)`).run();
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS push_subscriptions (endpoint TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at TEXT NOT NULL, last_ok_at TEXT, fails INTEGER NOT NULL DEFAULT 0)`).run();
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS announcements (id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', cta TEXT NOT NULL DEFAULT '', style TEXT NOT NULL DEFAULT 'info', created_at TEXT NOT NULL, expires_at TEXT, active INTEGER NOT NULL DEFAULT 1, notified INTEGER NOT NULL DEFAULT 0, created_by TEXT)`).run();
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS user_activity (user_id TEXT PRIMARY KEY, last_seen_at TEXT, last_save_at TEXT, saves INTEGER NOT NULL DEFAULT 0, visits INTEGER NOT NULL DEFAULT 0)`).run();
   schemaReady = true;
 }
