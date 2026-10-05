@@ -301,7 +301,7 @@ function applyDeepLink(){
     STATE.activeTab='blog'; const b=blogState(); b.current=null;
     if(isAdmin()){ b.editing=newBlogDraft(); b.view='edit'; b.preview=false; b.dirty=false; }
     else { b.view='list'; setTimeout(()=>alert('Yeh admin link hai. Aapka email ADMIN_EMAILS mein nahi hai, isliye sirf Blog khula hai.'),300); }
-  } else if(tabs.includes(h)) { STATE.activeTab=h; if(h==='blog'){ const b=blogState(); b.view='list'; b.current=null; } }
+  } else if(tabs.includes(h)) { if(TAB_FEATURE[h] && !featureVisible(TAB_FEATURE[h])) { history.replaceState(null,'',location.pathname+location.search); return false; } STATE.activeTab=h; if(h==='blog'){ const b=blogState(); b.view='list'; b.current=null; } }
   else return false;
   history.replaceState(null,'',location.pathname+location.search);   // clean URL after opening
   return true;
@@ -310,9 +310,12 @@ window.addEventListener('hashchange', ()=>{ if(STATE.user && applyDeepLink()) re
 function showApp(){
   applyDeepLink();
   if(STATE.activeTab==='admin' && !isAdmin()) STATE.activeTab='copilot';
+  applyFeatureClasses();
   setTimeout(maybeShowPrivacyNotice, 1500);
   setTimeout(()=>{ if(STATE.user) loadBlog(); }, 800);
   if(STATE.user && !STATE.quotes?.loaded) loadQuotes();
+  if(STATE.user && !STATE.ann?.loaded) loadAnnouncements();
+  applyFeatureClasses();
   if(!PUSH.checked) checkPush(); $('#loading-screen').style.display='none'; $('#auth-screen').style.display='none'; $('#app-screen').style.display='block'; render(); }
 
 function setAuthMode(mode){
@@ -351,14 +354,14 @@ $('#auth-form').addEventListener('submit', async (e) => {
 
 $('#logout-btn').addEventListener('click', async () => {
   try { await api('/api/logout', 'POST'); } catch (e) { console.warn('Logout request failed', e); }
-  IMAGE_URL_CACHE.clear(); IMAGE_STORE_AVAILABLE = true; STATE.blog = null; STATE.admin = null; STATE.quotes = null; $('#privacy-notice')?.remove();
+  IMAGE_URL_CACHE.clear(); IMAGE_STORE_AVAILABLE = true; STATE.blog = null; STATE.admin = null; STATE.quotes = null; STATE.ann = null; STATE.features = {}; $('#privacy-notice')?.remove();
   STATE.user = null; STATE.trades = []; STATE.notes = []; STATE.customStrategies = []; STATE.sessionNotes = {};
   setAuthMode('login');
   showAuth();
 });
 
 async function loadUserData(){
-  const data = await api('/api/data');
+  const [data] = await Promise.all([api('/api/data'), loadFeatures()]);
   STATE.trades = data.trades || [];
   STATE.notes = data.notes || [];
   STATE.notes = STATE.notes.map(n => ({...n, concept: n.concept || 'General', customConcept: n.customConcept || '', blocks: normalizeNoteBlocks(n)}));
@@ -822,10 +825,10 @@ const TABS = [
   {id:'blog', label:'📰 Blog'},
   {id:'admin', label:'🛠️ Admin'}
 ];
-function visibleTabs(){ return TABS.filter(t=>t.id!=='admin' || isAdmin()); }
+function visibleTabs(){ return TABS.filter(t=>(t.id!=='admin' || isAdmin()) && (!TAB_FEATURE[t.id] || featureVisible(TAB_FEATURE[t.id]))); }
 function renderTabNav(){
   $('#tab-nav').innerHTML = visibleTabs().map(t =>
-    `<button class="tab-btn ${STATE.activeTab===t.id?'active':''}" data-action="set-tab" data-tab="${t.id}">${t.label}${t.id==='blog'&&STATE.blog?.loaded&&blogUnreadCount()?`<span class="tab-dot" aria-label="${blogUnreadCount()} new posts">${blogUnreadCount()}</span>`:''}</button>`
+    `<button class="tab-btn ${STATE.activeTab===t.id?'active':''}" data-action="set-tab" data-tab="${t.id}">${t.label}${isAdmin()&&TAB_FEATURE[t.id]&&!featureOn(TAB_FEATURE[t.id])?'<span class="tab-off" title="Traders ke liye band">OFF</span>':''}${t.id==='blog'&&STATE.blog?.loaded&&blogUnreadCount()?`<span class="tab-dot" aria-label="${blogUnreadCount()} new posts">${blogUnreadCount()}</span>`:''}</button>`
   ).join('');
   try { placeTabIndicator(); } catch (e) { console.warn('indicator skipped', e); }
   const mobileIcons = {copilot:'⚡',log:'➕',notes:'🧠',history:'📜',analysis:'📊',risk:'🛡️',blog:'📰',admin:'🛠️'};
@@ -889,12 +892,12 @@ function renderCopilotTab(){
     <div class="hero-today">
       <span>Aaj ka P&amp;L</span>
       <strong class="${risk.todayPnl>=0?'positive':'negative'}">${money(risk.todayPnl)}</strong>
-      <small>${risk.todayTrades.length} trade${risk.todayTrades.length===1?'':'s'} aaj · loss budget ${risk.dailyLimit>0?`${Math.round(budgetUsedPct)}% used`:'set nahi hai'}</small>
-      ${risk.dailyLimit>0?`<div class="hero-budget" aria-hidden="true"><i class="${budgetUsedPct>=75?'hot':''}" style="width:${Math.max(2,budgetUsedPct)}%"></i></div>`:''}
+      <small>${risk.todayTrades.length} trade${risk.todayTrades.length===1?'':'s'} aaj${featureVisible('risk')?` · loss budget ${risk.dailyLimit>0?`${Math.round(budgetUsedPct)}% used`:'set nahi hai'}`:''}</small>
+      ${featureVisible('risk') && risk.dailyLimit>0?`<div class="hero-budget" aria-hidden="true"><i class="${budgetUsedPct>=75?'hot':''}" style="width:${Math.max(2,budgetUsedPct)}%"></i></div>`:''}
     </div>
     <div class="hero-actions"><button class="btn-cta" data-action="set-tab" data-tab="log">＋ Log New Trade</button><button type="button" class="btn-hero-ghost" data-action="open-weekly-report">📄 Weekly report</button></div>
   </section>
-  ${renderQuoteCard()}
+  ${renderDashMessages()}
 
   <div class="dashboard-kpis">
     <div class="card dashboard-kpi"><span class="uppercase-label">Total Trades</span><strong>${total}</strong><small>${wins} wins · ${losses} losses</small></div>
@@ -905,7 +908,7 @@ function renderCopilotTab(){
     <div class="card dashboard-kpi"><span class="uppercase-label">Avg Quality</span><strong>${avgQuality.toFixed(1)}/5</strong><small>Self-rated execution</small></div>
   </div>
 
-  ${renderSetupPlaybook()}
+  ${featureVisible('playbook') ? renderSetupPlaybook() : ''}
 
   <div class="grid-2 dashboard-main-grid">
     <div class="card">
@@ -1593,10 +1596,12 @@ async function buildWeeklyPdf(d, opts={}){
 
   // header band
   doc.setFillColor(...INK); doc.rect(0,0,W,34,'F'); doc.setFillColor(...GOLD); doc.rect(0,34,W,1.2,'F');
-  doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(18); doc.text('Weekly Trading Report',M,15);
+  let TX=M;   // text starts after the logo
+  try { const logo=await imageForPdf('/icon-maskable-192.png', 192); doc.addImage(logo.data,'JPEG',M,7,20,20); TX=M+25; } catch(_) {}
+  doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(18); doc.text('Weekly Trading Report',TX,15);
   doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(200,213,230);
-  doc.text(pdfText(`${STATE.user?.name||'Trader'}  |  ${d.label}`),M,23);
-  doc.setFontSize(8); doc.text(pdfText(`Generated ${new Date().toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})}  |  Trader Co-Pilot`),M,29);
+  doc.text(pdfText(`${STATE.user?.name||'Trader'}  |  ${d.label}`),TX,23);
+  doc.setFontSize(8); doc.text(pdfText(`Generated ${new Date().toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})}  |  Trader Co-Pilot`),TX,29);
   y=44;
 
   // KPI boxes
@@ -2131,7 +2136,8 @@ function renderAdminTab(){
       <div class="adm-head-actions"><button type="button" class="btn-secondary btn-small" data-action="admin-reload">↻ Refresh</button><button type="button" class="btn-secondary btn-small" data-action="admin-export">⬇️ CSV</button></div>
     </section>
     <div class="adm-kpis">${k.map(([l,v,c])=>`<div class="${c}"><span>${l}</span><strong>${v}</strong></div>`).join('')}</div>
-    ${renderAdminQuotePanel()}
+    <div class="adm-two">${renderAdminQuotePanel()}${renderAdminAnnPanel()}</div>
+    ${renderAdminFeaturesPanel()}
     <section class="card adm-list">
       <div class="adm-tools">
         <input type="search" id="admin-search" value="${esc(a.search)}" placeholder="🔍 Naam ya email…" aria-label="Search traders">
@@ -2348,7 +2354,7 @@ function renderQuoteCard(){
   </section>`;
 }
 function rerenderQuoteCard(){
-  const el=$('#quote-card'); if(el) el.outerHTML=renderQuoteCard();
+  const wrap=$('#dash-msgs'); if(wrap) wrap.outerHTML=renderDashMessages(); else { const el=$('#quote-card'); if(el) el.outerHTML=renderQuoteCard(); }
   const adm=$('#admin-quote'); if(adm) adm.outerHTML=renderAdminQuotePanel();
 }
 function renderAdminQuotePanel(){
@@ -2392,6 +2398,133 @@ function handleQuoteClick(action, btn){
   if(action==='admin-delete-quote'){ if(!confirm('Yeh quote delete karein?')) return true; const id=btn.dataset.id; api(`/api/quotes/${encodeURIComponent(id)}`,'DELETE').then(()=>{ const q=quoteState(); q.recent=q.recent.filter(x=>x.id!==id); q.today=q.recent[0]||null; rerenderQuoteCard(); }).catch(e=>alert(e.message)); return true; }
   return false;
 }
+
+
+/* ---------------- feature switches (admin can turn features off for traders) ---------------- */
+const FEATURES = [
+  ['risk','🛡️ Risk Center','Risk Center tab aur dashboard ka loss-budget'],
+  ['analysis','📊 Daily & Session Analysis','Analysis tab'],
+  ['notes','🧠 Notes & Learnings','Notes tab'],
+  ['history','📜 Trade History','History tab'],
+  ['blog','📰 Blog','Blog tab'],
+  ['playbook','🎯 Setup Playbook','Dashboard ka strategy card'],
+  ['report','📄 Weekly report','PDF report buttons'],
+  ['quote','💬 Quote of the Day','Dashboard ka quote card'],
+  ['announcements','📢 Announcements','Dashboard ke announcements'],
+  ['voice','🎤 Voice typing','Mic buttons']
+];
+const TAB_FEATURE = { risk:'risk', analysis:'analysis', notes:'notes', history:'history', blog:'blog' };
+function featureOn(k){ return STATE.features?.[k] !== false; }
+function featureVisible(k){ return isAdmin() || featureOn(k); }      // admins always see everything
+function applyFeatureClasses(){
+  const off = isAdmin() ? [] : FEATURES.map(f=>f[0]).filter(k=>!featureOn(k));
+  FEATURES.forEach(([k])=>document.body.classList.toggle('feat-off-'+k, off.includes(k)));
+  if (!isAdmin() && TAB_FEATURE[STATE.activeTab] && !featureOn(TAB_FEATURE[STATE.activeTab])) STATE.activeTab='copilot';
+}
+async function loadFeatures(){ try { const d=await api('/api/settings'); STATE.features=d.features||{}; } catch(_) { STATE.features=STATE.features||{}; } applyFeatureClasses(); }
+function renderAdminFeaturesPanel(){
+  return `<section class="card adm-features" id="admin-features">
+    <div class="adm-quote-head"><h3 class="section-title">⚙️ Features on / off</h3><span class="adm-readonly">Traders ke liye · admin ko sab dikhta hai</span></div>
+    <div class="adm-feature-grid">${FEATURES.map(([k,l,d])=>`<label class="adm-switch ${featureOn(k)?'on':''}"><input type="checkbox" data-feature="${k}" ${featureOn(k)?'checked':''}><span class="adm-switch-ui" aria-hidden="true"></span><span><b>${l}</b><small>${d}</small></span></label>`).join('')}</div>
+    <p class="adm-quote-progress" id="adm-feature-status" role="status"></p>
+  </section>`;
+}
+document.addEventListener('change', async e=>{
+  const k=e.target.dataset?.feature; if(!k) return;
+  const on=e.target.checked, st=$('#adm-feature-status'), label=(FEATURES.find(f=>f[0]===k)||[k,k])[1];
+  e.target.closest('.adm-switch')?.classList.toggle('on', on);
+  if(st) st.textContent='Save ho raha hai…';
+  try { const d=await api('/api/settings','PUT',{features:{[k]:on}}); STATE.features=d.features; applyFeatureClasses(); renderTabNav(); if(st) st.textContent=`✓ ${label} ab traders ke liye ${on?'ON':'OFF'} hai.`; }
+  catch(err){ e.target.checked=!on; e.target.closest('.adm-switch')?.classList.toggle('on', !on); if(st) st.textContent='⚠ '+(err.message||'Save nahi hua.'); }
+});
+
+/* ---------------- announcements ---------------- */
+const ANN_CTA = { log:['📝 Abhi journal karo','set-tab','log'], notes:['🧠 Notes kholo','set-tab','notes'], history:['📜 History dekho','set-tab','history'], blog:['📰 Blog padho','set-tab','blog'], analysis:['📊 Analysis dekho','set-tab','analysis'], report:['📄 Weekly report','open-weekly-report',''] };
+const ANN_TEMPLATES = [
+  ['📝 Journaling reminder', {title:'Kya aapne aaj journal kiya? 📝', body:'Har trade ke baad sirf 30 second — entry, emotion aur mistake likho. Jo trader journal karta hai, wahi apni galti dobara nahi karta.', cta:'log', style:'important'}],
+  ['🛡️ Risk reminder', {title:'Aaj ka loss limit yaad hai?', body:'Daily loss limit hit ho jaye to screen band. Kal market phir khulega — account bacha rahega to mauke bhi milenge.', cta:'', style:'important'}],
+  ['📰 Naya blog', {title:'Naya blog aaya hai 📰', body:'Trading psychology par naya article — 5 minute nikal kar zaroor padho.', cta:'blog', style:'info'}],
+  ['🎉 Celebration', {title:'Shabaash traders! 🎉', body:'Is hafte sabse zyada logon ne apne rules follow kiye. Discipline jaari rakho!', cta:'', style:'celebrate'}]
+];
+function annState(){ return STATE.ann || (STATE.ann={ list:[], all:[], loaded:false, posting:false, progress:'', draft:{title:'',body:'',cta:'log',style:'important',days:'1'} }); }
+async function loadAnnouncements(){
+  const a=annState();
+  try { a.list=(await api('/api/announcements')).announcements||[]; if(isAdmin()) a.all=(await api('/api/announcements?all=1')).announcements||[]; a.loaded=true; } catch(_) { a.loaded=true; }
+  rerenderAnnouncements();
+}
+function annDismissed(){ try { return JSON.parse(localStorage.getItem('tc_ann_dismissed')||'[]'); } catch(_) { return []; } }
+function dismissAnn(id){ const d=annDismissed(); if(!d.includes(id)){ d.push(id); try { localStorage.setItem('tc_ann_dismissed', JSON.stringify(d.slice(-50))); } catch(_) {} } }
+function visibleAnnouncements(){ const d=annDismissed(); return annState().list.filter(x=>!d.includes(x.id)).slice(0,2); }
+function renderAnnouncementCards(){
+  const list=visibleAnnouncements();
+  if(!list.length) return '';
+  return list.map(x=>{ const c=ANN_CTA[x.cta]; const icon=x.style==='celebrate'?'🎉':x.style==='important'?'📢':'ℹ️';
+    return `<article class="ann ann-${esc(x.style)}" role="status">
+      <div class="ann-top"><span class="ann-icon" aria-hidden="true">${icon}</span><span class="ann-label">Announcement · ${esc(quoteDateLabel(x.createdAt))}</span><button type="button" class="ann-x" data-action="ann-dismiss" data-id="${esc(x.id)}" aria-label="Hatao">×</button></div>
+      <h3>${esc(x.title)}</h3>${x.body?`<p>${esc(x.body)}</p>`:''}
+      ${c?`<button type="button" class="ann-cta" data-action="${c[1]}" ${c[2]?`data-tab="${c[2]}"`:''} data-ann-id="${esc(x.id)}">${c[0]} →</button>`:''}
+    </article>`; }).join('');
+}
+function renderDashMessages(){
+  const q=featureVisible('quote') ? renderQuoteCard() : '<div id="quote-card" hidden></div>';
+  const a=featureVisible('announcements') ? renderAnnouncementCards() : '';
+  const hasQ=!/id="quote-card" hidden/.test(q);
+  return `<div class="dash-msgs ${hasQ&&a?'two':''}" id="dash-msgs">${q}${a?`<div class="ann-wrap">${a}</div>`:''}</div>`;
+}
+function rerenderAnnouncements(){
+  const el=$('#dash-msgs'); if(el) el.outerHTML=renderDashMessages();
+  const adm=$('#admin-ann'); if(adm) adm.outerHTML=renderAdminAnnPanel();
+}
+function renderAdminAnnPanel(){
+  const a=annState(), d=a.draft, q=quoteState();
+  const opt=(v,l,cur)=>`<option value="${v}" ${String(cur)===String(v)?'selected':''}>${l}</option>`;
+  return `<section class="card adm-quote adm-ann" id="admin-ann">
+    <div class="adm-quote-head"><h3 class="section-title">📢 Announcement</h3><span class="adm-readonly">🔔 ${q.subscribers||0} devices par notification on</span></div>
+    <div class="adm-ann-templates">${ANN_TEMPLATES.map(([l],i)=>`<button type="button" class="qotd-link" data-action="ann-template" data-i="${i}">${l}</button>`).join('')}</div>
+    <input id="an-title" maxlength="120" placeholder="Title — e.g. Kya aapne aaj journal kiya? 📝" value="${esc(d.title)}">
+    <textarea id="an-body" rows="2" maxlength="600" placeholder="Message (optional)">${esc(d.body)}</textarea>
+    <div class="adm-ann-row">
+      <label>Button<select id="an-cta">${opt('','Koi button nahi',d.cta)}${Object.entries(ANN_CTA).map(([k,v])=>opt(k,v[0],d.cta)).join('')}</select></label>
+      <label>Style<select id="an-style">${opt('important','📢 Important',d.style)}${opt('info','ℹ️ Info',d.style)}${opt('celebrate','🎉 Celebration',d.style)}</select></label>
+      <label>Kitne din dikhe<select id="an-days">${opt('1','1 din',d.days)}${opt('3','3 din',d.days)}${opt('7','7 din',d.days)}${opt('0','Jab tak hatao nahi',d.days)}</select></label>
+    </div>
+    <div class="adm-ann-row adm-ann-send"><label class="report-check"><input type="checkbox" id="an-notify" checked> Sabko notification bhejo</label><button type="button" class="btn-primary" data-action="admin-post-ann" ${a.posting?'disabled':''}>${a.posting?'Bhej rahe hain…':'📢 Announce karo'}</button></div>
+    ${a.progress?`<p class="adm-quote-progress" role="status">${a.progress}</p>`:''}
+    ${a.all.length?`<details class="adm-quote-history" ${a.all.some(x=>x.active)?'open':''}><summary>Announcements (${a.all.length})</summary><ul>${a.all.map(x=>{ const live=x.active && (!x.expiresAt || new Date(x.expiresAt)>new Date()); return `<li><div><q>${esc(x.title)}</q><small>${live?'🟢 Live':'⚪ Khatam'} · ${esc(quoteDateLabel(x.createdAt))}${x.expiresAt?` · ${live?'khatam':'khatam hua'} ${esc(quoteDateLabel(x.expiresAt))}`:''} · 🔔 ${x.notified||0}</small></div><button type="button" class="be-del" data-action="admin-delete-ann" data-id="${esc(x.id)}" aria-label="Delete">✕</button></li>`; }).join('')}</ul></details>`:''}
+  </section>`;
+}
+function readAnnDraft(){ const a=annState(); a.draft={ title:$('#an-title')?.value||'', body:$('#an-body')?.value||'', cta:$('#an-cta')?.value||'', style:$('#an-style')?.value||'info', days:$('#an-days')?.value||'1' }; return a.draft; }
+async function sendPushBatches(kind, id, total, onProgress){
+  let offset=0, sent=0, gone=0, failed=0, guard=0;
+  while(guard++<200){ onProgress(sent,total); const b=await api('/api/quotes/notify','POST',{kind,id,offset}); sent+=b.sent; gone+=b.gone; failed+=b.failed; total=b.total+gone; offset=b.nextOffset; if(b.done) break; }
+  return {sent,gone,failed};
+}
+async function postAnnouncement(){
+  const a=annState(); if(a.posting) return;
+  const d=readAnnDraft(), notify=!!$('#an-notify')?.checked;
+  if(d.title.trim().length<2){ $('#an-title')?.focus(); return; }
+  a.posting=true; a.progress='Announcement save ho raha hai…'; rerenderAnnouncements();
+  try{
+    const r=await api('/api/announcements','POST',{...d, days:Number(d.days)});
+    a.list=[r.announcement,...a.list]; a.all=[r.announcement,...a.all]; a.draft={title:'',body:'',cta:'log',style:'important',days:'1'};
+    if(notify && r.subscribers){
+      const res=await sendPushBatches('announcement', r.announcement.id, r.subscribers, (s,t)=>{ a.progress=`🔔 Notification bhej rahe hain… ${s}/${t}`; rerenderAnnouncements(); });
+      r.announcement.notified=res.sent;
+      a.progress=`✓ Announcement live · 🔔 ${res.sent} device${res.sent===1?'':'s'} par gaya${res.gone?` · ${res.gone} purane device hataye`:''}${res.failed?` · ${res.failed} fail`:''}`;
+    } else a.progress = notify ? '✓ Announcement live. Abhi kisi ne notification on nahi kiya — sabko app mein dikhega.' : '✓ Announcement live (bina notification).';
+  }catch(e){ a.progress='⚠ '+(e.message||'Post nahi hua.'); }
+  finally{ a.posting=false; rerenderAnnouncements(); }
+}
+function handleAnnClick(action, btn){
+  const a=annState();
+  if(action==='ann-dismiss'){ dismissAnn(btn.dataset.id); rerenderAnnouncements(); return true; }
+  if(action==='ann-template'){ const t=ANN_TEMPLATES[Number(btn.dataset.i)]?.[1]; if(t){ a.draft={...a.draft,...t}; rerenderAnnouncements(); $('#an-title')?.focus(); } return true; }
+  if(action==='admin-post-ann'){ postAnnouncement(); return true; }
+  if(action==='admin-delete-ann'){ if(!confirm('Yeh announcement hata dein? Traders ko dikhna band ho jayega.')) return true; const id=btn.dataset.id; api(`/api/announcements/${encodeURIComponent(id)}`,'DELETE').then(()=>{ a.list=a.list.filter(x=>x.id!==id); a.all=a.all.filter(x=>x.id!==id); rerenderAnnouncements(); }).catch(e=>alert(e.message)); return true; }
+  return false;
+}
+document.addEventListener('input', e=>{ if(['an-title','an-body'].includes(e.target.id)) readAnnDraft(); });
+document.addEventListener('change', e=>{ if(['an-cta','an-style','an-days'].includes(e.target.id)) readAnnDraft(); });
 
 /* ---------------- strategy manager ---------------- */
 function strategyUsage(name){
@@ -2504,10 +2637,12 @@ document.addEventListener('click', async (e) => {
   if (!btn) return;
   const action = btn.dataset.action;
 
+  if (action==='set-tab' && TAB_FEATURE[btn.dataset.tab] && !featureVisible(TAB_FEATURE[btn.dataset.tab])) { return; }
   if (action==='set-tab') { if (STATE.activeTab==='blog' && btn.dataset.tab!=='blog' && STATE.blog?.view==='edit' && !leaveBlogEditor()) return; if (btn.dataset.tab==='blog' && STATE.activeTab==='blog' && STATE.blog) { STATE.blog.view='list'; STATE.blog.current=null; } STATE.activeTab = btn.dataset.tab; render(); }
   else if (handleBlogClick(action, btn, e)) { /* blog */ }
   else if (handleAdminClick(action, btn)) { /* admin */ }
   else if (handleQuoteClick(action, btn)) { /* quotes */ }
+  else if (handleAnnClick(action, btn)) { /* announcements */ }
   else if (action==='privacy-ack') { try { localStorage.setItem('tc_privacy_ack_'+STATE.user.id, new Date().toISOString()); } catch(_) {} $('#privacy-notice')?.remove(); }
   else if (action==='select-mindset') { STATE.selectedMindsetId = btn.dataset.id; renderTabOnly(); }
   else if (action==='toggle-rule') { const i=btn.dataset.idx; STATE.checkedRules[i]=!STATE.checkedRules[i]; renderTabOnly(); }

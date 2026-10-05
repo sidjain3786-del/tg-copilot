@@ -1,5 +1,5 @@
-const CACHE = 'trader-copilot-v9';
-const APP_SHELL = ['/', '/index.html', '/style.css', '/theme.css', '/app.js', '/vendor/jspdf.umd.min.js', '/vendor/jspdf.plugin.autotable.min.js', '/manifest.webmanifest', '/icon.svg', '/icon-192.png', '/icon-512.png'];
+const CACHE = 'trader-copilot-v12';
+const APP_SHELL = ['/', '/index.html', '/style.css', '/theme.css', '/app.js', '/vendor/jspdf.umd.min.js', '/vendor/jspdf.plugin.autotable.min.js', '/manifest.webmanifest', '/icon.svg', '/icon-192.png', '/icon-512.png', '/icon-maskable-192.png', '/icon-maskable-512.png', '/apple-touch-icon.png', '/favicon-32.png', '/badge-96.png'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(APP_SHELL)).then(() => self.skipWaiting()));
 });
@@ -17,21 +17,17 @@ self.addEventListener('fetch', event => {
   }).catch(() => caches.match(event.request).then(r => r || caches.match('/index.html'))));
 });
 
-// ---- Quote of the Day notifications ----
-// The server sends an empty push; we fetch the newest quote and show it.
+// ---- Notifications (Quote of the Day, announcements) ----
+// The server sends an empty push; we ask the server what it was about and show that.
 self.addEventListener('push', event => {
   event.waitUntil((async () => {
-    let body = 'Aaj ka naya quote aaya hai — padhne ke liye tap karo.';
+    let n = { title: 'Trader Co-Pilot', body: 'Naya update aaya hai — dekhne ke liye tap karo.', url: '/', tag: 'tc-update' };
     try {
-      const res = await fetch('/api/quotes?limit=1', { credentials: 'same-origin', cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.today) body = `“${data.today.text}”${data.today.author ? ' — ' + data.today.author : ''}`;
-      }
+      const res = await fetch('/api/notify/latest', { credentials: 'same-origin', cache: 'no-store' });
+      if (res.ok) n = { ...n, ...(await res.json()) };
     } catch (_) {}
-    await self.registration.showNotification('💬 Quote of the Day', {
-      body, icon: '/icon-192.png', badge: '/icon-192.png', tag: 'quote-of-the-day', renotify: true,
-      data: { url: '/#copilot' }
+    await self.registration.showNotification(n.title, {
+      body: n.body, icon: '/icon-192.png', badge: '/badge-96.png', tag: n.tag || 'tc-update', renotify: true, data: { url: n.url || '/' }
     });
   })());
 });

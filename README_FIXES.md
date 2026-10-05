@@ -185,3 +185,23 @@ This restores the WHOLE database (trades/notes saved after that time are rolled 
 - How it works: the server sends an empty Web Push "ping" to every subscribed device (in batches of 40, within Cloudflare limits); the service worker then fetches the newest quote and shows it. Expired devices are removed automatically. VAPID keys are created automatically on first use and stored in D1 — no setup needed.
 - Security: only admins can post / notify (403 otherwise); deleting a trader also removes their devices.
 - New files: `functions/_lib/push.js`, `functions/api/quotes/index.js`, `functions/api/quotes/[id].js`, `functions/api/quotes/notify.js`, `functions/api/push/index.js`. Tables `quotes`, `push_subscriptions`, `app_settings` are created automatically.
+
+## Update 21 — New logo
+- New mark: **pilot wings + candlestick** (Co-Pilot × trading) on the ink background, gold candle.
+- Replaced everywhere: browser tab (SVG + 32px PNG), header, login screen, install prompt, home-screen icons (normal + Android "maskable" full-bleed), iPhone home-screen icon (`apple-touch-icon.png`), notification icon + monochrome Android badge (`badge-96.png`), and the Weekly report PDF header.
+- Service worker cache bumped (v10) so phones pick up the new icon. Already-installed home-screen apps may keep the old icon until the app is reopened a few times or reinstalled (OS caches icons).
+
+## Update 22 — Logo focused on mind & psychology
+- New mark: a **brain split by a gold candlestick** — the trader's mind, with trading at its centre. Same ink & marigold colours.
+- Replaces the pilot-wings logo in every place listed in Update 21 (same file names). Service worker cache bumped to v11 so the new icons load.
+
+## Update 23 — Announcements + feature on/off switches
+### Announcements
+- Admin tab → **📢 Announcement** (next to Quote of the Day): ready templates (📝 Journaling reminder, 🛡️ Risk reminder, 📰 Naya blog, 🎉 Celebration), title, message, a button (Abhi journal karo / Notes / History / Blog / Analysis / Weekly report), style (Important / Info / Celebration), how long it shows (1 / 3 / 7 days / until removed), and "Sabko notification bhejo".
+- Traders see it on the dashboard **beside the Quote of the Day** (below it on phones), can tap the button (e.g. opens Log Trade) or close it (×).
+- Notifications: the phone notification shows the announcement title + message and opens the right tab when tapped. The service worker now asks `/api/notify/latest` what the last push was about (quote or announcement).
+- Admin list shows live / ended announcements with how many devices got it; ✕ removes one.
+### Feature switches
+- Admin tab → **⚙️ Features on / off**: Risk Center, Analysis, Notes, History, Blog, Setup Playbook, Weekly report, Quote of the Day, Announcements, Voice typing. Switching off hides it for all traders instantly (tabs, buttons, cards; Risk also hides the dashboard loss-budget). Data is not deleted — switch back on any time.
+- Admins still see everything (switched-off tabs show a red OFF tag) so you can check things.
+- New files: `functions/_lib/settings.js`, `functions/api/settings.js`, `functions/api/announcements/index.js`, `functions/api/announcements/[id].js`, `functions/api/notify/latest.js`. Changed: `functions/api/quotes/notify.js`, `functions/_lib/auth.js`. Tables are created automatically.

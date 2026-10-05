@@ -723,3 +723,59 @@ button[disabled] { opacity: .65; cursor: progress; }
 .be-del { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: .9rem; padding: .2rem .45rem; border-radius: 6px; }
 .be-del:hover { background: #FDECEC; color: var(--loss); }
 @media (max-width: 700px) { .adm-quote-row { grid-template-columns: 1fr; } .qotd-bell { margin-left: 0; } }
+
+/* ---------- New logo (pilot wings + candlestick) ---------- */
+.brand-icon, .auth-logo, .install-icon { padding: 0 !important; background: none !important; box-shadow: none !important; border-radius: 0 !important; display: inline-flex; line-height: 0; }
+.brand-icon img { width: 40px; height: 40px; border-radius: 11px; box-shadow: 0 4px 14px -6px rgba(0,0,0,.6); }
+.auth-logo img { width: 64px; height: 64px; border-radius: 17px; box-shadow: 0 14px 30px -12px rgba(0,0,0,.6); }
+.install-icon { width: auto !important; height: auto !important; }
+.install-icon img { width: 56px; height: 56px; border-radius: 15px; }
+@media (max-width: 700px) { .brand-icon img { width: 34px; height: 34px; border-radius: 9px; } }
+
+/* ---------- Announcements + feature switches ---------- */
+.dash-msgs { margin-bottom: 1rem; }
+.dash-msgs.two { display: grid; grid-template-columns: minmax(0,1.25fr) minmax(0,1fr); gap: 1rem; align-items: stretch; }
+.dash-msgs .qotd { margin: 0; height: 100%; box-sizing: border-box; }
+.dash-msgs:not(.two) .ann-wrap { margin-top: 0; }
+.dash-msgs:not(.two) > .qotd + .ann-wrap, .dash-msgs:not(.two) .ann + .ann { margin-top: .8rem; }
+.ann-wrap { display: grid; gap: .8rem; align-content: start; }
+.ann { position: relative; border-radius: var(--r-md); padding: 1rem 1.1rem; background: #fff; border: 1px solid var(--line); box-shadow: var(--shadow-1); border-left: 5px solid var(--ink-3); animation: tc-enter .35s var(--ease-out); }
+.ann-important { background: linear-gradient(135deg, #13233F, #1F3A63); color: #fff; border: 0; border-left: 5px solid var(--marigold); }
+.ann-celebrate { background: linear-gradient(135deg, #E6F6EF, #fff); border-left-color: var(--profit); }
+.ann-top { display: flex; align-items: center; gap: .45rem; margin-bottom: .35rem; }
+.ann-icon { font-size: 1.05rem; }
+.ann-label { font-size: .7rem; font-weight: 700; letter-spacing: .05em; font-variant-caps: all-small-caps; color: var(--muted); flex: 1; }
+.ann-important .ann-label { color: #FFD27A; }
+.ann-x { border: 0; background: none; font-size: 1.2rem; line-height: 1; color: inherit; opacity: .55; cursor: pointer; padding: .1rem .35rem; border-radius: 6px; }
+.ann-x:hover { opacity: 1; background: rgba(127,127,127,.15); }
+.ann h3 { margin: 0; font-family: var(--font-display); font-size: 1.12rem; line-height: 1.3; color: inherit; }
+.ann p { margin: .35rem 0 0; font-size: .86rem; line-height: 1.5; opacity: .9; }
+.ann-cta { margin-top: .75rem; border: 0; border-radius: 999px; padding: .55rem 1rem; font: inherit; font-size: .82rem; font-weight: 700; cursor: pointer; background: var(--ink); color: #fff; transition: transform .12s var(--ease-out), background .15s; }
+.ann-important .ann-cta { background: var(--marigold); color: var(--ink); }
+.ann-cta:active { transform: scale(.97); }
+.adm-two { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: start; }
+.adm-two > .card { margin-bottom: 1rem; }
+.adm-ann input, .adm-ann textarea, .adm-ann select { width: 100%; box-sizing: border-box; border: 1px solid var(--line); border-radius: var(--r-sm); padding: .55rem .7rem; font: inherit; font-size: .86rem; background: #fff; }
+.adm-ann input, .adm-ann textarea { margin-bottom: .5rem; }
+.adm-ann input:focus, .adm-ann textarea:focus, .adm-ann select:focus { outline: none; border-color: var(--ink-3); box-shadow: 0 0 0 3px rgba(45,82,135,.14); }
+.adm-ann-templates { display: flex; flex-wrap: wrap; gap: .35rem; margin-bottom: .6rem; }
+.adm-ann-row { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: .5rem; }
+.adm-ann-row label { font-size: .72rem; font-weight: 600; color: var(--muted); display: grid; gap: .25rem; }
+.adm-ann-send { grid-template-columns: 1fr auto; align-items: center; margin-top: .6rem; }
+.adm-feature-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: .5rem; }
+.adm-switch { display: flex; align-items: center; gap: .65rem; padding: .6rem .7rem; border: 1px solid var(--line); border-radius: var(--r-sm); cursor: pointer; background: #FAFBFD; transition: background .15s, border-color .15s; }
+.adm-switch.on { background: #fff; border-color: var(--ink-line); }
+.adm-switch input { position: absolute; opacity: 0; pointer-events: none; }
+.adm-switch-ui { flex-shrink: 0; width: 38px; height: 22px; border-radius: 999px; background: #CBD5E1; position: relative; transition: background .2s; }
+.adm-switch-ui::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.3); transition: transform .2s var(--ease-out); }
+.adm-switch.on .adm-switch-ui { background: var(--profit); }
+.adm-switch.on .adm-switch-ui::after { transform: translateX(16px); }
+.adm-switch input:focus-visible + .adm-switch-ui { outline: 2px solid var(--marigold); outline-offset: 2px; }
+.adm-switch b { display: block; font-size: .82rem; }
+.adm-switch small { display: block; font-size: .7rem; color: var(--muted); }
+.tab-off { margin-left: .35rem; font-size: .58rem; font-weight: 800; letter-spacing: .05em; padding: .1rem .35rem; border-radius: 4px; background: #FDECEC; color: #B42318; vertical-align: 1px; }
+/* switched-off features (traders only) */
+.feat-off-voice .voice-btn, .feat-off-report [data-action="open-weekly-report"], .feat-off-playbook #setup-playbook, .feat-off-quote #quote-card, .feat-off-announcements .ann-wrap, .feat-off-risk .hero-budget { display: none !important; }
+@media (max-width: 900px) { .dash-msgs.two, .adm-two { grid-template-columns: 1fr; } }
+@media (max-width: 700px) { .adm-ann-row { grid-template-columns: 1fr; } }
+.adm-ann-send label.report-check { display: flex; align-items: center; gap: .5rem; font-size: .82rem; color: var(--text); }
