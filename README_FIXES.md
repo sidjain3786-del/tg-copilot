@@ -209,3 +209,16 @@ This restores the WHOLE database (trades/notes saved after that time are rolled 
 ## Update 24 — Log Trade: cleaner Quick Note
 - Quick Note now has its own full-width row under "Trade Date & Time / Exit Reason" (was squeezed into a narrow third column with the 🎤 floating outside).
 - 🎤 sits inside the note box (bottom-right); the box only stretches downward (min ~3 lines, max ~10) so dragging no longer breaks the layout.
+
+## Update 25 — Pre-launch test + System check
+- Full launch test on a fresh database (real Cloudflare runtime + real browser): 78/78 passed — accounts & validation, 25 traders signing up and saving at the same moment (all OK, slowest 1.9 s), privacy between traders, admin-only APIs, XSS, image storage, full phone journey (signup → strategy → trade with screenshot → edit → notes → every tab → weekly PDF → logout/login), admin journey (quote, announcement, feature switch, blog) and the trader view after that.
+- New **🩺 System check** in the Admin tab: one tap checks database tables, R2 image storage (real upload/read/delete), ADMIN_EMAILS, push setup, and that every API and important file actually got uploaded to GitHub (tells you the exact missing file).
+- Push: devices that fail 5 sends in a row are removed automatically.
+- New file: `functions/api/admin/health.js`. Changed: `app.js`, `theme.css`, `functions/api/quotes/notify.js`.
+
+### Launch checklist
+1. Upload the full project (all folders) to GitHub; Cloudflare build shows Success.
+2. Cloudflare → Pages → Settings: D1 binding `DB`, R2 binding `IMAGES`, variable `ADMIN_EMAILS` — for Production. Redeploy after changing.
+3. Open the app as admin → Admin tab → 🩺 **System check** → everything ✅.
+4. Post a Quote of the Day and a "journaling" announcement; ask traders to tap 🔔 once (iPhone: Add to Home Screen first).
+5. Share the link. D1 Time Travel keeps 7 days of database history (free plan) if anything needs undoing.

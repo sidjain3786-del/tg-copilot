@@ -2145,6 +2145,7 @@ function renderAdminTab(){
     <div class="adm-kpis">${k.map(([l,v,c])=>`<div class="${c}"><span>${l}</span><strong>${v}</strong></div>`).join('')}</div>
     <div class="adm-two">${renderAdminQuotePanel()}${renderAdminAnnPanel()}</div>
     ${renderAdminFeaturesPanel()}
+    ${renderAdminHealthPanel()}
     <section class="card adm-list">
       <div class="adm-tools">
         <input type="search" id="admin-search" value="${esc(a.search)}" placeholder="🔍 Naam ya email…" aria-label="Search traders">
@@ -2533,6 +2534,36 @@ function handleAnnClick(action, btn){
 document.addEventListener('input', e=>{ if(['an-title','an-body'].includes(e.target.id)) readAnnDraft(); });
 document.addEventListener('change', e=>{ if(['an-cta','an-style','an-days'].includes(e.target.id)) readAnnDraft(); });
 
+
+/* ---------------- admin: system check (catches missing uploads / settings after a deploy) ---------------- */
+const HEALTH_FILES = [
+  ['/api/settings','functions/api/settings.js'], ['/api/quotes?limit=1','functions/api/quotes/index.js'], ['/api/announcements','functions/api/announcements/index.js'],
+  ['/api/blog?limit=1','functions/api/blog/index.js'], ['/api/push','functions/api/push/index.js'], ['/api/notify/latest','functions/api/notify/latest.js'],
+  ['/api/img-health','functions/api/img-health.js'], ['/api/admin/users','functions/api/admin/users/index.js']
+];
+const HEALTH_STATIC = [['/theme.css','theme.css','text/css'],['/vendor/jspdf.umd.min.js','vendor/jspdf.umd.min.js','javascript'],['/vendor/jspdf.plugin.autotable.min.js','vendor/jspdf.plugin.autotable.min.js','javascript'],['/icon.svg','icon.svg','svg'],['/badge-96.png','badge-96.png','image/png'],['/manifest.webmanifest','manifest.webmanifest','']];
+async function runSystemCheck(){
+  const box=$('#adm-health-results'); if(box) box.innerHTML='<p class="pb-empty">Check ho raha hai…</p>';
+  const rows=[];
+  try { const d=await api('/api/admin/health'); d.checks.forEach(c=>rows.push(c)); }
+  catch(e){ rows.push({name:'Server checks',ok:false,detail:'functions/api/admin/health.js GitHub par nahi hai ya error: '+e.message}); }
+  for (const [url,file] of HEALTH_FILES){
+    try { const r=await fetch(url,{credentials:'same-origin',cache:'no-store'}); const type=r.headers.get('Content-Type')||''; const ok=type.includes('application/json');
+      rows.push({name:`API ${url.split('?')[0]}`, ok, detail: ok?'OK':`JSON nahi aaya (${r.status}) — "${file}" GitHub par upload karo`}); }
+    catch(_) { rows.push({name:`API ${url}`, ok:false, detail:'Network error'}); }
+  }
+  for (const [url,file,want] of HEALTH_STATIC){
+    try { const r=await fetch(url,{cache:'no-store'}); const type=r.headers.get('Content-Type')||''; const ok=r.ok && (!want || type.includes(want));
+      rows.push({name:`File ${file}`, ok, detail: ok?'OK':`Nahi mili — "${file}" GitHub par upload karo`}); }
+    catch(_) { rows.push({name:`File ${file}`, ok:false, detail:'Network error'}); }
+  }
+  const bad=rows.filter(r=>!r.ok).length;
+  if(box) box.innerHTML=`<p class="adm-health-sum ${bad?'bad':'good'}">${bad?`⚠️ ${bad} cheez${bad===1?'':'ein'} theek karni hai`:'✅ Sab kuch ready hai — launch kar sakte ho!'}</p><ul class="adm-health-list">${rows.map(r=>`<li class="${r.ok?'ok':'bad'}"><span>${r.ok?'✅':'❌'}</span><div><b>${esc(r.name)}</b><small>${esc(r.detail||'')}</small></div></li>`).join('')}</ul>`;
+}
+function renderAdminHealthPanel(){
+  return `<section class="card adm-health" id="admin-health"><div class="adm-quote-head"><h3 class="section-title">🩺 System check</h3><button type="button" class="btn-secondary btn-small" data-action="admin-health">Check karo</button></div><p class="card-sub">Har deploy ke baad ek baar chalao — GitHub par chhooti file, R2, admin emails sab check karta hai.</p><div id="adm-health-results"></div></section>`;
+}
+
 /* ---------------- strategy manager ---------------- */
 function strategyUsage(name){
   return { trades: STATE.trades.filter(t=>sameName(t.strategy,name)).length, notes: STATE.notes.filter(n=>noteMatchesStrategy(n,name)).length, exactNotes: STATE.notes.filter(n=>sameName(n.strategy,name)).length };
@@ -2650,6 +2681,7 @@ document.addEventListener('click', async (e) => {
   else if (handleAdminClick(action, btn)) { /* admin */ }
   else if (handleQuoteClick(action, btn)) { /* quotes */ }
   else if (handleAnnClick(action, btn)) { /* announcements */ }
+  else if (action==='admin-health') { runSystemCheck(); }
   else if (action==='privacy-ack') { try { localStorage.setItem('tc_privacy_ack_'+STATE.user.id, new Date().toISOString()); } catch(_) {} $('#privacy-notice')?.remove(); }
   else if (action==='select-mindset') { STATE.selectedMindsetId = btn.dataset.id; renderTabOnly(); }
   else if (action==='toggle-rule') { const i=btn.dataset.idx; STATE.checkedRules[i]=!STATE.checkedRules[i]; renderTabOnly(); }

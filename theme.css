@@ -791,3 +791,10 @@ button[disabled] { opacity: .65; cursor: progress; }
 .feat-off-voice .quick-note-hint { display: none; }
 @media (max-width: 700px) { .fast-journal-time-fields { grid-template-columns: 1fr !important; } }
 .fast-journal-time-fields { grid-template-columns: 1fr 1fr; }
+/* system check */
+.adm-health-sum { font-weight: 700; padding: .6rem .8rem; border-radius: var(--r-sm); margin: .6rem 0; }
+.adm-health-sum.good { background: #E6F6EF; color: #08734F; } .adm-health-sum.bad { background: #FFF5F5; color: #B42318; }
+.adm-health-list { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: .4rem; }
+.adm-health-list li { display: flex; gap: .5rem; padding: .5rem .6rem; border: 1px solid var(--line); border-radius: 8px; font-size: .8rem; }
+.adm-health-list li.bad { border-color: #F3C2C1; background: #FFF8F8; }
+.adm-health-list small { display: block; color: var(--muted); font-size: .72rem; }
