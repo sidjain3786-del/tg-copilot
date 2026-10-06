@@ -2143,7 +2143,7 @@ function renderAdminTab(){
       <div class="adm-head-actions"><button type="button" class="btn-secondary btn-small" data-action="admin-reload">↻ Refresh</button><button type="button" class="btn-secondary btn-small" data-action="admin-export">⬇️ CSV</button></div>
     </section>
     <div class="adm-kpis">${k.map(([l,v,c])=>`<div class="${c}"><span>${l}</span><strong>${v}</strong></div>`).join('')}</div>
-    <div class="adm-two">${renderAdminQuotePanel()}${renderAdminAnnPanel()}</div>
+    ${renderAdminBroadcast()}
     ${renderAdminFeaturesPanel()}
     ${renderAdminHealthPanel()}
     <section class="card adm-list">
@@ -2363,17 +2363,18 @@ function renderQuoteCard(){
 }
 function rerenderQuoteCard(){
   const wrap=$('#dash-msgs'); if(wrap) wrap.outerHTML=renderDashMessages(); else { const el=$('#quote-card'); if(el) el.outerHTML=renderQuoteCard(); }
-  const adm=$('#admin-quote'); if(adm) adm.outerHTML=renderAdminQuotePanel();
+  const bc=$('#admin-broadcast'); if(bc) bc.outerHTML=renderAdminBroadcast();
 }
 function renderAdminQuotePanel(){
   const q=quoteState();
-  return `<section class="card adm-quote" id="admin-quote">
-    <div class="adm-quote-head"><h3 class="section-title">💬 Quote of the Day</h3><span class="adm-readonly">🔔 ${q.subscribers} device${q.subscribers===1?'':'s'} par notification on</span></div>
-    <textarea id="aq-text" rows="2" maxlength="500" placeholder="Aaj ka quote likho… e.g. Plan the trade, trade the plan.">${esc(q.draft||'')}</textarea>
-    <div class="adm-quote-row"><input id="aq-author" maxlength="80" placeholder="Kisne kaha (optional)" value="${esc(q.draftAuthor||'')}"><label class="report-check"><input type="checkbox" id="aq-notify" checked> Sabko notification bhejo</label><button type="button" class="btn-primary" data-action="admin-post-quote" ${q.posting?'disabled':''}>${q.posting?'Post ho raha hai…':'📣 Post karo'}</button></div>
+  if((STATE.broadcastMode||'quote')!=='quote') return '<div id="admin-quote" hidden></div>';
+  return `<div class="adm-bc-body" id="admin-quote">
+    <label class="adm-field"><span>Quote</span><textarea id="aq-text" rows="3" maxlength="500" placeholder="Aaj ka quote likho… e.g. Plan the trade, trade the plan.">${esc(q.draft||'')}</textarea></label>
+    <label class="adm-field"><span>Kisne kaha <small>(optional)</small></span><input id="aq-author" maxlength="80" placeholder="e.g. Mark Douglas" value="${esc(q.draftAuthor||'')}"></label>
+    <div class="adm-send-row"><label class="adm-notify"><input type="checkbox" id="aq-notify" checked><span>🔔 Sabko notification bhejo</span></label><button type="button" class="btn-primary" data-action="admin-post-quote" ${q.posting?'disabled':''}>${q.posting?'Post ho raha hai…':'💬 Quote post karo'}</button></div>
     ${q.progress?`<p class="adm-quote-progress" role="status">${q.progress}</p>`:''}
     ${q.recent.length?`<details class="adm-quote-history"><summary>Pichhle quotes (${q.recent.length})</summary><ul>${q.recent.map(x=>`<li><div><q>${esc(x.text)}</q>${x.author?` <small>— ${esc(x.author)}</small>`:''}<small>${esc(quoteDateLabel(x.createdAt))} · 🔔 ${x.notified||0} bheje</small></div><button type="button" class="be-del" data-action="admin-delete-quote" data-id="${esc(x.id)}" aria-label="Delete quote">✕</button></li>`).join('')}</ul></details>`:''}
-  </section>`;
+  </div>`;
 }
 async function postQuote(){
   const q=quoteState(); if(q.posting) return;
@@ -2481,25 +2482,37 @@ function renderDashMessages(){
 }
 function rerenderAnnouncements(){
   const el=$('#dash-msgs'); if(el) el.outerHTML=renderDashMessages();
-  const adm=$('#admin-ann'); if(adm) adm.outerHTML=renderAdminAnnPanel();
+  const bc=$('#admin-broadcast'); if(bc) bc.outerHTML=renderAdminBroadcast();
+}
+function renderAdminBroadcast(){
+  const mode=STATE.broadcastMode||'quote', n=quoteState().subscribers||0, live=annState().all.filter(x=>x.active&&(!x.expiresAt||new Date(x.expiresAt)>new Date())).length;
+  return `<section class="card adm-broadcast" id="admin-broadcast">
+    <div class="adm-bc-head"><div><h3 class="section-title">📣 Traders ko message bhejo</h3><p class="card-sub">Dashboard par dikhega · notification on ho to phone par bhi</p></div><span class="adm-readonly">🔔 ${n} device${n===1?'':'s'} par notification on</span></div>
+    <div class="adm-seg" role="tablist" aria-label="Message type">
+      <button type="button" role="tab" aria-selected="${mode==='quote'}" class="${mode==='quote'?'active':''}" data-action="bc-mode" data-mode="quote">💬 Quote of the Day</button>
+      <button type="button" role="tab" aria-selected="${mode==='ann'}" class="${mode==='ann'?'active':''}" data-action="bc-mode" data-mode="ann">📢 Announcement${live?` <span class="adm-seg-count">${live} live</span>`:''}</button>
+    </div>
+    ${renderAdminQuotePanel()}${renderAdminAnnPanel()}
+  </section>`;
 }
 function renderAdminAnnPanel(){
   const a=annState(), d=a.draft, q=quoteState();
   const opt=(v,l,cur)=>`<option value="${v}" ${String(cur)===String(v)?'selected':''}>${l}</option>`;
-  return `<section class="card adm-quote adm-ann" id="admin-ann">
-    <div class="adm-quote-head"><h3 class="section-title">📢 Announcement</h3><span class="adm-readonly">🔔 ${q.subscribers||0} devices par notification on</span></div>
+  if((STATE.broadcastMode||'quote')!=='ann') return '<div id="admin-ann" hidden></div>';
+  return `<div class="adm-bc-body adm-ann" id="admin-ann">
+    <span class="adm-field-label">Jaldi shuru karo — template chuno</span>
     <div class="adm-ann-templates">${ANN_TEMPLATES.map(([l],i)=>`<button type="button" class="qotd-link" data-action="ann-template" data-i="${i}">${l}</button>`).join('')}</div>
-    <input id="an-title" maxlength="120" placeholder="Title — e.g. Kya aapne aaj journal kiya? 📝" value="${esc(d.title)}">
-    <textarea id="an-body" rows="2" maxlength="600" placeholder="Message (optional)">${esc(d.body)}</textarea>
+    <label class="adm-field"><span>Title</span><input id="an-title" maxlength="120" placeholder="e.g. Kya aapne aaj journal kiya? 📝" value="${esc(d.title)}"></label>
+    <label class="adm-field"><span>Message <small>(optional)</small></span><textarea id="an-body" rows="3" maxlength="600" placeholder="Traders ko kya kehna hai…">${esc(d.body)}</textarea></label>
     <div class="adm-ann-row">
       <label>Button<select id="an-cta">${opt('','Koi button nahi',d.cta)}${Object.entries(ANN_CTA).map(([k,v])=>opt(k,v[0],d.cta)).join('')}</select></label>
       <label>Style<select id="an-style">${opt('important','📢 Important',d.style)}${opt('info','ℹ️ Info',d.style)}${opt('celebrate','🎉 Celebration',d.style)}</select></label>
       <label>Kitne din dikhe<select id="an-days">${opt('1','1 din',d.days)}${opt('3','3 din',d.days)}${opt('7','7 din',d.days)}${opt('0','Jab tak hatao nahi',d.days)}</select></label>
     </div>
-    <div class="adm-ann-row adm-ann-send"><label class="report-check"><input type="checkbox" id="an-notify" checked> Sabko notification bhejo</label><button type="button" class="btn-primary" data-action="admin-post-ann" ${a.posting?'disabled':''}>${a.posting?'Bhej rahe hain…':'📢 Announce karo'}</button></div>
+    <div class="adm-send-row"><label class="adm-notify"><input type="checkbox" id="an-notify" checked><span>🔔 Sabko notification bhejo</span></label><button type="button" class="btn-primary" data-action="admin-post-ann" ${a.posting?'disabled':''}>${a.posting?'Bhej rahe hain…':'📢 Announce karo'}</button></div>
     ${a.progress?`<p class="adm-quote-progress" role="status">${a.progress}</p>`:''}
     ${a.all.length?`<details class="adm-quote-history" ${a.all.some(x=>x.active)?'open':''}><summary>Announcements (${a.all.length})</summary><ul>${a.all.map(x=>{ const live=x.active && (!x.expiresAt || new Date(x.expiresAt)>new Date()); return `<li><div><q>${esc(x.title)}</q><small>${live?'🟢 Live':'⚪ Khatam'} · ${esc(quoteDateLabel(x.createdAt))}${x.expiresAt?` · ${live?'khatam':'khatam hua'} ${esc(quoteDateLabel(x.expiresAt))}`:''} · 🔔 ${x.notified||0}</small></div><button type="button" class="be-del" data-action="admin-delete-ann" data-id="${esc(x.id)}" aria-label="Delete">✕</button></li>`; }).join('')}</ul></details>`:''}
-  </section>`;
+  </div>`;
 }
 function readAnnDraft(){ const a=annState(); a.draft={ title:$('#an-title')?.value||'', body:$('#an-body')?.value||'', cta:$('#an-cta')?.value||'', style:$('#an-style')?.value||'info', days:$('#an-days')?.value||'1' }; return a.draft; }
 async function sendPushBatches(kind, id, total, onProgress){
@@ -2682,6 +2695,7 @@ document.addEventListener('click', async (e) => {
   else if (handleQuoteClick(action, btn)) { /* quotes */ }
   else if (handleAnnClick(action, btn)) { /* announcements */ }
   else if (action==='admin-health') { runSystemCheck(); }
+  else if (action==='bc-mode') { STATE.broadcastMode=btn.dataset.mode; const bc=$('#admin-broadcast'); if(bc) bc.outerHTML=renderAdminBroadcast(); }
   else if (action==='privacy-ack') { try { localStorage.setItem('tc_privacy_ack_'+STATE.user.id, new Date().toISOString()); } catch(_) {} $('#privacy-notice')?.remove(); }
   else if (action==='select-mindset') { STATE.selectedMindsetId = btn.dataset.id; renderTabOnly(); }
   else if (action==='toggle-rule') { const i=btn.dataset.idx; STATE.checkedRules[i]=!STATE.checkedRules[i]; renderTabOnly(); }

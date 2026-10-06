@@ -222,3 +222,8 @@ This restores the WHOLE database (trades/notes saved after that time are rolled 
 3. Open the app as admin → Admin tab → 🩺 **System check** → everything ✅.
 4. Post a Quote of the Day and a "journaling" announcement; ask traders to tap 🔔 once (iPhone: Add to Home Screen first).
 5. Share the link. D1 Time Travel keeps 7 days of database history (free plan) if anything needs undoing.
+
+## Update 26 — Admin: one tidy "Traders ko message bhejo" card
+- Quote of the Day and Announcement were two side-by-side cards of very different heights (and the announcement's "Sabko notification bhejo" checkbox was split from its text).
+- Now one card with a switch at the top: **💬 Quote of the Day | 📢 Announcement** (shows how many announcements are live). Fields are labelled, full width, and the bottom row is always: ☑ 🔔 Sabko notification bhejo ··· [Post button]. What you typed is kept when switching. Device count shown once ("1 device", not "1 devices").
+- Full launch test re-run on a fresh database: 78/78 passed.
