@@ -1048,10 +1048,17 @@ function renderLogTab(){
           <div><label>Exit <span class="optional-label">optional</span></label><input type="number" step="any" id="log-exit" placeholder="Exit"></div>
           <div><label>SL <span class="optional-label">optional</span></label><input type="number" step="any" id="log-sl" placeholder="Stop loss"></div>
         </div>
-        <div class="field grid-3 fast-journal-time-fields">
+        <div class="field grid-2 fast-journal-time-fields">
           <div><label>Trade Date &amp; Time <span class="optional-label">used for session analysis</span></label><input type="datetime-local" id="log-trade-datetime" value="${esc(localDateTimeInputValue())}"></div>
           <div><label>Exit Reason <span class="optional-label">optional</span></label><input type="text" id="log-exit-reason" placeholder="Target, SL, manual, time, news..."></div>
-          <div><label class="voice-label">Quick Note <span class="optional-label">optional</span><button type="button" class="voice-btn voice-btn-inline" data-action="voice-type" data-voice-for="log-notes" title="Bolkar likho" aria-label="Voice typing" aria-pressed="false">🎤</button></label><textarea id="log-notes" rows="2" placeholder="Kya sahi hua? Kya improve karna hai? (🎤 se bol bhi sakte ho)"></textarea></div>
+        </div>
+        <div class="field quick-note-field">
+          <label for="log-notes">Quick Note <span class="optional-label">optional</span></label>
+          <div class="quick-note-box">
+            <textarea id="log-notes" rows="3" maxlength="1000" placeholder="Kya sahi hua? Kya improve karna hai? Trade ke time dimaag mein kya chal raha tha?"></textarea>
+            <button type="button" class="voice-btn quick-note-mic" data-action="voice-type" data-voice-for="log-notes" title="Bolkar likho" aria-label="Voice typing" aria-pressed="false">🎤</button>
+          </div>
+          <small class="quick-note-hint">🎤 dabakar bol bhi sakte ho</small>
         </div>
 
         <div class="fast-journal-emotion">

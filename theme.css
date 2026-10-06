@@ -779,3 +779,15 @@ button[disabled] { opacity: .65; cursor: progress; }
 @media (max-width: 900px) { .dash-msgs.two, .adm-two { grid-template-columns: 1fr; } }
 @media (max-width: 700px) { .adm-ann-row { grid-template-columns: 1fr; } }
 .adm-ann-send label.report-check { display: flex; align-items: center; gap: .5rem; font-size: .82rem; color: var(--text); }
+
+/* ---------- Log Trade: quick note on its own full-width row ---------- */
+.quick-note-field { margin-top: .2rem; }
+.quick-note-box { position: relative; }
+.quick-note-box textarea { display: block; width: 100%; box-sizing: border-box; min-height: 84px; max-height: 260px; resize: vertical; padding: .75rem 3.4rem .75rem .9rem; line-height: 1.5; font: inherit; font-size: .9rem; border-radius: var(--r-sm); }
+.quick-note-mic { position: absolute; right: .5rem; bottom: .55rem; width: 2.3rem; height: 2.3rem; border-radius: 50%; border: 1px solid var(--line); background: #fff; font-size: 1rem; line-height: 1; cursor: pointer; box-shadow: var(--shadow-1); transition: background .15s, transform .12s var(--ease-out); }
+.quick-note-mic:hover { background: var(--ink-tint); }
+.quick-note-mic:active { transform: scale(.94); }
+.quick-note-hint { display: block; margin-top: .3rem; font-size: .7rem; color: var(--muted); }
+.feat-off-voice .quick-note-hint { display: none; }
+@media (max-width: 700px) { .fast-journal-time-fields { grid-template-columns: 1fr !important; } }
+.fast-journal-time-fields { grid-template-columns: 1fr 1fr; }

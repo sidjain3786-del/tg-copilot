@@ -205,3 +205,7 @@ This restores the WHOLE database (trades/notes saved after that time are rolled 
 - Admin tab → **⚙️ Features on / off**: Risk Center, Analysis, Notes, History, Blog, Setup Playbook, Weekly report, Quote of the Day, Announcements, Voice typing. Switching off hides it for all traders instantly (tabs, buttons, cards; Risk also hides the dashboard loss-budget). Data is not deleted — switch back on any time.
 - Admins still see everything (switched-off tabs show a red OFF tag) so you can check things.
 - New files: `functions/_lib/settings.js`, `functions/api/settings.js`, `functions/api/announcements/index.js`, `functions/api/announcements/[id].js`, `functions/api/notify/latest.js`. Changed: `functions/api/quotes/notify.js`, `functions/_lib/auth.js`. Tables are created automatically.
+
+## Update 24 — Log Trade: cleaner Quick Note
+- Quick Note now has its own full-width row under "Trade Date & Time / Exit Reason" (was squeezed into a narrow third column with the 🎤 floating outside).
+- 🎤 sits inside the note box (bottom-right); the box only stretches downward (min ~3 lines, max ~10) so dragging no longer breaks the layout.
