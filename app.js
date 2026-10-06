@@ -1,3 +1,4 @@
+const APP_VERSION = '26';   // shown in Admin → System check; bump on every release
 /* ============================================================
    Trader Co-Pilot — vanilla JS (no framework)
    Talks to /api/* (Cloudflare Pages Functions + D1) for
@@ -2574,7 +2575,7 @@ async function runSystemCheck(){
   if(box) box.innerHTML=`<p class="adm-health-sum ${bad?'bad':'good'}">${bad?`⚠️ ${bad} cheez${bad===1?'':'ein'} theek karni hai`:'✅ Sab kuch ready hai — launch kar sakte ho!'}</p><ul class="adm-health-list">${rows.map(r=>`<li class="${r.ok?'ok':'bad'}"><span>${r.ok?'✅':'❌'}</span><div><b>${esc(r.name)}</b><small>${esc(r.detail||'')}</small></div></li>`).join('')}</ul>`;
 }
 function renderAdminHealthPanel(){
-  return `<section class="card adm-health" id="admin-health"><div class="adm-quote-head"><h3 class="section-title">🩺 System check</h3><button type="button" class="btn-secondary btn-small" data-action="admin-health">Check karo</button></div><p class="card-sub">Har deploy ke baad ek baar chalao — GitHub par chhooti file, R2, admin emails sab check karta hai.</p><div id="adm-health-results"></div></section>`;
+  return `<section class="card adm-health" id="admin-health"><div class="adm-quote-head"><h3 class="section-title">🩺 System check <span class="adm-readonly">App version ${APP_VERSION}</span></h3><button type="button" class="btn-secondary btn-small" data-action="admin-health">Check karo</button></div><p class="card-sub">Har deploy ke baad ek baar chalao — GitHub par chhooti file, R2, admin emails sab check karta hai.</p><div id="adm-health-results"></div></section>`;
 }
 
 /* ---------------- strategy manager ---------------- */

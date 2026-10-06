@@ -1,4 +1,4 @@
-const CACHE = 'trader-copilot-v12';
+const CACHE = 'trader-copilot-v13';
 const APP_SHELL = ['/', '/index.html', '/style.css', '/theme.css', '/app.js', '/vendor/jspdf.umd.min.js', '/vendor/jspdf.plugin.autotable.min.js', '/manifest.webmanifest', '/icon.svg', '/icon-192.png', '/icon-512.png', '/icon-maskable-192.png', '/icon-maskable-512.png', '/apple-touch-icon.png', '/favicon-32.png', '/badge-96.png'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(APP_SHELL)).then(() => self.skipWaiting()));

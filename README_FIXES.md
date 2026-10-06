@@ -227,3 +227,7 @@ This restores the WHOLE database (trades/notes saved after that time are rolled 
 - Quote of the Day and Announcement were two side-by-side cards of very different heights (and the announcement's "Sabko notification bhejo" checkbox was split from its text).
 - Now one card with a switch at the top: **💬 Quote of the Day | 📢 Announcement** (shows how many announcements are live). Fields are labelled, full width, and the bottom row is always: ☑ 🔔 Sabko notification bhejo ··· [Post button]. What you typed is kept when switching. Device count shown once ("1 device", not "1 devices").
 - Full launch test re-run on a fresh database: 78/78 passed.
+
+## Update 27 — Final package
+- Admin → 🩺 System check now shows **App version 26** so you can confirm after every upload that the new version is live (open the Admin tab → System check: the number must match).
+- Service worker cache bumped (v13) so all phones pick up the latest files.
