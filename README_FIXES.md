@@ -231,3 +231,10 @@ This restores the WHOLE database (trades/notes saved after that time are rolled 
 ## Update 27 — Final package
 - Admin → 🩺 System check now shows **App version 26** so you can confirm after every upload that the new version is live (open the Admin tab → System check: the number must match).
 - Service worker cache bumped (v13) so all phones pick up the latest files.
+
+## Update 28 — Sidebar navigation on laptop / desktop (App version 27)
+- Screens 1024px and wider: the top tab bar is replaced by a **left sidebar** grouped as Journal (Dashboard, Log Trade, Trade History, Notes), Insights (Session Analysis, Risk Center), Community (Blog) and Admin. Active page is highlighted; Blog shows the unread count; switched-off features show OFF (admins only).
+- "« Menu chhota karo" collapses it to icons only (remembered on that device).
+- Content now uses the empty side space (up to 1600px wide); the Log Trade form is wider (up to 1280px) and sits next to the sidebar.
+- Tablets (701–1023px) keep the top tabs; phones keep the bottom bar. No sideways scrolling at any size.
+- Changed: `index.html`, `app.js`, `theme.css`, `sw.js`.

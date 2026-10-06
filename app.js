@@ -1,4 +1,4 @@
-const APP_VERSION = '26';   // shown in Admin → System check; bump on every release
+const APP_VERSION = '27';   // shown in Admin → System check; bump on every release
 /* ============================================================
    Trader Co-Pilot — vanilla JS (no framework)
    Talks to /api/* (Cloudflare Pages Functions + D1) for
@@ -827,11 +827,34 @@ const TABS = [
   {id:'admin', label:'🛠️ Admin'}
 ];
 function visibleTabs(){ return TABS.filter(t=>(t.id!=='admin' || isAdmin()) && (!TAB_FEATURE[t.id] || featureVisible(TAB_FEATURE[t.id]))); }
+/* ---------------- desktop sidebar navigation ---------------- */
+const SIDE_GROUPS = [
+  ['Journal', [['copilot','⚡','Dashboard'],['log','➕','Log Trade'],['history','📜','Trade History'],['notes','🧠','Notes & Learnings']]],
+  ['Insights', [['analysis','📊','Session Analysis'],['risk','🛡️','Risk Center']]],
+  ['Community', [['blog','📰','Blog']]],
+  ['Admin', [['admin','🛠️','Admin Panel']]]
+];
+function sideCollapsed(){ try { return localStorage.getItem('tc_side_collapsed')==='1'; } catch(_) { return false; } }
+function renderSideNav(){
+  const el=$('#side-nav'); if(!el) return;
+  const visible=new Set(visibleTabs().map(t=>t.id)), collapsed=sideCollapsed();
+  document.body.classList.toggle('side-collapsed', collapsed);
+  const unread = STATE.blog?.loaded ? blogUnreadCount() : 0;
+  el.innerHTML = SIDE_GROUPS.map(([group,items])=>{
+    const rows=items.filter(([id])=>visible.has(id)); if(!rows.length) return '';
+    return `<div class="side-group"><span class="side-group-label">${group}</span>${rows.map(([id,icon,label])=>{
+      const off=isAdmin()&&TAB_FEATURE[id]&&!featureOn(TAB_FEATURE[id]);
+      return `<button type="button" class="side-item ${STATE.activeTab===id?'active':''}" data-action="set-tab" data-tab="${id}" title="${label}" ${STATE.activeTab===id?'aria-current="page"':''}>
+        <span class="side-icon" aria-hidden="true">${icon}</span><span class="side-label">${label}</span>
+        ${off?'<span class="tab-off">OFF</span>':''}${id==='blog'&&unread?`<span class="side-badge">${unread}</span>`:''}</button>`; }).join('')}</div>`;
+  }).join('') + `<button type="button" class="side-collapse" data-action="side-toggle" title="${collapsed?'Menu bada karo':'Menu chhota karo'}" aria-label="${collapsed?'Expand menu':'Collapse menu'}"><span aria-hidden="true">${collapsed?'»':'«'}</span><span class="side-label">Menu chhota karo</span></button>`;
+}
 function renderTabNav(){
   $('#tab-nav').innerHTML = visibleTabs().map(t =>
     `<button class="tab-btn ${STATE.activeTab===t.id?'active':''}" data-action="set-tab" data-tab="${t.id}">${t.label}${isAdmin()&&TAB_FEATURE[t.id]&&!featureOn(TAB_FEATURE[t.id])?'<span class="tab-off" title="Traders ke liye band">OFF</span>':''}${t.id==='blog'&&STATE.blog?.loaded&&blogUnreadCount()?`<span class="tab-dot" aria-label="${blogUnreadCount()} new posts">${blogUnreadCount()}</span>`:''}</button>`
   ).join('');
   try { placeTabIndicator(); } catch (e) { console.warn('indicator skipped', e); }
+  renderSideNav();
   const mobileIcons = {copilot:'⚡',log:'➕',notes:'🧠',history:'📜',analysis:'📊',risk:'🛡️',blog:'📰',admin:'🛠️'};
   const mobileLabels = {copilot:'Co-Pilot',log:'Log',notes:'Notes',history:'History',analysis:'Analysis',risk:'Risk',blog:'Blog',admin:'Admin'};
   const unread = STATE.blog?.loaded ? blogUnreadCount() : 0;
@@ -2696,6 +2719,7 @@ document.addEventListener('click', async (e) => {
   else if (handleQuoteClick(action, btn)) { /* quotes */ }
   else if (handleAnnClick(action, btn)) { /* announcements */ }
   else if (action==='admin-health') { runSystemCheck(); }
+  else if (action==='side-toggle') { try { localStorage.setItem('tc_side_collapsed', sideCollapsed()?'0':'1'); } catch(_) {} renderSideNav(); }
   else if (action==='bc-mode') { STATE.broadcastMode=btn.dataset.mode; const bc=$('#admin-broadcast'); if(bc) bc.outerHTML=renderAdminBroadcast(); }
   else if (action==='privacy-ack') { try { localStorage.setItem('tc_privacy_ack_'+STATE.user.id, new Date().toISOString()); } catch(_) {} $('#privacy-notice')?.remove(); }
   else if (action==='select-mindset') { STATE.selectedMindsetId = btn.dataset.id; renderTabOnly(); }
