@@ -11,6 +11,11 @@ export async function deleteTrader(env, me, id) {
   await run('DELETE FROM user_session_notes WHERE user_id = ?');
   await run('DELETE FROM user_activity WHERE user_id = ?');
   await run('DELETE FROM push_subscriptions WHERE user_id = ?');
+  let compImages = [];
+  try { compImages = (await env.DB.prepare(`SELECT image FROM competition_entries WHERE user_id = ? AND image != ''`).bind(u.id).all()).results || []; } catch (_) {}
+  await run('DELETE FROM competition_claps WHERE entry_id IN (SELECT id FROM competition_entries WHERE user_id = ?)');
+  await run('DELETE FROM competition_claps WHERE user_id = ?');
+  await run('DELETE FROM competition_entries WHERE user_id = ?');
   await env.DB.prepare('DELETE FROM login_attempts WHERE email = ?').bind(u.email).run().catch(() => null);
   await env.DB.prepare('DELETE FROM users WHERE id = ?').bind(u.id).run();
   let images = 0;
@@ -23,6 +28,7 @@ export async function deleteTrader(env, me, id) {
         if (keys.length) { await env.IMAGES.delete(keys); images += keys.length; }
         cursor = page.truncated ? page.cursor : undefined;
       } while (cursor);
+      for (const r of compImages) await env.IMAGES.delete(`comp/${String(r.image).replace('/api/comp-img/', '')}`);
     } catch (e) { console.error('image cleanup', e); }
   }
   return { id, ok: true, email: u.email, name: u.name, images };

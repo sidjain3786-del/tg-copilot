@@ -45,6 +45,17 @@ export function clearCookie() {
 
 // Tables added after the first release. Created once per Worker isolate
 // instead of on every request.
+async function addMissingColumns(env, table, cols) {
+  try {
+    const { results } = await env.DB.prepare(`PRAGMA table_info(${table})`).all();
+    const have = new Set((results || []).map(r => r.name));
+    const added = [];
+    for (const [name, def] of Object.entries(cols)) {
+      if (!have.has(name)) { await env.DB.prepare(`ALTER TABLE ${table} ADD COLUMN ${name} ${def}`).run(); added.push(name); }
+    }
+    return added;
+  } catch (e) { console.error('schema upgrade', table, e); return []; }
+}
 let schemaReady = false;
 export async function ensureSchema(env) {
   if (schemaReady) return;
@@ -55,6 +66,15 @@ export async function ensureSchema(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS quotes (id TEXT PRIMARY KEY, text TEXT NOT NULL, author TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, created_by TEXT, notified INTEGER NOT NULL DEFAULT 0)`).run();
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS push_subscriptions (endpoint TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at TEXT NOT NULL, last_ok_at TEXT, fails INTEGER NOT NULL DEFAULT 0)`).run();
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS competitions (id TEXT PRIMARY KEY, title TEXT NOT NULL, strategy TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', rules TEXT NOT NULL DEFAULT '[]', entry_criteria TEXT NOT NULL DEFAULT '', exit_criteria TEXT NOT NULL DEFAULT '', start_date TEXT NOT NULL, end_date TEXT NOT NULL, criteria TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'active', results TEXT, reveal_names INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, created_by TEXT, prize_weekly TEXT NOT NULL DEFAULT '', prize_final TEXT NOT NULL DEFAULT '', week_results TEXT NOT NULL DEFAULT '{}')`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS competition_entries (id TEXT PRIMARY KEY, competition_id TEXT NOT NULL, user_id TEXT NOT NULL, alias TEXT NOT NULL, trade_id TEXT NOT NULL, trade TEXT NOT NULL, rules_checked TEXT NOT NULL DEFAULT '[]', image TEXT NOT NULL DEFAULT '', score REAL NOT NULL DEFAULT 0, breakdown TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, image_src TEXT NOT NULL DEFAULT '', day TEXT NOT NULL DEFAULT '', rr REAL, rules_part REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'ok', admin_note TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '', UNIQUE(competition_id, trade_id, user_id))`).run();
+  await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_comp_entries ON competition_entries (competition_id, created_at)`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS competition_claps (entry_id TEXT NOT NULL, user_id TEXT NOT NULL, PRIMARY KEY (entry_id, user_id))`).run();
+  // columns added in a later update -> add them to a database that already has the older tables
+  await addMissingColumns(env, 'competitions', { prize_weekly: `TEXT NOT NULL DEFAULT ''`, prize_final: `TEXT NOT NULL DEFAULT ''`, week_results: `TEXT NOT NULL DEFAULT '{}'` });
+  const newCols = await addMissingColumns(env, 'competition_entries', { image_src: `TEXT NOT NULL DEFAULT ''`, day: `TEXT NOT NULL DEFAULT ''`, rr: 'REAL', rules_part: 'REAL NOT NULL DEFAULT 0', status: `TEXT NOT NULL DEFAULT 'ok'`, admin_note: `TEXT NOT NULL DEFAULT ''`, updated_at: `TEXT NOT NULL DEFAULT ''` });
+  // entries saved by the older version: fill the new ranking columns from what was stored
+  if (newCols && newCols.includes('day')) await env.DB.prepare(`UPDATE competition_entries SET day = COALESCE(json_extract(trade, '$.day'), ''), rr = json_extract(trade, '$.rr'), rules_part = COALESCE(json_extract(breakdown, '$.rules'), 0) WHERE day = ''`).run().catch(e => console.error('entry backfill', e));
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS announcements (id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', cta TEXT NOT NULL DEFAULT '', style TEXT NOT NULL DEFAULT 'info', created_at TEXT NOT NULL, expires_at TEXT, active INTEGER NOT NULL DEFAULT 1, notified INTEGER NOT NULL DEFAULT 0, created_by TEXT)`).run();
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS user_activity (user_id TEXT PRIMARY KEY, last_seen_at TEXT, last_save_at TEXT, saves INTEGER NOT NULL DEFAULT 0, visits INTEGER NOT NULL DEFAULT 0)`).run();
   schemaReady = true;

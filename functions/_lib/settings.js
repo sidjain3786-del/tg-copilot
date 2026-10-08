@@ -1,5 +1,5 @@
 // App-wide settings stored in D1 (app_settings table).
-export const FEATURE_KEYS = ['risk', 'analysis', 'notes', 'history', 'blog', 'playbook', 'report', 'quote', 'announcements', 'voice'];
+export const FEATURE_KEYS = ['risk', 'analysis', 'notes', 'history', 'competition', 'blog', 'playbook', 'report', 'quote', 'announcements', 'voice'];
 export async function getFeatures(env) {
   const row = await env.DB.prepare(`SELECT value FROM app_settings WHERE key = 'features'`).first();
   let saved = {}; try { saved = row ? JSON.parse(row.value) : {}; } catch {}
