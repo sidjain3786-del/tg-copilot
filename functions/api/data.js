@@ -1,4 +1,5 @@
 import { getUserFromRequest, json, readJson, parseColumn, ensureSchema, touchActivity } from '../_lib/auth.js';
+import { syncUserEntries } from '../_lib/competition.js';
 
 const LEGACY_DEFAULT_STRATEGY_NAMES = new Set([
   'Asian High/Low Liquidity Sweep (AMD)',
@@ -116,7 +117,13 @@ export async function onRequestPost({ request, env }) {
     }
 
     await touchActivity(env, user.id, 'save');
-    return json({ ok: true, updatedAt });
+    // 🏆 Trades logged with Sir's competition strategy are copied (anonymously) to the competition.
+    // A problem here must never stop the journal from saving.
+    let competition = null;
+    if (updates.trades !== undefined) {
+      try { competition = await syncUserEntries(env, user, body.trades); } catch (e) { console.error('competition sync', e); }
+    }
+    return json({ ok: true, updatedAt, ...(competition ? { competition } : {}) });
   } catch (e) {
     console.error('data POST error', e);
     return json({ error: 'Save failed on the server. Please try again.' }, { status: 500 });
