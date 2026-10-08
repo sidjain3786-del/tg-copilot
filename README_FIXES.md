@@ -238,3 +238,35 @@ This restores the WHOLE database (trades/notes saved after that time are rolled 
 - Content now uses the empty side space (up to 1600px wide); the Log Trade form is wider (up to 1280px) and sits next to the sidebar.
 - Tablets (701–1023px) keep the top tabs; phones keep the bottom bar. No sideways scrolling at any size.
 - Changed: `index.html`, `app.js`, `theme.css`, `sw.js`.
+
+## Update 29 — 🏆 Competition on Sir's strategy (App version 29)
+**Idea:** Sir shares one strategy → every trader trades it → a trade logged with that strategy goes to the Competition tab **by itself** → everyone sees everyone's trades under an **anonymous name** → every weekend a weekly winner and at month-end the final winners are declared (prize e.g. funded account). Ranking is by **discipline**, not by profit alone.
+
+### Trader
+- **Log Trade → Strategy dropdown** now has a group "🏆 Competition — Sir ki strategy". Pick it and a panel opens: Sir's entry / exit criteria, the rules as a tick-list ("kaunse rules follow kiye?"), the trader's anonymous name, and exactly what is shared. Save Trade → the trade is in the competition (a small message shows the discipline score).
+- Nothing extra to submit. Edit the trade → the competition copy updates and is re-scored. Change its strategy or delete it → it leaves the competition. Forgot to pick the strategy? Edit the trade, or use "Pehle se logged trade jodo" on the Competition tab.
+- **Competition tab:** banner (LIVE, dates, prizes, countdown, own anonymous name and rank) · 🔥 Sabke trades (anonymous cards: symbol, direction, entry / SL / exit, R result, emotion, mistake, rules followed and missed, note, first chart, 👏) · 🏆 Leaderboard (Week 1, Week 2 … and Overall) · 📜 Strategy & rules (strategy, score weights, how the winner is chosen, privacy) · 🙋 Mere trades.
+- Dashboard shows a "LIVE" banner while a competition is running; Trade History cards get a 🏆 Competition chip.
+
+### Admin (Sir)
+- Competition tab → **＋ Naya**: name, strategy name (or fill from a saved strategy), description, entry / exit criteria, rules (one per line), dates (default: today → month end), weekly prize, month-end prize, score weights, minimum trades for weekly and final rank, max trades counted per day, number of winners. Optional announcement + notification on launch.
+- **🏅 Weekly winner:** choose the week, see the winner with real name + email, choose whether the real name is shown to everyone (default: only the anonymous name), optional announcement + notification. A declared week is **locked** (later edits don't change it). Can be undone.
+- **🏆 Final results:** same, for the whole competition (podium + confetti). Can be undone.
+- Admin sees real names next to every anonymous name, can **🚫 remove** any trade from the competition with a reason (the trader sees the reason; it can't be re-added by re-tagging) and restore it.
+- Feature switch "🏆 Competition" hides the tab, the dashboard banner and the strategy in Log Trade for traders.
+
+### Score (out of 100, per trade; weights editable per competition)
+Rules followed 35 · Stop loss set 10 · Loss stayed within SL 15 · No mistake 15 · Calm emotions 5 · Note + screenshot 5 · Result in R 15 (≥2R full, ≥1R 0.8, small win 0.6, controlled loss ≤1.1R 0.3, bigger loss 0).
+Rank = average score of a trader's competition trades. Ties: more trades, then better net R. Only the first N competition trades per day count (default 3).
+
+### Privacy
+Shared: symbol, direction, entry / exit / SL, R result, emotion, mistake, exit reason, quick note (500 chars), first chart screenshot (copied to a separate shared area). **Not shared:** quantity, ₹ P&L, other screenshots, notes, the rest of the journal, name, email. Traders are told this in Log Trade and on the Competition tab. The anonymous name is fixed per trader per competition.
+
+### Technical
+- The server does the work: after every journal save, `functions/api/data.js` calls `syncUserEntries` (`functions/_lib/competition.js`), which reads the trade from the saved journal, snapshots only the public fields and scores it. The app cannot send a score.
+- Database: `competitions` gets `prize_weekly`, `prize_final`, `week_results`; `competition_entries` gets `image_src`, `day`, `rr`, `rules_part`, `status`, `admin_note`, `updated_at`. **No manual step** — missing tables and columns are added automatically on the first request.
+- Admin → 🩺 System check now also checks every competition file (including the ones inside `[id]` folders).
+- Tested: 71 API checks, 56 browser checks (desktop + phone), 26 regression checks on the older features, 25 traders × 375 competition trades at once (page loads < 0.2 s, saves ≤ 1.6 s), upgrade from an older database.
+
+**New files:** `functions/_lib/competition.js`, `functions/api/competitions/index.js`, `functions/api/competitions/[id].js`, `functions/api/competitions/[id]/entries.js`, `functions/api/competitions/[id]/declare.js`, `functions/api/competition-entries/[id].js`, `functions/api/competition-entries/[id]/clap.js`, `functions/api/comp-img/[name].js`.
+**Changed:** `app.js`, `theme.css`, `sw.js`, `schema.sql`, `functions/api/data.js`, `functions/api/admin/health.js`, `functions/_lib/auth.js`, `functions/_lib/settings.js`, `functions/_lib/admin-delete.js`.

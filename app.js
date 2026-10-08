@@ -1,4 +1,4 @@
-const APP_VERSION = '27';   // shown in Admin → System check; bump on every release
+const APP_VERSION = '29';   // shown in Admin → System check; bump on every release
 /* ============================================================
    Trader Co-Pilot — vanilla JS (no framework)
    Talks to /api/* (Cloudflare Pages Functions + D1) for
@@ -38,7 +38,7 @@ const STATE = {
   energyLevel: 85, noiseLevel: 15,
   selectedMindsetId: MINDSET_ARCHETYPES[0].id,
   logFormIsSetup: true, logFormDevice: 'Laptop', logFormLocation: 'Desk', logFormImage: '', logFormBeforeImage: '', logFormAfterImage: '', logFormImages: [],
-  logEmotions: [], logCustomEmotion: '', editingTradeId: null,
+  logEmotions: [], logCustomEmotion: '', editingTradeId: null, logCompId: null, logCompRules: [], lastSave: null,
   noteFormStrategy: '', noteFormConcept: 'General', noteFormCustomConcept: '', noteFormImage: '', noteFormBlocks: [], activeNoteId: null, editingNoteId: null, noteConceptFilter: 'ALL',
   annotator: {src:'', baseSrc:'', noteId:null, blockIndex:null, drawing:false, mode:'pen', color:'#ef4444', size:4, pressure:false, strokes:[], history:[], redo:[], activeStroke:null},
   noteAutoSaveTimer: null, noteAutoSaveBusy: false, noteInsertIndex: null,
@@ -316,6 +316,7 @@ function showApp(){
   setTimeout(()=>{ if(STATE.user) loadBlog(); }, 800);
   if(STATE.user && !STATE.quotes?.loaded) loadQuotes();
   if(STATE.user && !STATE.ann?.loaded) loadAnnouncements();
+  if(STATE.user && !STATE.comp?.loaded) setTimeout(()=>loadCompetitions(), 1200);
   applyFeatureClasses();
   if(!PUSH.checked) checkPush(); $('#loading-screen').style.display='none'; $('#auth-screen').style.display='none'; $('#app-screen').style.display='block'; render(); }
 
@@ -355,7 +356,7 @@ $('#auth-form').addEventListener('submit', async (e) => {
 
 $('#logout-btn').addEventListener('click', async () => {
   try { await api('/api/logout', 'POST'); } catch (e) { console.warn('Logout request failed', e); }
-  IMAGE_URL_CACHE.clear(); IMAGE_STORE_AVAILABLE = true; STATE.blog = null; STATE.admin = null; STATE.quotes = null; STATE.ann = null; STATE.features = {}; $('#privacy-notice')?.remove();
+  IMAGE_URL_CACHE.clear(); IMAGE_STORE_AVAILABLE = true; STATE.blog = null; STATE.admin = null; STATE.quotes = null; STATE.ann = null; STATE.comp = null; STATE.logCompId = null; STATE.logCompRules = []; STATE.features = {}; $('#comp-toast')?.remove(); $('#privacy-notice')?.remove();
   STATE.user = null; STATE.trades = []; STATE.notes = []; STATE.customStrategies = []; STATE.sessionNotes = {};
   setAuthMode('login');
   showAuth();
@@ -440,7 +441,10 @@ async function persistAll(parts = ALL_PARTS){
     if (parts.includes('notes')) await offloadImagesIn(STATE.notes);
     const payload = {};
     parts.forEach(k => { payload[k] = STATE[k]; });
-    return api('/api/data', 'POST', payload);
+    const res = await api('/api/data', 'POST', payload);
+    const cp = res && res.competition;   // 🏆 the server copied / updated / removed competition trades
+    if (cp && (cp.added.length || cp.updated.length || cp.removed)) setTimeout(()=>loadCompetitions(true), 60);
+    return res;
   };
   const p = SAVE_CHAIN.then(run, run);
   SAVE_CHAIN = p.catch(()=>{});
@@ -448,7 +452,7 @@ async function persistAll(parts = ALL_PARTS){
 }
 async function saveUserData(what='Trade', parts = ALL_PARTS){
   try {
-    await persistAll(parts);
+    STATE.lastSave = await persistAll(parts);
     return true;
   } catch (e) {
     console.error('Save failed:', e);
@@ -823,6 +827,7 @@ const TABS = [
   {id:'history', label:'📜 Trade History Log'},
   {id:'analysis', label:'📊 Daily & Session Analysis'},
   {id:'risk', label:'🛡️ Risk Center'},
+  {id:'competition', label:'🏆 Competition'},
   {id:'blog', label:'📰 Blog'},
   {id:'admin', label:'🛠️ Admin'}
 ];
@@ -831,7 +836,7 @@ function visibleTabs(){ return TABS.filter(t=>(t.id!=='admin' || isAdmin()) && (
 const SIDE_GROUPS = [
   ['Journal', [['copilot','⚡','Dashboard'],['log','➕','Log Trade'],['history','📜','Trade History'],['notes','🧠','Notes & Learnings']]],
   ['Insights', [['analysis','📊','Session Analysis'],['risk','🛡️','Risk Center']]],
-  ['Community', [['blog','📰','Blog']]],
+  ['Community', [['competition','🏆','Competition'],['blog','📰','Blog']]],
   ['Admin', [['admin','🛠️','Admin Panel']]]
 ];
 function sideCollapsed(){ try { return localStorage.getItem('tc_side_collapsed')==='1'; } catch(_) { return false; } }
@@ -855,14 +860,26 @@ function renderTabNav(){
   ).join('');
   try { placeTabIndicator(); } catch (e) { console.warn('indicator skipped', e); }
   renderSideNav();
-  const mobileIcons = {copilot:'⚡',log:'➕',notes:'🧠',history:'📜',analysis:'📊',risk:'🛡️',blog:'📰',admin:'🛠️'};
-  const mobileLabels = {copilot:'Co-Pilot',log:'Log',notes:'Notes',history:'History',analysis:'Analysis',risk:'Risk',blog:'Blog',admin:'Admin'};
+  const mobileIcons = {copilot:'⚡',log:'➕',notes:'🧠',history:'📜',analysis:'📊',risk:'🛡️',blog:'📰',admin:'🛠️',competition:'🏆'};
+  const mobileLabels = {copilot:'Home',log:'Log',notes:'Notes',history:'History',analysis:'Analysis',risk:'Risk',blog:'Blog',admin:'Admin',competition:'Contest'};
   const unread = STATE.blog?.loaded ? blogUnreadCount() : 0;
   const mobile = $('#mobile-tab-nav');
-  if (mobile) mobile.style.gridTemplateColumns = `repeat(${visibleTabs().length}, 1fr)`;
-  if (mobile) mobile.innerHTML = visibleTabs().map(t =>
+  const MOBILE_MAIN=['copilot','log','history','notes','competition'];
+  const vis=visibleTabs(), main=vis.filter(t=>MOBILE_MAIN.includes(t.id)), more=vis.filter(t=>!MOBILE_MAIN.includes(t.id));
+  const moreActive=more.some(t=>t.id===STATE.activeTab), moreDot=more.some(t=>t.id==='blog') && unread;
+  if (mobile) mobile.style.gridTemplateColumns = `repeat(${main.length + (more.length?1:0)}, 1fr)`;
+  if (mobile) mobile.innerHTML = main.map(t =>
     `<button class="mobile-tab-btn ${STATE.activeTab===t.id?'active':''}" data-action="set-tab" data-tab="${t.id}"><span class="mobile-tab-icon">${mobileIcons[t.id]}${t.id==='blog'&&unread?'<i class="tab-dot-mini" aria-hidden="true"></i>':''}</span><span>${mobileLabels[t.id]}</span></button>`
-  ).join('');
+  ).join('') + (more.length ? `<button class="mobile-tab-btn ${moreActive?'active':''}" data-action="mobile-more" aria-haspopup="true"><span class="mobile-tab-icon">☰${moreDot?'<i class="tab-dot-mini" aria-hidden="true"></i>':''}</span><span>${moreActive?mobileLabels[STATE.activeTab]:'More'}</span></button>` : '');
+  STATE._mobileMore = more.map(t=>({id:t.id, icon:mobileIcons[t.id], label:t.label.replace(/^\S+\s/,'')}));
+}
+function toggleMobileMore(open){
+  let sh=$('#mobile-more'); if(sh){ sh.remove(); if(!open) return; }
+  if(open===false) return;
+  const items=STATE._mobileMore||[], unread=STATE.blog?.loaded?blogUnreadCount():0;
+  sh=document.createElement('div'); sh.id='mobile-more'; sh.className='mobile-more';
+  sh.innerHTML=`<div class="mobile-more-backdrop" data-action="mobile-more-close"></div><div class="mobile-more-sheet" role="menu"><span class="mobile-more-handle" aria-hidden="true"></span>${items.map(t=>`<button type="button" role="menuitem" class="mobile-more-item ${STATE.activeTab===t.id?'active':''}" data-action="set-tab" data-tab="${t.id}"><span>${t.icon}</span><b>${esc(t.label)}</b>${t.id==='blog'&&unread?`<i class="side-badge">${unread}</i>`:''}</button>`).join('')}</div>`;
+  document.body.appendChild(sh);
 }
 
 /* ---------------- Co-Pilot tab ---------------- */
@@ -921,6 +938,7 @@ function renderCopilotTab(){
     </div>
     <div class="hero-actions"><button class="btn-cta" data-action="set-tab" data-tab="log">＋ Log New Trade</button><button type="button" class="btn-hero-ghost" data-action="open-weekly-report">📄 Weekly report</button></div>
   </section>
+  ${renderCompDashBanner()}
   ${renderDashMessages()}
 
   <div class="dashboard-kpis">
@@ -1012,7 +1030,7 @@ function restoreLogDraft(draft){
   if(!draft) return;
   const set=(id,val)=>{ const el=$('#'+id); if(el && val!==undefined && val!==null) el.value=val; };
   set('log-symbol',draft.symbolChoice || draft.symbol || 'XAUUSD'); set('log-custom-symbol',draft.customSymbol || (draft.symbolChoice==='OTHER' ? draft.symbol : '')); set('log-type',draft.type); set('log-qty',draft.qty); set('log-entry',draft.entry); set('log-exit',draft.exit); set('log-sl',draft.sl);
-  set('log-strategy-select',draft.strategy); set('log-planned-entry',draft.plannedEntry); set('log-planned-sl',draft.plannedSL); set('log-planned-tp',draft.plannedTP);
+  if (draft.strategy) set('log-strategy-select',draft.strategy); set('log-planned-entry',draft.plannedEntry); set('log-planned-sl',draft.plannedSL); set('log-planned-tp',draft.plannedTP);
   set('log-image-url',draft.imageUrl); set('log-mistake',draft.mistake); set('log-quality',draft.quality); set('log-trade-datetime',draft.tradeDateTime || localDateTimeInputValue()); set('log-exit-reason',draft.exitReason); set('log-notes',draft.notes); set('log-location-select',draft.location); set('log-custom-emotion',draft.customEmotion);
   if (Array.isArray(draft.emotions)) STATE.logEmotions = [...draft.emotions];
 }
@@ -1047,7 +1065,7 @@ function addLogImages(images){
   renderLogImagePreview(); updateLogPreview();
 }
 function renderLogTab(){
-  const strategyOptions = allStrategies().map(p => `<option value="${esc(p.id)}" ${STATE.selectedPlaybookId===p.id?'selected':''}>${esc(p.name)}</option>`).join('');
+  const strategyOptions = logStrategyOptionsHtml(), canPickStrategy = allStrategies().length || liveComps().length;
   return `
   <div class="card log-trade-card">
     <div class="log-head">
@@ -1105,8 +1123,8 @@ function renderLogTab(){
         </div>
         ${STATE.logFormIsSetup ? `<div class="field strategy-select-field log-strategy-mini">
           <label class="log-strategy-label">🎯 Strategy <button type="button" class="pb-link" data-action="open-strategy-manager" ${allStrategies().length?'':'data-new="1"'}>${allStrategies().length?'⚙️ Manage':'＋ Add strategy'}</button></label>
-          <select id="log-strategy-select" ${allStrategies().length ? '' : 'disabled'}>${allStrategies().length ? strategyOptions : '<option>No strategy yet</option>'}</select>
-        </div>` : ''}
+          <select id="log-strategy-select" ${canPickStrategy ? '' : 'disabled'}>${strategyOptions}</select>
+        </div><div id="log-comp-panel" data-live="${liveComps().length?'1':''}">${renderLogCompPanel()}</div>` : ''}
       </div>
 
       <details class="log-advanced">
@@ -1317,7 +1335,7 @@ function renderTradeView(t, mode){
   const when=esc(formatTradeTime(t));
   const strategy=esc(tradeStrategyName(t));
   const meta=`${esc(t.symbol||'—')} • ${esc(t.type||'—')}`;
-  const chips=`<div class="history-chips"><span class="journal-chip">🧠 ${esc(emotionText(t))}</span><span class="journal-chip ${t.mistake&&t.mistake!=='none'?'chip-warn':''}">📝 ${esc(mistakeLabel(t.mistake||'none'))}</span><span class="journal-chip">⭐ ${t.quality||3}/5</span>${t.exitReason?`<span class="journal-chip">🚪 ${esc(t.exitReason)}</span>`:''}</div>`;
+  const chips=`<div class="history-chips">${t.competitionId&&compById(t.competitionId)?`<button type="button" class="journal-chip chip-comp" data-action="set-tab" data-tab="competition" title="${esc(compById(t.competitionId).title)}">🏆 Competition</button>`:''}<span class="journal-chip">🧠 ${esc(emotionText(t))}</span><span class="journal-chip ${t.mistake&&t.mistake!=='none'?'chip-warn':''}">📝 ${esc(mistakeLabel(t.mistake||'none'))}</span><span class="journal-chip">⭐ ${t.quality||3}/5</span>${t.exitReason?`<span class="journal-chip">🚪 ${esc(t.exitReason)}</span>`:''}</div>`;
   const quickNote = t.notes ? `<p class="history-quick-note" title="${esc(t.notes)}"><span>Note</span>${esc(t.notes)}</p>` : '';
   const actions=`<div class="trade-actions"><button type="button" class="btn-secondary trade-edit-btn" data-action="edit-trade" data-id="${esc(t.id)}">✏️ Edit</button><button type="button" class="btn-danger trade-delete-btn" data-action="delete-trade" data-id="${esc(t.id)}" title="Delete trade">🗑️ Delete</button></div>`;
   const shots = imgs.length ? `<div class="history-images">${imgs.map((src,i)=>`<div class="history-image"><img src="${esc(imgUrl(src))}" data-action="view-image" data-trade-id="${esc(t.id)}" data-src="${esc(src)}" loading="lazy"><span>${i===0?'Before':i===1?'After':`Image ${i+1}`}</span></div>`).join('')}</div>` : `<div class="history-no-images">🖼 No screenshots</div>`;
@@ -1366,8 +1384,11 @@ function renderHistoryTab(){
 function toDateTimeLocalValue(raw){ if(!raw) return localDateTimeInputValue(); const d=new Date(raw); if(Number.isNaN(d.getTime())) return String(raw).slice(0,16); return localDateTimeInputValue(d); }
 const NO_SETUP_STRATEGY='Bina Setup (Tukke Baazi)';
 function editStrategyOptions(t){
-  const names=[...new Set([...STATE.customStrategies.map(x=>normalizeCustomStrategy(x).name).filter(Boolean), NO_SETUP_STRATEGY, t.strategy].filter(Boolean))];
-  return names.map(n=>`<option value="${esc(n)}" ${n===t.strategy?'selected':''}>${esc(n)}</option>`).join('');
+  // 🏆 live competition strategies first; a trade already in a (finished) competition keeps its tag
+  const cur=t.competitionId && compById(t.competitionId) ? t.competitionId : '';
+  const comps=[...liveComps()]; if(cur && !comps.some(c=>c.id===cur)) comps.push(compById(cur));
+  const names=[...new Set([...STATE.customStrategies.map(x=>normalizeCustomStrategy(x).name).filter(Boolean), NO_SETUP_STRATEGY, ...(cur?[]:[t.strategy])].filter(Boolean))];
+  return comps.map(c=>`<option value="comp:${esc(c.id)}" ${cur===c.id?'selected':''}>🏆 ${esc(c.strategy)} (Competition)</option>`).join('') + names.map(n=>`<option value="${esc(n)}" ${!cur&&n===t.strategy?'selected':''}>${esc(n)}</option>`).join('');
 }
 function renderEditTradeModal(id){
   const t=STATE.trades.find(x=>x.id===id); if(!t) return '';
@@ -1378,6 +1399,7 @@ function renderEditTradeModal(id){
     <div class="field grid-3"><div><label>Symbol</label><input id="edit-symbol" value="${esc(t.symbol)}"></div><div><label>Direction</label><select id="edit-type"><option ${t.type==='LONG'?'selected':''}>LONG</option><option ${t.type==='SHORT'?'selected':''}>SHORT</option></select></div><div><label>Quantity</label><input type="number" step="any" id="edit-qty" value="${t.quantity??''}"></div></div>
     <div class="field grid-3"><div><label>Entry</label><input type="number" step="any" id="edit-entry" value="${t.entryPrice??''}"></div><div><label>Exit</label><input type="number" step="any" id="edit-exit" value="${t.exitPrice??''}"></div><div><label>SL</label><input type="number" step="any" id="edit-sl" value="${t.stopLoss??''}"></div></div>
     <div class="field grid-3"><div><label>Trade date &amp; time</label><input type="datetime-local" id="edit-trade-datetime" value="${esc(tradeTimeInputValue(t))}"></div><div><label>Strategy</label><select id="edit-strategy">${editStrategyOptions(t)}</select></div><div><label>Mistake</label><select id="edit-mistake">${MISTAKE_OPTIONS.map(x=>`<option value="${x[0]}" ${(t.mistake||'none')===x[0]?'selected':''}>${esc(x[1])}</option>`).join('')}</select></div></div>
+    <div id="edit-comp-panel">${editCompPanelHtml(t, t.competitionId && compById(t.competitionId) ? 'comp:'+t.competitionId : '')}</div>
     <div class="field grid-2"><div><label>Execution quality</label><select id="edit-quality">${[1,2,3,4,5].map(n=>`<option value="${n}" ${Number(t.quality||3)===n?'selected':''}>${'⭐'.repeat(n)} ${n}/5</option>`).join('')}</select></div><div><label class="voice-label">Quick note<button type="button" class="voice-btn voice-btn-inline" data-action="voice-type" data-voice-for="edit-notes" title="Bolkar likho" aria-label="Voice typing" aria-pressed="false">🎤</button></label><textarea id="edit-notes" rows="2" placeholder="Kya sahi hua? Kya improve karna hai?">${esc(t.notes||'')}</textarea></div></div>
     <div class="field"><label>Emotion(s)</label><div class="emotion-pills edit-emotions">${presets.map(x=>`<button type="button" class="emotion-pill ${(tradeEmotions(t).includes(x))?'selected':''}" data-action="toggle-edit-emotion" data-value="${esc(x)}">${esc(x)}</button>`).join('')}</div><input type="text" id="edit-custom-emotion" value="${esc(tradeEmotions(t).filter(x=>!presets.includes(x)).join(', '))}" placeholder="Custom emotions, comma separated"></div>
     <div class="field grid-2"><div><label>Exit Reason</label><input id="edit-exit-reason" value="${esc(t.exitReason||'')}" placeholder="Target / SL / manual / time..."></div><div><label>Images</label><div class="edit-images-list" id="edit-images-list">${imgs.map((src,i)=>`<div class="edit-image-item"><img src="${esc(imgUrl(src))}" data-src="${esc(src)}"><button type="button" data-action="remove-edit-image" data-index="${i}">×</button></div>`).join('')}<label class="edit-add-image">+ Add<input type="file" id="edit-multi-image-file" accept="image/*" multiple style="display:none"></label></div></div></div>
@@ -2439,6 +2461,7 @@ const FEATURES = [
   ['analysis','📊 Daily & Session Analysis','Analysis tab'],
   ['notes','🧠 Notes & Learnings','Notes tab'],
   ['history','📜 Trade History','History tab'],
+  ['competition','🏆 Competition','Discipline Challenge tab'],
   ['blog','📰 Blog','Blog tab'],
   ['playbook','🎯 Setup Playbook','Dashboard ka strategy card'],
   ['report','📄 Weekly report','PDF report buttons'],
@@ -2446,7 +2469,7 @@ const FEATURES = [
   ['announcements','📢 Announcements','Dashboard ke announcements'],
   ['voice','🎤 Voice typing','Mic buttons']
 ];
-const TAB_FEATURE = { risk:'risk', analysis:'analysis', notes:'notes', history:'history', blog:'blog' };
+const TAB_FEATURE = { risk:'risk', analysis:'analysis', notes:'notes', history:'history', blog:'blog', competition:'competition' };
 function featureOn(k){ return STATE.features?.[k] !== false; }
 function featureVisible(k){ return isAdmin() || featureOn(k); }      // admins always see everything
 function applyFeatureClasses(){
@@ -2576,7 +2599,11 @@ document.addEventListener('change', e=>{ if(['an-cta','an-style','an-days'].incl
 const HEALTH_FILES = [
   ['/api/settings','functions/api/settings.js'], ['/api/quotes?limit=1','functions/api/quotes/index.js'], ['/api/announcements','functions/api/announcements/index.js'],
   ['/api/blog?limit=1','functions/api/blog/index.js'], ['/api/push','functions/api/push/index.js'], ['/api/notify/latest','functions/api/notify/latest.js'],
-  ['/api/img-health','functions/api/img-health.js'], ['/api/admin/users','functions/api/admin/users/index.js']
+  ['/api/img-health','functions/api/img-health.js'], ['/api/admin/users','functions/api/admin/users/index.js'], ['/api/competitions','functions/api/competitions/index.js'],
+  // 🏆 competition files that live in sub-folders (the ones most easily missed while uploading). "syscheck" is a made-up id: a JSON "not found" answer proves the file is deployed.
+  ['/api/competitions/syscheck','functions/api/competitions/[id].js'], ['/api/competitions/syscheck/entries','functions/api/competitions/[id]/entries.js'],
+  ['/api/competitions/syscheck/declare','functions/api/competitions/[id]/declare.js','POST'], ['/api/competition-entries/syscheck','functions/api/competition-entries/[id].js','PUT'],
+  ['/api/competition-entries/syscheck/clap','functions/api/competition-entries/[id]/clap.js','POST'], ['/api/comp-img/syscheck.png','functions/api/comp-img/[name].js']
 ];
 const HEALTH_STATIC = [['/theme.css','theme.css','text/css'],['/vendor/jspdf.umd.min.js','vendor/jspdf.umd.min.js','javascript'],['/vendor/jspdf.plugin.autotable.min.js','vendor/jspdf.plugin.autotable.min.js','javascript'],['/icon.svg','icon.svg','svg'],['/badge-96.png','badge-96.png','image/png'],['/manifest.webmanifest','manifest.webmanifest','']];
 async function runSystemCheck(){
@@ -2584,8 +2611,8 @@ async function runSystemCheck(){
   const rows=[];
   try { const d=await api('/api/admin/health'); d.checks.forEach(c=>rows.push(c)); }
   catch(e){ rows.push({name:'Server checks',ok:false,detail:'functions/api/admin/health.js GitHub par nahi hai ya error: '+e.message}); }
-  for (const [url,file] of HEALTH_FILES){
-    try { const r=await fetch(url,{credentials:'same-origin',cache:'no-store'}); const type=r.headers.get('Content-Type')||''; const ok=type.includes('application/json');
+  for (const [url,file,method] of HEALTH_FILES){
+    try { const r=await fetch(url,{credentials:'same-origin',cache:'no-store',...(method?{method,headers:{'Content-Type':'application/json'},body:'{}'}:{})}); const type=r.headers.get('Content-Type')||''; const ok=type.includes('application/json');
       rows.push({name:`API ${url.split('?')[0]}`, ok, detail: ok?'OK':`JSON nahi aaya (${r.status}) — "${file}" GitHub par upload karo`}); }
     catch(_) { rows.push({name:`API ${url}`, ok:false, detail:'Network error'}); }
   }
@@ -2600,6 +2627,451 @@ async function runSystemCheck(){
 function renderAdminHealthPanel(){
   return `<section class="card adm-health" id="admin-health"><div class="adm-quote-head"><h3 class="section-title">🩺 System check <span class="adm-readonly">App version ${APP_VERSION}</span></h3><button type="button" class="btn-secondary btn-small" data-action="admin-health">Check karo</button></div><p class="card-sub">Har deploy ke baad ek baar chalao — GitHub par chhooti file, R2, admin emails sab check karta hai.</p><div id="adm-health-results"></div></section>`;
 }
+
+
+/* ================= 🏆 COMPETITION (Discipline Challenge) =================
+   Sir shares one strategy. When a trader logs a trade and picks that strategy, the trade
+   goes to the Competition tab by itself (the server copies it on every journal save).
+   Everyone sees every trade under an anonymous name. Ranking = discipline score, with
+   weekly winners and month-end winners declared by the admin. */
+const COMP_CRITERIA = [
+  ['rules','📋 Strategy ke rules follow kiye'],['sl','🛑 Stop loss lagaya'],['slRespected','✅ Loss SL ke andar raha'],
+  ['noMistake','🎯 Koi mistake nahi'],['emotion','🧘 Shaant mann'],['journal','📝 Note + screenshot'],['result','📈 Trade ka result (R)']
+];
+const COMP_BAD_EMO=['fomo','revenge','tilt','overexcited','anxious','greedy','fear'];
+const COMP_DEFAULTS={ weights:{rules:35,sl:10,slRespected:15,noMistake:15,emotion:5,journal:5,result:15}, minTrades:6, minTradesWeek:2, maxPerDay:3, winnersWeek:1, winnersFinal:3 };
+function compState(){ return STATE.comp || (STATE.comp={ list:[], loaded:false, loading:false, currentId:null, detail:null, view:'feed', period:null, attach:null, form:null, declare:null }); }
+/* same maths as the server (functions/_lib/competition.js) — used only for the live preview */
+function compScore(t, checkedCount, rulesCount, crit, hasImage){
+  const w=crit.weights, total=Object.values(w).reduce((a,b)=>a+b,0)||1;
+  const emos=(Array.isArray(t.emotions)?t.emotions:[t.emotion]).filter(Boolean).map(e=>String(e).toLowerCase());
+  const n=v=>(v===null||v===undefined||v===''||!Number.isFinite(Number(v)))?null:Number(v);
+  const en=n(t.entryPrice), ex=n(t.exitPrice), open=en===null||ex===null, hasSl=n(t.stopLoss)>0, rr=hasSl?n(t.rr):null;
+  const diff=open?0:(t.type==='SHORT'?en-ex:ex-en), win=diff>0;
+  const parts={ rules: rulesCount?Math.min(1,checkedCount/rulesCount):1, sl: hasSl?1:0, slRespected: !hasSl?0:open?0.5:(rr===null?0.5:(rr>=-1.1?1:0)),
+    noMistake: (!t.mistake||t.mistake==='none')?1:0, emotion: emos.some(e=>COMP_BAD_EMO.some(b=>e.includes(b)))?0:1,
+    journal: (String(t.notes||'').trim().length>=10?0.5:0)+(hasImage?0.5:0),
+    result: open?0.3:!hasSl?(win?0.5:0):rr===null?0.3:rr>=2?1:rr>=1?0.8:rr>0?0.6:rr>=-1.1?0.3:0 };
+  return { score: Math.round((Object.entries(parts).reduce((a,[k,v])=>a+v*(w[k]||0),0)/total*100+1e-9)*10)/10, parts };
+}
+const scoreTone=s=>s>=85?'great':s>=65?'good':s>=45?'ok':'low';
+function compIstDay(t){ const raw=String(t.tradeDateTime||t.date||''); if(/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?)?$/.test(raw)) return raw.slice(0,10); const d=new Date(raw); return Number.isNaN(d.getTime())?'':new Date(d.getTime()+5.5*3600000).toISOString().slice(0,10); }
+const compDay=(d,o)=>fmtDay(new Date(d+'T00:00'),o||{day:'numeric',month:'short'});
+function compFmtLeft(ms){ const m=Math.max(0,Math.floor(ms/60000)), d=Math.floor(m/1440), h=Math.floor(m%1440/60), mm=m%60; return d?`${d}d ${h}h`:h?`${h}h ${mm}m`:`${mm}m`; }
+function compCountdown(c){
+  const now=Date.now(), start=new Date(`${c.startDate}T00:00:00+05:30`).getTime(), end=new Date(`${c.endDate}T23:59:59+05:30`).getTime();
+  if(c.state==='results') return '🏆 Final results aa gaye';
+  if(now<start) return `⏳ Shuru hone mein ${compFmtLeft(start-now)}`;
+  if(now<=end) return `⏱ Khatam hone mein ${compFmtLeft(end-now)}`;
+  return '🏁 Khatam — results ka intezaar';
+}
+setInterval(()=>{ const c=STATE.comp?.detail?.competition; if(!c) return; document.querySelectorAll('[data-countdown]').forEach(el=>{ el.textContent=compCountdown(c); }); }, 30000);
+async function loadCompetitions(force=false){
+  const s=compState(); if(s.loading||(s.loaded&&!force)) return;
+  const first=!s.loaded; s.loading=true;
+  try { s.list=(await api('/api/competitions')).competitions||[]; s.loaded=true; s.error='';
+    if(!s.currentId || !s.list.some(c=>c.id===s.currentId)) s.currentId=(s.list.find(c=>c.state==='live')||s.list.find(c=>c.state==='upcoming')||s.list.find(c=>c.state==='results')||s.list[0])?.id||null;
+    if(STATE.logCompId && !liveComps().some(c=>c.id===STATE.logCompId)) STATE.logCompId=null;
+    if(s.currentId) await loadCompetition(s.currentId, true); else s.detail=null;
+  } catch(e){ s.error=e.message||'Load nahi hua.'; }
+  finally { s.loading=false; }
+  if(STATE.activeTab==='competition') renderTabOnly();
+  else {
+    renderTabNav();
+    if(STATE.activeTab==='log'){ const panel=$('#log-comp-panel'); if(panel && !!panel.dataset.live!==!!liveComps().length) refreshLogStrategySelect(); }
+    else if(STATE.activeTab==='copilot'){ const el=$('#comp-dash'); if(el) el.outerHTML=renderCompDashBanner(); }
+    else if(STATE.activeTab==='history' && first && !STATE.editingTradeId && s.list.length) renderTabOnly();   // show the 🏆 chips
+  }
+}
+async function loadCompetition(id, silent){
+  const s=compState(); if(s.currentId!==id){ s.period=null; } s.currentId=id;
+  try { s.detail=await api(`/api/competitions/${encodeURIComponent(id)}`); } catch(e){ s.detail={error:e.message}; }
+  if(!silent && STATE.activeTab==='competition') renderTabOnly();
+}
+/* competitions a trade can be logged into right now */
+function liveComps(){ return featureVisible('competition') ? compState().list.filter(c=>c.accepting) : []; }
+function compById(id){ return compState().list.find(c=>c.id===id) || null; }
+function compToast(html, ms=7000){
+  $('#comp-toast')?.remove();
+  const n=document.createElement('div'); n.id='comp-toast'; n.className='privacy-notice comp-toast'; n.setAttribute('role','status'); n.innerHTML=html+'<button type="button" class="modal-x comp-toast-x" data-action="comp-toast-close" aria-label="Close">×</button>';
+  document.body.appendChild(n); clearTimeout(compToast.t); compToast.t=setTimeout(()=>n.remove(), ms);
+}
+/* called after a trade is saved: tells the trader what happened to it in the competition */
+function compAfterSave(trade, info, verb='chala gaya'){
+  if(!trade?.competitionId || !info) return;
+  const c=compById(trade.competitionId), id=String(trade.id);
+  const add=(info.added||[]).find(x=>x.tradeId===id) || (info.updated||[]).find(x=>x.tradeId===id), skip=(info.skipped||[]).find(x=>x.tradeId===id);
+  if(add) compToast(`<strong>🏆 Trade competition mein ${verb}</strong><p>${esc(c?.title||'Competition')} · discipline score <b>${Math.round(add.score)}/100</b> · aap wahan <b>${esc(c?.myAlias||'anonymous')}</b> naam se dikhoge.</p><button type="button" class="btn-primary btn-small" data-action="set-tab" data-tab="competition">Competition dekho</button>`);
+  else if(skip) compToast(`<strong>ℹ️ Trade journal mein save ho gaya — competition mein nahi gaya</strong><p>${skip.reason==='limit'?`Ek din mein sirf ${skip.limit} competition trades gine jaate hain, aur us din ke ${skip.limit} ho chuke hain.`:skip.reason==='dates'?`Trade ki date competition ke dates (${esc(c?compDay(c.startDate):'')} – ${esc(c?compDay(c.endDate):'')}) ke bahar hai.`:'Us hafte ke winners declare ho chuke hain, isliye woh hafta lock hai.'}</p>`, 10000);
+}
+/* ---------- Log Trade: Sir's strategy in the strategy dropdown ---------- */
+function logStrategyOptionsHtml(){
+  const comps=liveComps(), own=allStrategies();
+  if(STATE.logCompId && !comps.some(c=>c.id===STATE.logCompId)) STATE.logCompId=null;
+  if(!own.length && comps.length && !STATE.logCompId) STATE.logCompId=comps[0].id;
+  const ownOpts=own.map(p=>`<option value="${esc(p.id)}" ${!STATE.logCompId&&STATE.selectedPlaybookId===p.id?'selected':''}>${esc(p.name)}</option>`).join('');
+  if(!comps.length) return own.length ? ownOpts : '<option>No strategy yet</option>';
+  return `<optgroup label="🏆 Competition — Sir ki strategy">${comps.map(c=>`<option value="comp:${esc(c.id)}" ${STATE.logCompId===c.id?'selected':''}>🏆 ${esc(c.strategy)}</option>`).join('')}</optgroup>${own.length?`<optgroup label="Meri strategies">${ownOpts}</optgroup>`:''}`;
+}
+function renderLogCompPanel(){
+  const comps=liveComps(), c=comps.find(x=>x.id===STATE.logCompId);
+  if(!c) return comps.length ? `<p class="log-comp-hint">🏆 <b>${esc(comps[0].title)}</b> live hai. Strategy mein <b>“🏆 ${esc(comps[0].strategy)}”</b> chuno to yeh trade apne aap competition mein chala jayega. <button type="button" class="pb-link" data-action="log-pick-comp" data-id="${esc(comps[0].id)}">Abhi chuno</button></p>` : '';
+  const checked=STATE.logCompRules||[];
+  return `<div class="log-comp">
+    <div class="log-comp-head"><span class="comp-pill live"><i></i>COMPETITION</span><b>${esc(c.title)}</b></div>
+    <p class="log-comp-sub">Save karte hi yeh trade <b>Competition tab</b> mein sabko dikhega — aapka naam wahan <b>${esc(c.myAlias||'anonymous')}</b> rahega (asli naam nahi).</p>
+    ${c.entryCriteria||c.exitCriteria?`<details class="log-comp-crit"><summary>📖 Sir ki strategy: entry / exit criteria</summary>${c.entryCriteria?`<div class="pb-criteria"><span>Entry</span><p>${esc(c.entryCriteria)}</p></div>`:''}${c.exitCriteria?`<div class="pb-criteria"><span>Exit / SL</span><p>${esc(c.exitCriteria)}</p></div>`:''}</details>`:''}
+    ${c.rules.length?`<span class="adm-field-label">Imaandari se tick karo — is trade mein kaunse rules follow kiye? <b id="log-comp-count">${checked.length}/${c.rules.length}</b></span>
+    <div class="comp-rule-checks">${c.rules.map((r,i)=>`<label class="adm-notify"><input type="checkbox" data-log-comp-rule="${i}" ${checked.includes(i)?'checked':''}><span>${esc(r)}</span></label>`).join('')}</div>`:''}
+    <p class="comp-note">🕶️ Share hota hai: symbol, direction, entry / exit / SL, R result, emotion, mistake, quick note aur pehla chart. <b>Quantity aur ₹ P&amp;L share nahi hote.</b></p>
+  </div>`;
+}
+function refreshLogStrategySelect(){
+  const sel=$('#log-strategy-select'), panel=$('#log-comp-panel'); if(!panel) return;
+  if(sel){ sel.innerHTML=logStrategyOptionsHtml(); sel.disabled=!(allStrategies().length||liveComps().length); }
+  panel.innerHTML=renderLogCompPanel(); panel.dataset.live=liveComps().length?'1':'';
+}
+function setLogStrategy(value){
+  if(String(value).startsWith('comp:')){ const id=value.slice(5); if(STATE.logCompId!==id){ STATE.logCompId=id; STATE.logCompRules=[]; } }
+  else { STATE.logCompId=null; STATE.logCompRules=[]; STATE.selectedPlaybookId=value; }
+  const panel=$('#log-comp-panel'); if(panel) panel.innerHTML=renderLogCompPanel();
+}
+/* ---------- Edit Trade: same choice while editing ---------- */
+function editCompPanelHtml(t, value){
+  const c=String(value||'').startsWith('comp:') ? compById(value.slice(5)) : null; if(!c) return '';
+  const keep=t.competitionId===c.id ? (t.compRules||[]) : [];
+  return `<div class="log-comp"><div class="log-comp-head"><span class="comp-pill ${c.accepting?'live':'ended'}">${c.accepting?'<i></i>':''}COMPETITION</span><b>${esc(c.title)}</b></div>
+    ${c.accepting?`<p class="log-comp-sub">Update karte hi yeh trade Competition tab mein <b>${esc(c.myAlias||'anonymous')}</b> naam se dikhega.</p>`:'<p class="log-comp-sub">Yeh competition khatam ho chuka hai — entry ab badlegi nahi.</p>'}
+    ${c.rules.length?`<span class="adm-field-label">Kaunse rules follow kiye?</span><div class="comp-rule-checks">${c.rules.map((r,i)=>`<label class="adm-notify"><input type="checkbox" data-edit-comp-rule="${i}" ${keep.includes(i)?'checked':''} ${c.accepting?'':'disabled'}><span>${esc(r)}</span></label>`).join('')}</div>`:''}</div>`;
+}
+/* ---------- dashboard banner ---------- */
+function renderCompDashBanner(){
+  const c=featureVisible('competition') ? compState().list.find(x=>x.state==='live') : null;
+  if(!c) return '<div id="comp-dash" hidden></div>';
+  const prize=c.prizeWeekly||c.prizeFinal;
+  return `<button type="button" id="comp-dash" class="comp-dash" data-action="set-tab" data-tab="competition"><span class="comp-dash-ico" aria-hidden="true">🏆</span><span class="comp-dash-text"><b>${esc(c.title)}</b><small>Strategy: ${esc(c.strategy)}${prize?` · 🎁 ${esc(prize)}`:''} · ${c.myEntries?`aapke ${c.myEntries} trades`:'abhi tak aapka koi trade nahi'}</small></span><span class="comp-pill live"><i></i>LIVE</span><span class="comp-dash-go" aria-hidden="true">→</span></button>`;
+}
+/* ---------- Competition tab ---------- */
+function compWeeks(d){ return (d.weeks||[]).length>1 ? d.weeks : []; }
+function compPeriod(d){
+  const s=compState(), weeks=compWeeks(d);
+  if(s.period && (s.period==='all' || weeks.some(w=>w.start===s.period))) return s.period;
+  return (weeks.find(w=>w.state==='live') || {start:'all'}).start;
+}
+function renderCompetitionTab(){
+  const s=compState();
+  if(!s.loaded){ setTimeout(()=>loadCompetitions(),0); return `<section class="card"><p class="card-sub">${s.error?esc(s.error):'Competition load ho raha hai…'}</p></section>`; }
+  if(!s.list.length) return `<section class="comp-empty card"><div class="comp-empty-trophy" aria-hidden="true">🏆</div><h2>Discipline Challenge</h2><p>Abhi koi competition nahi chal raha. Sir jaldi ek strategy share karenge — us par liye gaye sabke trades aur leaderboard yahan dikhenge.</p>${isAdmin()?'<button type="button" class="btn-cta" data-action="comp-new">＋ Pehla competition banao</button>':''}</section>${renderCompForm()}`;
+  const d=s.detail; if(!d || d.error) return `<section class="card"><p class="card-sub">${esc(d?.error||'Load ho raha hai…')}</p></section>`;
+  const c=d.competition, weeks=compWeeks(d), liveWeek=weeks.find(w=>w.state==='live');
+  const me=d.leaderboard.find(r=>r.mine), meWeek=liveWeek?.leaderboard.find(r=>r.mine), myOk=d.mine.filter(e=>e.status==='ok');
+  const pill={live:'<span class="comp-pill live"><i></i>LIVE</span>',upcoming:'<span class="comp-pill soon">Jaldi shuru</span>',ended:'<span class="comp-pill ended">Khatam</span>',results:'<span class="comp-pill done">🏆 Results</span>'}[c.state];
+  const picker = s.list.length>1 ? `<label class="comp-picker"><span class="sr-only">Competition chuno</span><select id="comp-picker">${s.list.map(x=>`<option value="${esc(x.id)}" ${x.id===c.id?'selected':''}>${esc(x.title)} · ${x.state==='live'?'LIVE':x.state==='results'?'Results':x.state==='upcoming'?'Upcoming':'Khatam'}</option>`).join('')}</select></label>` : '';
+  const rankText=r=>r?.rank?`#${r.rank}`:null;
+  const myRank = me ? (rankText(me) || `${me.entries}/${c.criteria.minTrades} trades`) : '—';
+  const myRankSub = !me ? 'Abhi koi trade nahi' : `Score ${me.avg}${liveWeek?` · is hafte ${rankText(meWeek)||(meWeek?`${meWeek.entries}/${c.criteria.minTradesWeek} trades`:'—')}`:''}`;
+  const tabs=[['feed','🔥 Sabke trades',c.entries],['board','🏆 Leaderboard',''],['rules','📜 Strategy & rules',''],['mine','🙋 Mere trades',d.mine.length]];
+  return `${picker}
+  <section class="comp-hero">
+    <div class="comp-hero-glow" aria-hidden="true"></div>
+    <div class="comp-hero-main">
+      <div class="comp-hero-top">${pill}<span class="comp-dates">📅 ${esc(compDay(c.startDate))} – ${esc(compDay(c.endDate,{day:'numeric',month:'short',year:'numeric'}))}</span></div>
+      <h2>${esc(c.title)}</h2>
+      <p class="comp-strategy">Sir ki strategy: <b>${esc(c.strategy)}</b></p>
+      ${c.prizeWeekly||c.prizeFinal?`<div class="comp-prizes">${c.prizeWeekly&&weeks.length?`<span><i>🎁 Har hafte ka winner</i><b>${esc(c.prizeWeekly)}</b></span>`:''}${c.prizeFinal?`<span class="final"><i>🏆 ${weeks.length?'Month-end winner':'Winner'}</i><b>${esc(c.prizeFinal)}</b></span>`:''}</div>`:''}
+      <p class="comp-countdown" data-countdown>${esc(compCountdown(c))}</p>
+      ${c.accepting?`<div class="comp-hero-cta"><button type="button" class="btn-cta" data-action="comp-log-trade">➕ Is strategy par trade log karo</button><button type="button" class="comp-ghost" data-action="comp-open-attach">Pehle se logged trade jodo</button></div>`:''}
+    </div>
+    <div class="comp-hero-stats">
+      <div><span>Traders</span><strong>${c.participants}</strong></div>
+      <div><span>Trades</span><strong>${c.entries}</strong></div>
+      <div class="me"><span>Aapka naam (anonymous)</span><strong class="comp-alias">${esc(c.myAlias||'—')}</strong></div>
+      <div class="me"><span>Aapka rank</span><strong>${myRank}</strong><small>${esc(myRankSub)}</small></div>
+    </div>
+  </section>
+  ${c.results ? renderCompResults(c) : ''}${renderCompWeekWinners(d)}
+  ${isAdmin()?renderCompAdminBar(d):''}
+  ${c.accepting&&!myOk.length&&!isAdmin()?renderCompHow(c):''}
+  <div class="comp-tabs" role="tablist">
+    ${tabs.map(([v,l,n])=>`<button type="button" role="tab" aria-selected="${s.view===v}" class="${s.view===v?'active':''}" data-action="comp-view" data-view="${v}">${l}${n!==''?` <span>${n}</span>`:''}</button>`).join('')}
+  </div>
+  <div class="comp-body">${s.view==='board'?renderCompBoard(d):s.view==='rules'?renderCompRules(c, weeks.length):s.view==='mine'?renderCompFeed(d.mine, d, true):renderCompFeed(d.feed, d, false)}</div>
+  ${renderCompAttach()}${renderCompForm()}${renderCompDeclare()}`;
+}
+function renderCompHow(c){
+  return `<section class="comp-how"><div><b>1</b><p><strong>Strategy padho</strong>“📜 Strategy &amp; rules” mein Sir ki strategy aur rules dekho.</p></div><div><b>2</b><p><strong>Trade log karo</strong>Log Trade mein strategy <em>“🏆 ${esc(c.strategy)}”</em> chuno aur rules tick karo.</p></div><div><b>3</b><p><strong>Apne aap yahan</strong>Trade seedha is tab mein aa jayega — anonymous naam se. Discipline ka score banega.</p></div></section>`;
+}
+function compPodium(w, mini){
+  const medal=['🥇','🥈','🥉'];
+  return `<div class="podium ${mini?'mini':''}">${[1,0,2].filter(i=>w[i]).map(i=>`<div class="podium-col p${i+1} ${w[i].mine?'is-me':''}"><div class="podium-medal">${medal[i]}</div><div class="podium-name">${esc(w[i].name||w[i].realName||w[i].alias)}</div>${(w[i].name||w[i].realName)?`<small>${esc(w[i].alias)}</small>`:''}${w[i].mine?'<span class="comp-you">Aap</span>':''}<div class="podium-block"><b>${w[i].avg}</b><span>score</span></div></div>`).join('')}</div>`;
+}
+function renderCompResults(c){
+  const r=c.results, w=r.winners||[];
+  const key='tc_confetti_'+c.id; let first=false; try { first=!localStorage.getItem(key); if(first) localStorage.setItem(key,'1'); } catch(_) {}
+  const mine=w.find(x=>x.mine);
+  return `<section class="comp-results ${first&&!REDUCED_MOTION?'celebrate':''}">
+    ${first&&!REDUCED_MOTION?`<div class="confetti" aria-hidden="true">${Array.from({length:36},(_,i)=>`<i style="--x:${(i*37)%100}%;--d:${(i%7)*0.12}s;--c:${['#E9A100','#3DDC97','#FF7A78','#9DB2CF','#FFD27A'][i%5]}"></i>`).join('')}</div>`:''}
+    <h3>🏆 Final winners — sabse disciplined traders</h3><p class="card-sub">${r.participants} traders · ${r.entries} trades${r.prize?` · 🎁 ${esc(r.prize)}`:''}</p>
+    ${mine?`<p class="comp-won">🎉 Badhai ho! Aap #${mine.rank} aaye hain. Sir aapse prize ke liye contact karenge.</p>`:''}
+    ${w.length?compPodium(w,false):'<p class="pb-empty">Kisi ne minimum trades poore nahi kiye.</p>'}
+    ${isAdmin()?`<p class="comp-admin-line">${w.map(x=>`#${x.rank} ${esc(x.name||'')} · ${esc(x.email||'')}`).join(' &nbsp;|&nbsp; ')} <button type="button" class="pb-link" data-action="comp-undeclare" data-period="final">↩ Results wapas lo</button></p>`:''}
+  </section>`;
+}
+function renderCompWeekWinners(d){
+  const done=compWeeks(d).filter(w=>w.declared);
+  if(!done.length) return '';
+  return `<section class="comp-weekwins"><h3>🏅 Weekly winners</h3><div class="comp-weekwins-row">${done.map(w=>{ const win=w.declared.winners;
+    return `<div class="comp-weekwin ${win.some(x=>x.mine)?'is-me':''}"><span>Week ${w.n} · ${esc(compDay(w.start))}–${esc(compDay(w.end))}</span>${win.length?win.map(x=>`<b>${x.rank>1?`#${x.rank} `:'🏅 '}${esc(x.name||x.alias)}${x.mine?' <em class="comp-you">Aap</em>':''}</b><small>${x.name?esc(x.alias)+' · ':''}score ${x.avg} · ${x.entries} trades</small>${isAdmin()&&x.email?`<small class="comp-real">${esc(x.email)}</small>`:''}`).join(''):'<b>Koi qualify nahi hua</b>'}${w.declared.prize&&win.length?`<i>🎁 ${esc(w.declared.prize)}</i>`:''}${win.some(x=>x.mine)?'<i class="won">🎉 Badhai ho! Sir aapse contact karenge.</i>':''}</div>`; }).join('')}</div></section>`;
+}
+function renderCompAdminBar(d){
+  const c=d.competition, weeks=compWeeks(d), pending=weeks.filter(w=>w.state==='ended'&&!w.declared);
+  return `<section class="comp-admin card"><div><b>🛠️ Admin</b><small>Sirf aapko dikhta hai · aapko alias ke saath asli naam bhi dikh rahe hain${pending.length?` · <strong class="comp-warn">${pending.length} hafte ka winner declare karna baaki hai</strong>`:''}</small></div><div class="comp-admin-actions">
+    <button type="button" class="btn-secondary btn-small" data-action="comp-new">＋ Naya</button>
+    <button type="button" class="btn-secondary btn-small" data-action="comp-edit">✏️ Edit</button>
+    ${c.state!=='results'&&weeks.some(w=>w.state!=='upcoming'&&!w.declared)?`<button type="button" class="btn-primary btn-small" data-action="comp-declare" data-period="week">🏅 Weekly winner</button>`:''}
+    ${c.state!=='results'&&c.state!=='upcoming'?`<button type="button" class="${weeks.length?'btn-secondary':'btn-primary'} btn-small" data-action="comp-declare" data-period="final">🏆 Final results</button>`:''}
+    <button type="button" class="btn-danger btn-small" data-action="comp-delete">Delete</button></div></section>`;
+}
+function renderCompRules(c, weekCount){
+  const w=c.criteria.weights, tot=Object.values(w).reduce((a,b)=>a+b,0)||1, k=c.criteria;
+  return `<div class="comp-rules-grid">
+    <section class="card"><h3 class="section-title">🎯 ${esc(c.strategy)}</h3>${c.description?`<p class="comp-desc">${esc(c.description)}</p>`:''}
+      ${c.entryCriteria?`<div class="pb-criteria"><span>Entry</span><p>${esc(c.entryCriteria)}</p></div>`:''}${c.exitCriteria?`<div class="pb-criteria"><span>Exit / SL</span><p>${esc(c.exitCriteria)}</p></div>`:''}
+      ${c.rules.length?`<span class="adm-field-label">Rules — har trade mein follow karne hain</span><ol class="comp-rule-list">${c.rules.map(r=>`<li>${esc(r)}</li>`).join('')}</ol>`:''}
+      ${c.accepting?`<button type="button" class="btn-primary" data-action="comp-log-trade" style="margin-top:.8rem">➕ Is strategy par trade log karo</button>`:''}</section>
+    <section class="card"><h3 class="section-title">🧮 Score kaise banta hai</h3><p class="card-sub">Sirf profit se koi nahi jeetta — <b>discipline</b> jeetti hai. Har trade ko 100 mein se score milta hai:</p>
+      <ul class="comp-weights">${COMP_CRITERIA.filter(([x])=>w[x]>0).map(([x,l])=>`<li><span>${l}</span><b>${Math.round(w[x]/tot*100)}</b><i style="--v:${w[x]/tot*100}%"></i></li>`).join('')}</ul>
+      <h3 class="section-title" style="margin-top:1rem">🏁 Winner kaise banta hai</h3>
+      <ul class="comp-win-rules">
+        <li>Rank = aapke saare competition trades ka <b>average score</b>.</li>
+        ${weekCount?`<li><b>Har hafte</b> (Mon–Sun) ka alag winner${c.prizeWeekly?` — 🎁 ${esc(c.prizeWeekly)}`:''}. Us hafte kam se kam <b>${k.minTradesWeek} trades</b> chahiye.</li>`:''}
+        <li><b>${weekCount?'Month-end':'Final'}</b> winner${k.winnersFinal>1?`s (top ${k.winnersFinal})`:''}${c.prizeFinal?` — 🏆 ${esc(c.prizeFinal)}`:''}. Poore competition mein kam se kam <b>${k.minTrades} trades</b> chahiye.</li>
+        <li>Ek din mein sirf <b>${k.maxPerDay} trades</b> gine jaate hain — overtrading se fayda nahi.</li>
+        <li>Score barabar ho to: zyada disciplined trades, phir behtar R result.</li>
+        <li>Trade badlo ya delete karo to competition mein bhi badal jata hai. Winner declare hone ke baad woh hafta <b>lock</b> ho jata hai.</li>
+        <li>Sir kisi bhi trade ko hata sakte hain agar chart strategy se match na kare.</li>
+      </ul>
+      <p class="comp-note">🕶️ Yahan sabka naam <b>anonymous</b> hai — aapka naam: <b>${esc(c.myAlias||'')}</b>. Share hota hai: symbol, direction, entry / exit / SL, R result, emotion, mistake, quick note aur pehla chart. Quantity, ₹ P&amp;L aur baaki journal private rehta hai. Sir (admin) ko asli naam dikhte hain.</p></section>
+  </div>`;
+}
+function renderCompBoard(d){
+  const c=d.competition, weeks=compWeeks(d), p=compPeriod(d), wk=weeks.find(w=>w.start===p);
+  const rows=wk?wk.leaderboard:d.leaderboard, min=wk?c.criteria.minTradesWeek:c.criteria.minTrades;
+  const q=rows.filter(r=>r.qualified), nq=rows.filter(r=>!r.qualified), medal=['🥇','🥈','🥉'];
+  const chips=weeks.length?`<div class="comp-periods" role="tablist" aria-label="Leaderboard period">${weeks.map(w=>`<button type="button" class="${p===w.start?'active':''} ${w.state}" data-action="comp-period" data-period="${w.start}" ${w.state==='upcoming'?'disabled':''}><b>Week ${w.n}${w.declared?' 🏅':w.state==='live'?' •':''}</b><small>${esc(compDay(w.start))}–${esc(compDay(w.end))}</small></button>`).join('')}<button type="button" class="${p==='all'?'active':''}" data-action="comp-period" data-period="all"><b>🏆 Overall</b><small>Poora competition</small></button></div>`:'';
+  const head=wk?`<p class="comp-board-head"><b>Week ${wk.n}</b> ${wk.state==='live'?`· chal raha hai, ${esc(compFmtLeft(new Date(wk.end+'T23:59:59+05:30')-Date.now()))} baaki`:wk.declared?'· winner declare ho chuka':'· khatam, winner jaldi declare hoga'}${c.prizeWeekly?` · 🎁 ${esc(c.prizeWeekly)}`:''}${isAdmin()&&wk.declared?` <button type="button" class="pb-link" data-action="comp-undeclare" data-period="week" data-week="${wk.start}">↩ Winner wapas lo</button>`:''}</p>`
+    :`<p class="comp-board-head"><b>Overall</b> · ${weeks.length?'month-end':'final'} winner isi se banega${c.prizeFinal?` · 🏆 ${esc(c.prizeFinal)}`:''}</p>`;
+  if(!rows.length) return `${chips}${head}<p class="pb-empty comp-pad">${wk?'Is hafte abhi koi trade nahi.':'Abhi koi trade nahi.'} Pehla disciplined trade aapka ho! 🚀</p>`;
+  const row=r=>`<tr class="${r.mine?'mine':''}"><td class="rank">${r.rank?(r.rank<=3?medal[r.rank-1]:'#'+r.rank):'—'}</td><td><b>${esc(r.alias)}</b>${r.mine?' <span class="comp-you">Aap</span>':''}${r.realName?`<small>${esc(r.realName)} · ${esc(r.email||'')}</small>`:''}</td><td class="num">${r.entries}${r.qualified?'':`<small>/${min}</small>`}</td><td class="num c-rules">${r.rulesPct}%</td><td class="num c-r ${r.netR>0?'positive':r.netR<0?'negative':''}">${r.netR>0?'+':''}${r.netR}R</td><td><div class="score-cell"><span class="scorebar ${scoreTone(r.avg)}" style="--v:${r.avg}%"><i></i></span><b>${r.avg}</b></div></td></tr>`;
+  return `${chips}${head}${q.length?compPodium(q.slice(0,3),true):''}
+  ${q.length?`<div class="comp-board-wrap"><table class="comp-board"><thead><tr><th>Rank</th><th>Trader</th><th class="num">Trades</th><th class="num c-rules">Rules</th><th class="num c-r">Net R</th><th>Discipline score</th></tr></thead><tbody>${q.map(row).join('')}</tbody></table></div>`:''}
+  ${nq.length?`<p class="comp-note">⏳ Abhi rank nahi mila — ${wk?'is hafte':'poore competition mein'} kam se kam ${min} trades chahiye:</p><div class="comp-board-wrap"><table class="comp-board dim"><tbody>${nq.map(row).join('')}</tbody></table></div>`:''}`;
+}
+function renderCompFeed(list, d, mineView){
+  const c=d.competition;
+  if(!list.length) return `<div class="comp-empty-feed"><div aria-hidden="true">🕊️</div><p>${mineView?'Aapka abhi koi trade competition mein nahi hai.':'Abhi koi trade nahi aaya — pehla disciplined trade aapka ho!'}</p>${c.accepting?'<button type="button" class="btn-primary" data-action="comp-log-trade">➕ Is strategy par trade log karo</button>':''}</div>`;
+  return `<div class="comp-feed">${list.map(e=>{ const t=e.trade||{}, v=Number(t.rr), open=t.outcome==='open', emo=(t.emotions||[]).filter(Boolean), parts=e.breakdown||{}, removed=e.status==='removed';
+    const res=open?'<span class="comp-r open">Open</span>':Number(t.stopLoss)>0&&Number.isFinite(v)?`<span class="comp-r ${v>=0?'win':'loss'}">${v>=0?'+':''}${v.toFixed(2)}R</span>`:`<span class="comp-r ${t.outcome==='loss'?'loss':'win'}">${t.outcome==='loss'?'Loss':t.outcome==='be'?'Breakeven':'Profit'}</span>`;
+    const px=x=>(x===null||x===undefined||x==='')?'—':esc(String(x));
+    return `<article class="comp-entry ${e.mine?'mine':''} ${removed?'removed':''}">
+      <header><span class="comp-ava" aria-hidden="true">${esc((e.alias||'?').split(' ')[0])}</span><div><b>${esc((e.alias||'').split(' ').slice(1).join(' '))}</b>${e.mine?' <span class="comp-you">Aap</span>':''}${e.realName?` <small class="comp-real">(${esc(e.realName)})</small>`:''}<small>${esc(formatTradeTime(t))} · ${esc(timeAgo(e.createdAt))}</small></div><span class="comp-score ${scoreTone(e.score)}" title="Discipline score"><b>${Math.round(e.score)}</b><small>/100</small></span></header>
+      ${removed?`<p class="comp-removed">🚫 Sir ne yeh trade competition se hata diya${e.adminNote?`: “${esc(e.adminNote)}”`:''}. Yeh ranking mein nahi gina jata.</p>`:''}
+      <div class="comp-trade"><b>${esc(t.symbol||'—')}</b> <span class="pb-dir ${t.type==='SHORT'?'short':'long'}">${esc(t.type||'')}</span>${res}${emo.length?`<span class="journal-chip">🧠 ${esc(emo.join(', '))}</span>`:''}${t.mistake&&t.mistake!=='none'?`<span class="journal-chip chip-warn">${esc(mistakeLabel(t.mistake))}</span>`:''}</div>
+      <dl class="comp-px"><div><dt>Entry</dt><dd>${px(t.entryPrice)}</dd></div><div><dt>SL</dt><dd>${px(t.stopLoss)}</dd></div><div><dt>Exit</dt><dd>${px(t.exitPrice)}</dd></div><div><dt>Rules</dt><dd>${(e.rulesChecked||[]).length}/${c.rules.length}</dd></div></dl>
+      <ul class="comp-checks">${COMP_CRITERIA.filter(([k])=>c.criteria.weights[k]>0).map(([k,l])=>{ const p=parts[k]??0; return `<li class="${p>=1?'yes':p>0?'half':'no'}" title="${esc(l)}">${p>=1?'✓':p>0?'½':'✗'} ${esc(l.replace(/^\S+\s/,''))}</li>`; }).join('')}</ul>
+      ${c.rules.length&&(e.rulesChecked||[]).length<c.rules.length?`<p class="comp-missed">Rules jo follow nahi hue: ${c.rules.filter((_,i)=>!(e.rulesChecked||[]).includes(i)).map(r=>esc(r)).join(' · ')}</p>`:''}
+      ${t.notes?`<p class="comp-note-text">“${esc(t.notes)}”</p>`:''}
+      ${e.image?`<img class="comp-img" src="${esc(e.image)}" alt="Chart screenshot" loading="lazy" data-action="admin-view-image" data-src="${esc(e.image)}">`:''}
+      <footer>${removed?'<span></span>':`<button type="button" class="comp-clap ${e.clapped?'on':''}" data-action="comp-clap" data-id="${esc(e.id)}" ${e.mine?'disabled title="Apne trade par clap nahi"':'title="Disciplined trade ke liye taali"'}>👏 <span>${e.claps||0}</span></button>`}
+        <span class="comp-entry-actions">${e.mine&&c.accepting&&!removed?`<button type="button" class="pb-link" data-action="comp-untag" data-trade="${esc(e.sourceId||'')}">Competition se hatao</button>`:''}${isAdmin()?(removed?`<button type="button" class="pb-link" data-action="comp-restore" data-id="${esc(e.id)}">↩ Wapas lao</button>`:`<button type="button" class="pb-link danger" data-action="comp-remove" data-id="${esc(e.id)}">🚫 Hatao</button>`):''}</span></footer>
+    </article>`; }).join('')}</div>${!mineView&&d.feedMore?`<div class="comp-more"><button type="button" class="btn-secondary" data-action="comp-more" ${compState().moreBusy?'disabled':''}>${compState().moreBusy?'Load ho raha hai…':'Aur trades dikhao'}</button></div>`:''}`;
+}
+/* ---------- attach an already-logged trade ---------- */
+function compAttachable(c){
+  return STATE.trades.filter(t=>{ const day=compIstDay(t); return day && day>=c.startDate && day<=c.endDate && t.competitionId!==c.id; }).sort((a,b)=>tradeSortTime(b)-tradeSortTime(a));
+}
+function renderCompAttach(){
+  const s=compState(), a=s.attach, c=s.detail?.competition; if(!a||!c) return '';
+  const trades=compAttachable(c), t=trades.find(x=>x.id===a.tradeId);
+  const pv=t?compScore(t, a.checked.length, c.rules.length, c.criteria, tradeImages(t).some(x=>String(x).startsWith('/api/img/'))):null;
+  return `<div class="edit-overlay sm-overlay" data-action="comp-attach-backdrop"><div class="edit-modal sm-modal comp-submit" role="dialog" aria-modal="true" aria-labelledby="comp-att-title">
+    <div class="edit-modal-head"><div><h2 class="section-title" id="comp-att-title">🏆 Logged trade ko competition mein jodo</h2><p class="card-sub">Agar trade log karte waqt “🏆 ${esc(c.strategy)}” chunna bhool gaye the. Aap dikhoge: <b>${esc(c.myAlias||'')}</b></p></div><button type="button" class="modal-x" data-action="comp-attach-close" aria-label="Close">×</button></div>
+    <span class="adm-field-label">1. Trade chuno (${esc(compDay(c.startDate))} – ${esc(compDay(c.endDate))} ke beech ke)</span>
+    ${trades.length?`<div class="comp-pick">${trades.slice(0,30).map(x=>`<label class="comp-pick-row ${x.id===a.tradeId?'on':''}"><input type="radio" name="comp-trade" value="${esc(x.id)}" ${x.id===a.tradeId?'checked':''}><b>${esc(x.symbol||'—')}</b> <span class="pb-dir ${x.type==='SHORT'?'short':'long'}">${esc(x.type||'')}</span><small>${esc(formatTradeTime(x))} · ${esc(tradeStrategyName(x))}</small><span class="${isOpenTrade(x)?'':(Number(x.pnl)>=0?'positive':'negative')}">${isOpenTrade(x)?'Open':money(Number(x.pnl)||0)}</span></label>`).join('')}</div>`
+      :`<div class="report-empty">Competition ke dates mein aapka koi aur trade nahi mila.<br><button type="button" class="btn-primary btn-small" data-action="comp-log-trade" style="margin-top:.6rem">➕ Naya trade log karo</button></div>`}
+    ${t&&c.rules.length?`<span class="adm-field-label">2. Imaandari se tick karo — kaunse rules follow kiye?</span><div class="comp-rule-checks">${c.rules.map((r,i)=>`<label class="adm-notify"><input type="checkbox" data-comp-rule="${i}" ${a.checked.includes(i)?'checked':''}><span>${esc(r)}</span></label>`).join('')}</div>`:''}
+    ${pv?`<div class="comp-preview"><span class="comp-score big ${scoreTone(pv.score)}"><b>${Math.round(pv.score)}</b><small>/100</small></span><ul class="comp-checks">${COMP_CRITERIA.filter(([k])=>c.criteria.weights[k]>0).map(([k,l])=>{ const p=pv.parts[k]; return `<li class="${p>=1?'yes':p>0?'half':'no'}">${p>=1?'✓':p>0?'½':'✗'} ${esc(l.replace(/^\S+\s/,''))}</li>`; }).join('')}</ul></div>
+      <p class="comp-note">Is trade ki strategy badal kar <b>${esc(c.strategy)}</b> ho jayegi. Yeh sabko anonymous naam se dikhega.</p>`:''}
+    <p class="sm-error" role="status">${a.error?esc(a.error):''}</p>
+    <div class="sm-form-actions"><button type="button" class="btn-secondary" data-action="comp-attach-close">Cancel</button><button type="button" class="btn-primary" data-action="comp-attach-save" ${t&&!a.busy?'':'disabled'}>${a.busy?'Jud raha hai…':'🏆 Competition mein jodo'}</button></div>
+  </div></div>`;
+}
+async function saveCompAttach(){
+  const s=compState(), a=s.attach, c=s.detail?.competition; if(!a||!c||a.busy) return;
+  const t=STATE.trades.find(x=>x.id===a.tradeId); if(!t) return;
+  const before={ strategy:t.strategy, isSetupTrade:t.isSetupTrade, competitionId:t.competitionId, compRules:t.compRules, followedPlan:t.followedPlan };
+  a.busy=true; a.error=''; renderTabOnly();
+  Object.assign(t,{ strategy:c.strategy, isSetupTrade:true, competitionId:c.id, compRules:[...a.checked].sort((x,y)=>x-y), followedPlan:(t.mistake||'none')==='none' && a.checked.length===c.rules.length });
+  const saved=await saveUserData('Trade',['trades']);
+  if(!saved){ Object.assign(t,before); a.busy=false; renderTabOnly(); return; }
+  s.attach=null; s.view='mine'; compAfterSave(t, STATE.lastSave?.competition, 'jud gaya'); await loadCompetitions(true);
+}
+async function compUntag(tradeId){
+  const t=STATE.trades.find(x=>String(x.id)===String(tradeId));
+  if(!t){ alert('Yeh trade aapke journal mein nahi mila.'); return; }
+  if(!confirm(`${t.symbol||'Yeh trade'} ko competition se hata dein?\n\nTrade aapke journal mein rahega, bas competition mein nahi dikhega.`)) return;
+  const before={ competitionId:t.competitionId, compRules:t.compRules };
+  t.competitionId=null; t.compRules=[];
+  if(!(await saveUserData('Trade',['trades']))){ Object.assign(t,before); return; }
+  await loadCompetitions(true);
+}
+/* ---------- admin: create / edit ---------- */
+function compDatePreset(kind){
+  const now=new Date(), mon=weekStartOf(now);
+  if(kind==='week') return [localDateKey(mon), localDateKey(addDays(mon,6))];
+  if(kind==='next') return [localDateKey(addDays(mon,7)), localDateKey(addDays(mon,13))];
+  if(kind==='nextmonth') return [localDateKey(new Date(now.getFullYear(),now.getMonth()+1,1)), localDateKey(new Date(now.getFullYear(),now.getMonth()+2,0))];
+  return [localDateKey(now), localDateKey(new Date(now.getFullYear(),now.getMonth()+1,0))];   // today -> month end
+}
+function compFormWeeks(f){ const a=new Date(f.startDate+'T00:00'), b=new Date(f.endDate+'T00:00'); if(Number.isNaN(a.getTime())||Number.isNaN(b.getTime())||b<a) return 0; return weekStartOf(a).getTime()===weekStartOf(b).getTime()?1:2; }
+function renderCompForm(){
+  const s=compState(), f=s.form; if(!f) return '';
+  const tot=Object.values(f.criteria.weights).reduce((a,b)=>a+Number(b||0),0)||1, multi=compFormWeeks(f)>1;
+  return `<div class="edit-overlay sm-overlay" data-action="comp-form-backdrop"><div class="edit-modal sm-modal comp-form" role="dialog" aria-modal="true" aria-labelledby="comp-form-title">
+    <div class="edit-modal-head"><div><h2 class="section-title" id="comp-form-title">${f.id?'✏️ Competition edit karo':'🏆 Naya competition'}</h2><p class="card-sub">Aap ek strategy doge — sab traders usi par trade karenge. Ranking discipline se banegi.</p></div><button type="button" class="modal-x" data-action="comp-form-close" aria-label="Close">×</button></div>
+    <div class="adm-bc-body" style="max-width:none">
+      <label class="adm-field"><span>Competition ka naam</span><input data-cf="title" maxlength="120" value="${esc(f.title)}" placeholder="e.g. October ORB Discipline Challenge"></label>
+      <div class="adm-ann-row" style="grid-template-columns:1fr 1fr"><label class="adm-field"><span>Sir ki strategy ka naam</span><input data-cf="strategy" maxlength="80" value="${esc(f.strategy)}" placeholder="e.g. ORB Breakout"></label>
+        <label class="adm-field"><span>Apni saved strategy se bharo <small>(optional)</small></span><select data-action-change="comp-fill-strategy"><option value="">— chuno —</option>${allStrategies().map(x=>`<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('')}</select></label></div>
+      <label class="adm-field"><span>Description <small>(optional)</small></span><textarea data-cf="description" rows="2" maxlength="1500" placeholder="Is challenge ka maqsad, market, timeframe…">${esc(f.description)}</textarea></label>
+      <div class="adm-ann-row" style="grid-template-columns:1fr 1fr"><label class="adm-field"><span>Entry criteria</span><textarea data-cf="entryCriteria" rows="2" maxlength="800">${esc(f.entryCriteria)}</textarea></label><label class="adm-field"><span>Exit / SL criteria</span><textarea data-cf="exitCriteria" rows="2" maxlength="800">${esc(f.exitCriteria)}</textarea></label></div>
+      <label class="adm-field"><span>Rules <small>(har rule nayi line mein — trader har trade par inhe tick karega)</small></span><textarea data-cf="rules" rows="4" placeholder="15 min range banne do&#10;5-min candle range ke bahar close&#10;SL range ke andar&#10;Risk 1% se zyada nahi">${esc(f.rules)}</textarea></label>
+      <span class="adm-field-label">Dates</span>
+      <div class="adm-ann-templates"><button type="button" class="qotd-link" data-action="comp-preset" data-kind="month">🗓 Aaj se mahine ke end tak</button><button type="button" class="qotd-link" data-action="comp-preset" data-kind="nextmonth">⏭ Agla mahina</button><button type="button" class="qotd-link" data-action="comp-preset" data-kind="week">📅 Sirf is hafte</button><button type="button" class="qotd-link" data-action="comp-preset" data-kind="next">Agle hafte</button></div>
+      <div class="adm-ann-row" style="grid-template-columns:1fr 1fr"><label class="adm-field"><span>Start</span><input type="date" data-cf="startDate" value="${esc(f.startDate)}"></label><label class="adm-field"><span>End</span><input type="date" data-cf="endDate" value="${esc(f.endDate)}"></label></div>
+      <p class="comp-note" id="comp-form-weeknote">${multi?'📆 Yeh competition kai hafton ka hai — har hafte (Mon–Sun) ka alag winner + end mein final winner declare kar sakte ho.':'📆 Yeh ek hafte ka competition hai — end mein ek hi baar winner declare hoga.'}</p>
+      <span class="adm-field-label">🎁 Prize</span>
+      <div class="adm-ann-row" style="grid-template-columns:1fr 1fr"><label class="adm-field"><span>Har hafte ke winner ko</span><input data-cf="prizeWeekly" maxlength="120" value="${esc(f.prizeWeekly)}" placeholder="e.g. 5K Funded Account"></label><label class="adm-field"><span>Month-end / final winner ko</span><input data-cf="prizeFinal" maxlength="120" value="${esc(f.prizeFinal)}" placeholder="e.g. 25K Funded Account"></label></div>
+      <span class="adm-field-label">Score ka weight — kis cheez ko kitni ahmiyat (total <b id="comp-wtot">${tot}</b>)</span>
+      <div class="comp-weight-edit">${COMP_CRITERIA.map(([k,l])=>`<label><span>${l}</span><input type="number" min="0" max="100" data-cw="${k}" value="${f.criteria.weights[k]}"><small>${Math.round(Number(f.criteria.weights[k]||0)/tot*100)}%</small></label>`).join('')}</div>
+      <div class="comp-num-grid">
+        <label class="adm-field"><span>Weekly rank ke liye min trades</span><input type="number" min="1" max="50" data-cm="minTradesWeek" value="${f.criteria.minTradesWeek}"></label>
+        <label class="adm-field"><span>Final rank ke liye min trades</span><input type="number" min="1" max="100" data-cm="minTrades" value="${f.criteria.minTrades}"></label>
+        <label class="adm-field"><span>Ek din mein max trades</span><input type="number" min="1" max="20" data-cm="maxPerDay" value="${f.criteria.maxPerDay}"></label>
+        <label class="adm-field"><span>Weekly winners kitne</span><input type="number" min="1" max="5" data-cm="winnersWeek" value="${f.criteria.winnersWeek}"></label>
+        <label class="adm-field"><span>Final winners kitne</span><input type="number" min="1" max="5" data-cm="winnersFinal" value="${f.criteria.winnersFinal}"></label>
+      </div>
+      <p class="sm-error" id="comp-form-status">${f.error?esc(f.error):''}</p>
+      <div class="adm-send-row"><label class="adm-notify">${f.id?'':`<input type="checkbox" id="cf-announce" checked><span>📢 Traders ko announcement + notification bhejo</span>`}</label><button type="button" class="btn-primary" data-action="comp-form-save" ${f.busy?'disabled':''}>${f.busy?'Save ho raha hai…':f.id?'💾 Save':'🚀 Competition launch karo'}</button></div>
+    </div></div></div>`;
+}
+function openCompForm(existing){
+  const [a,b]=compDatePreset('month');
+  compState().form = existing ? { id:existing.id, title:existing.title, strategy:existing.strategy, description:existing.description, entryCriteria:existing.entryCriteria, exitCriteria:existing.exitCriteria, rules:existing.rules.join('\n'), startDate:existing.startDate, endDate:existing.endDate, prizeWeekly:existing.prizeWeekly||'', prizeFinal:existing.prizeFinal||'', criteria:structuredClone(existing.criteria) }
+    : { id:null, title:'', strategy:'', description:'', entryCriteria:'', exitCriteria:'', rules:'', startDate:a, endDate:b, prizeWeekly:'', prizeFinal:'', criteria:structuredClone(COMP_DEFAULTS) };
+  renderTabOnly();
+}
+async function compAnnounce(title, body, days){
+  try { const a=await api('/api/announcements','POST',{ title:title.slice(0,80), body:body.slice(0,280), cta:'', style:'celebrate', days });
+    if(a.subscribers) await sendPushBatches('announcement', a.announcement.id, a.subscribers, ()=>{}); if(STATE.ann) STATE.ann.loaded=false; } catch(e){ console.warn('announce skipped', e); }
+}
+async function saveCompForm(){
+  const s=compState(), f=s.form; if(!f||f.busy) return;
+  const announce=!!$('#cf-announce')?.checked;
+  f.busy=true; f.error=''; renderTabOnly();
+  try{
+    const body={ title:f.title, strategy:f.strategy, description:f.description, entryCriteria:f.entryCriteria, exitCriteria:f.exitCriteria, rules:f.rules, startDate:f.startDate, endDate:f.endDate, prizeWeekly:f.prizeWeekly, prizeFinal:f.prizeFinal, criteria:f.criteria };
+    const r = f.id ? await api(`/api/competitions/${encodeURIComponent(f.id)}`,'PUT',body) : await api('/api/competitions','POST',body);
+    const c=r.competition; s.form=null; s.currentId=c.id; s.period=null; await loadCompetitions(true);
+    if(!f.id && announce) await compAnnounce(`🏆 Naya competition: ${c.title}`, `Strategy: ${c.strategy}. Log Trade mein yahi strategy chuno — trade apne aap competition mein jayega.${c.prizeWeekly||c.prizeFinal?` Prize: ${c.prizeWeekly||c.prizeFinal}.`:''} Sabse disciplined trader jeetega!`, Math.min(14,Math.max(1,Math.round((new Date(c.endDate)-new Date())/86400000)+1)));
+  }catch(e){ f.busy=false; f.error=e.message||'Save nahi hua.'; renderTabOnly(); }
+}
+/* ---------- admin: declare winners ---------- */
+function renderCompDeclare(){
+  const s=compState(), x=s.declare, d=s.detail; if(!x||!d?.competition) return '';
+  const c=d.competition, weeks=compWeeks(d), open=weeks.filter(w=>w.state!=='upcoming'&&!w.declared);
+  const wk=x.period==='week' ? (open.find(w=>w.start===x.week)||open[0]) : null;
+  const board=(wk?wk.leaderboard:d.leaderboard).filter(r=>r.qualified).slice(0, wk?c.criteria.winnersWeek:c.criteria.winnersFinal);
+  const early = wk ? wk.state==='live' : c.state==='live';
+  return `<div class="edit-overlay sm-overlay" data-action="comp-declare-backdrop"><div class="edit-modal sm-modal comp-submit" role="dialog" aria-modal="true" aria-labelledby="comp-dec-title">
+    <div class="edit-modal-head"><div><h2 class="section-title" id="comp-dec-title">${wk?'🏅 Weekly winner declare karo':'🏆 Final results declare karo'}</h2><p class="card-sub">${esc(c.title)}</p></div><button type="button" class="modal-x" data-action="comp-declare-close" aria-label="Close">×</button></div>
+    ${x.period==='week'?`<label class="adm-field"><span>Kaunsa hafta</span><select id="comp-dec-week">${open.map(w=>`<option value="${w.start}" ${wk&&w.start===wk.start?'selected':''}>Week ${w.n} · ${esc(compDay(w.start))}–${esc(compDay(w.end))}${w.state==='live'?' (abhi chal raha hai)':''}</option>`).join('')}</select></label>`:''}
+    ${early?`<p class="comp-warn-box">⚠️ ${wk?'Yeh hafta':'Competition'} abhi khatam nahi hua. Abhi declare karoge to ${wk?'is hafte ki':'saari'} entries lock ho jayengi.</p>`:''}
+    <span class="adm-field-label">${board.length?'Winner yeh honge':'Koi qualify nahi hua'}</span>
+    ${board.length?`<ol class="comp-dec-list">${board.map(r=>`<li><b>${esc(r.realName||r.alias)}</b> <small>${esc(r.alias)} · ${esc(r.email||'')}</small><span>score ${r.avg} · ${r.entries} trades · ${r.netR>0?'+':''}${r.netR}R</span></li>`).join('')}</ol>`:`<p class="comp-note">Kisi ne minimum ${wk?c.criteria.minTradesWeek:c.criteria.minTrades} trades poore nahi kiye. Chaho to Edit mein minimum kam kar sakte ho.</p>`}
+    ${(wk?c.prizeWeekly:c.prizeFinal)?`<p class="comp-note">🎁 Prize: <b>${esc(wk?c.prizeWeekly:c.prizeFinal)}</b></p>`:''}
+    <label class="adm-notify"><input type="checkbox" id="comp-dec-reveal" ${x.reveal?'checked':''}><span>Winner ka <b>asli naam</b> sabko dikhao <small>(tick nahi karoge to sabko sirf anonymous naam dikhega)</small></span></label>
+    <label class="adm-notify"><input type="checkbox" id="comp-dec-announce" ${x.announce?'checked':''}><span>📢 Sabko announcement + notification bhejo</span></label>
+    <p class="sm-error" role="status">${x.error?esc(x.error):''}</p>
+    <div class="sm-form-actions"><button type="button" class="btn-secondary" data-action="comp-declare-close">Cancel</button><button type="button" class="btn-primary" data-action="comp-declare-go" ${x.busy||(x.period==='week'&&!wk)?'disabled':''}>${x.busy?'Declare ho raha hai…':'🏆 Declare karo'}</button></div>
+  </div></div>`;
+}
+async function runCompDeclare(){
+  const s=compState(), x=s.declare, d=s.detail, c=d?.competition; if(!x||!c||x.busy) return;
+  const weeks=compWeeks(d), open=weeks.filter(w=>w.state!=='upcoming'&&!w.declared), wk=x.period==='week'?(open.find(w=>w.start===x.week)||open[0]):null;
+  x.reveal=!!$('#comp-dec-reveal')?.checked; x.announce=!!$('#comp-dec-announce')?.checked; x.busy=true; x.error=''; renderTabOnly();
+  try{
+    const r=await api(`/api/competitions/${encodeURIComponent(c.id)}/declare`,'POST', wk?{period:'week',week:wk.start,revealNames:x.reveal}:{period:'final',revealNames:x.reveal});
+    const win=r.results.winners||[], names=win.map(w=>x.reveal?(w.name||w.alias):w.alias).join(', ');
+    if(x.announce) await compAnnounce(wk?`🏅 Week ${wk.n} winner: ${names||'koi qualify nahi hua'}`:`🏆 Final results: ${c.title}`,
+      win.length?`${wk?'Is hafte ka sabse disciplined trader':'Sabse disciplined traders'}: ${names} (score ${win[0].avg}).${r.results.prize?` Prize: ${r.results.prize}.`:''} Competition tab mein leaderboard dekho!`:'Is baar kisi ne minimum trades poore nahi kiye. Competition tab dekho.', 4);
+    s.declare=null; if(wk) { s.view='board'; s.period=wk.start; } await loadCompetitions(true);
+  }catch(e){ x.busy=false; x.error=e.message||'Declare nahi hua.'; renderTabOnly(); }
+}
+async function undoCompDeclare(period, week){
+  const c=compState().detail?.competition; if(!c) return;
+  if(!confirm(period==='week'?'Is hafte ka winner wapas lein? Us hafte ki entries phir se khul jayengi.':'Final results wapas lekar competition ko phir se khol dein?')) return;
+  try { await api(`/api/competitions/${encodeURIComponent(c.id)}/declare`,'POST',{period, week, undo:true}); await loadCompetitions(true); } catch(e){ alert(e.message||'Nahi hua.'); }
+}
+function handleCompClick(action, btn, e){
+  if(!action || (!action.startsWith('comp-') && action!=='log-pick-comp')) return false;
+  const s=compState();
+  if(action==='comp-toast-close'){ $('#comp-toast')?.remove(); return true; }
+  if(action==='log-pick-comp'){ const sel=$('#log-strategy-select'); if(sel){ sel.value='comp:'+btn.dataset.id; } setLogStrategy('comp:'+btn.dataset.id); return true; }
+  if(action==='comp-view'){ s.view=btn.dataset.view; renderTabOnly(); return true; }
+  if(action==='comp-period'){ s.period=btn.dataset.period; renderTabOnly(); return true; }
+  if(action==='comp-log-trade'){ const c=s.detail?.competition; s.attach=null; if(c?.accepting){ STATE.logFormIsSetup=true; if(STATE.logCompId!==c.id){ STATE.logCompId=c.id; STATE.logCompRules=[]; } } STATE.activeTab='log'; render(); window.scrollTo({top:0}); return true; }
+  if(action==='comp-open-attach'){ const c=s.detail?.competition; s.attach={ tradeId:(c?compAttachable(c)[0]:null)?.id||null, checked:[], busy:false }; renderTabOnly(); return true; }
+  if(action==='comp-attach-close' || (action==='comp-attach-backdrop' && e.target===btn)){ s.attach=null; renderTabOnly(); return true; }
+  if(action==='comp-attach-backdrop') return true;
+  if(action==='comp-attach-save'){ saveCompAttach(); return true; }
+  if(action==='comp-untag'){ compUntag(btn.dataset.trade); return true; }
+  if(action==='comp-clap'){ const id=btn.dataset.id; api(`/api/competition-entries/${encodeURIComponent(id)}/clap`,'POST',{}).then(r=>{ [...(s.detail?.feed||[]),...(s.detail?.mine||[])].filter(x=>x.id===id).forEach(en=>{ en.clapped=r.clapped; en.claps=r.claps; }); renderTabOnly(); }).catch(err=>alert(err.message)); return true; }
+  if(action==='comp-more'){ if(s.moreBusy) return true; s.moreBusy=true; renderTabOnly(); api(`/api/competitions/${encodeURIComponent(s.currentId)}/entries?offset=${s.detail.feed.length}`).then(r=>{ const have=new Set(s.detail.feed.map(x=>x.id)); s.detail.feed.push(...r.feed.filter(x=>!have.has(x.id))); s.detail.feedMore=r.feedMore; }).catch(err=>alert(err.message)).finally(()=>{ s.moreBusy=false; renderTabOnly(); }); return true; }
+  if(action==='comp-remove'){ const note=prompt('Yeh trade competition se kyun hata rahe ho? (trader ko yeh reason dikhega)','Chart strategy se match nahi karta'); if(note===null) return true; api(`/api/competition-entries/${encodeURIComponent(btn.dataset.id)}`,'PUT',{status:'removed',note}).then(()=>loadCompetitions(true)).catch(err=>alert(err.message)); return true; }
+  if(action==='comp-restore'){ api(`/api/competition-entries/${encodeURIComponent(btn.dataset.id)}`,'PUT',{status:'ok'}).then(()=>loadCompetitions(true)).catch(err=>alert(err.message)); return true; }
+  if(action==='comp-new'){ openCompForm(null); return true; }
+  if(action==='comp-edit'){ openCompForm(s.detail?.competition); return true; }
+  if(action==='comp-form-close' || (action==='comp-form-backdrop' && e.target===btn)){ s.form=null; renderTabOnly(); return true; }
+  if(action==='comp-form-backdrop') return true;
+  if(action==='comp-preset'){ const [a,b]=compDatePreset(btn.dataset.kind), wk=btn.dataset.kind==='week'||btn.dataset.kind==='next'; Object.assign(s.form,{startDate:a,endDate:b}); s.form.criteria.minTrades=wk?3:6; renderTabOnly(); return true; }
+  if(action==='comp-form-save'){ saveCompForm(); return true; }
+  if(action==='comp-declare'){ s.declare={ period:btn.dataset.period, week:null, reveal:false, announce:true, busy:false }; renderTabOnly(); return true; }
+  if(action==='comp-declare-close' || (action==='comp-declare-backdrop' && e.target===btn)){ s.declare=null; renderTabOnly(); return true; }
+  if(action==='comp-declare-backdrop') return true;
+  if(action==='comp-declare-go'){ runCompDeclare(); return true; }
+  if(action==='comp-undeclare'){ undoCompDeclare(btn.dataset.period, btn.dataset.week); return true; }
+  if(action==='comp-delete'){ const c=s.detail?.competition; if(c && confirm(`"${c.title}" aur uske saare trades competition se delete karein?\n\n(Traders ke apne journal ke trades safe rahenge.)`)) api(`/api/competitions/${encodeURIComponent(c.id)}`,'DELETE').then(()=>{ s.currentId=null; loadCompetitions(true); }).catch(err=>alert(err.message)); return true; }
+  return false;
+}
+document.addEventListener('change', e=>{
+  const el=e.target;
+  if(el.dataset.logCompRule!==undefined){ const i=Number(el.dataset.logCompRule), cur=STATE.logCompRules||[]; STATE.logCompRules=el.checked?[...new Set([...cur,i])]:cur.filter(x=>x!==i); const n=$('#log-comp-count'); if(n) n.textContent=`${STATE.logCompRules.length}/${document.querySelectorAll('[data-log-comp-rule]').length}`; return; }
+  if(el.id==='edit-strategy'){ const p=$('#edit-comp-panel'), t=STATE.trades.find(x=>x.id===STATE.editingTradeId); if(p&&t) p.innerHTML=editCompPanelHtml(t, el.value); return; }
+  const s=STATE.comp; if(!s) return;
+  if(el.id==='comp-picker'){ s.view='feed'; s.period=null; loadCompetition(el.value); return; }
+  if(el.id==='comp-dec-week' && s.declare){ s.declare.week=el.value; s.declare.reveal=!!$('#comp-dec-reveal')?.checked; s.declare.announce=!!$('#comp-dec-announce')?.checked; renderTabOnly(); return; }
+  if(el.name==='comp-trade' && s.attach){ s.attach.tradeId=el.value; s.attach.checked=[]; renderTabOnly(); return; }
+  if(el.dataset.compRule!==undefined && s.attach){ const i=Number(el.dataset.compRule); s.attach.checked=el.checked?[...new Set([...s.attach.checked,i])]:s.attach.checked.filter(x=>x!==i); renderTabOnly(); return; }
+  if(el.dataset.actionChange==='comp-fill-strategy' && s.form){ const st=allStrategies().find(x=>x.id===el.value); if(st){ s.form.strategy=st.name; s.form.entryCriteria=st.entryCriteria||s.form.entryCriteria; s.form.exitCriteria=st.exitCriteria||s.form.exitCriteria; s.form.rules=((st.rules&&st.rules.length?st.rules:st.mandatoryRules)||[]).join('\n')||s.form.rules; if(!s.form.title) s.form.title=`${st.name} — Discipline Challenge`; renderTabOnly(); } return; }
+  if(el.dataset.cf && (el.dataset.cf==='startDate'||el.dataset.cf==='endDate') && s.form){ const n=$('#comp-form-weeknote'); if(n) n.textContent=compFormWeeks(s.form)>1?'📆 Yeh competition kai hafton ka hai — har hafte (Mon–Sun) ka alag winner + end mein final winner declare kar sakte ho.':'📆 Yeh ek hafte ka competition hai — end mein ek hi baar winner declare hoga.'; }
+});
+document.addEventListener('input', e=>{
+  const f=STATE.comp?.form; if(!f) return;
+  if(e.target.dataset.cf){ f[e.target.dataset.cf]=e.target.value; return; }
+  if(e.target.dataset.cw){ f.criteria.weights[e.target.dataset.cw]=Math.max(0,Math.min(100,Number(e.target.value)||0)); const tot=Object.values(f.criteria.weights).reduce((a,b)=>a+Number(b||0),0)||1; document.querySelectorAll('.comp-weight-edit label').forEach(l=>{ const k=l.querySelector('input').dataset.cw; l.querySelector('small').textContent=Math.round(f.criteria.weights[k]/tot*100)+'%'; }); const t=$('#comp-wtot'); if(t) t.textContent=tot; return; }
+  if(e.target.dataset.cm){ f.criteria[e.target.dataset.cm]=Number(e.target.value)||1; }
+});
 
 /* ---------------- strategy manager ---------------- */
 function strategyUsage(name){
@@ -2690,6 +3162,7 @@ function render(){
   else if (STATE.activeTab==='risk') { content.innerHTML = renderRiskCenter(); bindRiskSettings(); updateRiskCalculator(); }
   else if (STATE.activeTab==='blog') { content.innerHTML = renderBlogTab(); if(blogState().view==='list'&&blogState().loaded) markBlogSeen(); }
   else if (STATE.activeTab==='admin') content.innerHTML = renderAdminTab();
+  else if (STATE.activeTab==='competition') content.innerHTML = renderCompetitionTab();
   afterTabRender();
 }
 function renderTabOnly(){ // re-render just the active tab (after in-tab interactions)
@@ -2702,6 +3175,7 @@ function renderTabOnly(){ // re-render just the active tab (after in-tab interac
   else if (STATE.activeTab==='risk') { content.innerHTML = renderRiskCenter(); bindRiskSettings(); updateRiskCalculator(); }
   else if (STATE.activeTab==='blog') content.innerHTML = renderBlogTab();
   else if (STATE.activeTab==='admin') content.innerHTML = renderAdminTab();
+  else if (STATE.activeTab==='competition') content.innerHTML = renderCompetitionTab();
   renderTabNav();
   afterTabRender();
 }
@@ -2712,12 +3186,16 @@ document.addEventListener('click', async (e) => {
   if (!btn) return;
   const action = btn.dataset.action;
 
+  if (action==='set-tab') $('#mobile-more')?.remove();
   if (action==='set-tab' && TAB_FEATURE[btn.dataset.tab] && !featureVisible(TAB_FEATURE[btn.dataset.tab])) { return; }
   if (action==='set-tab') { if (STATE.activeTab==='blog' && btn.dataset.tab!=='blog' && STATE.blog?.view==='edit' && !leaveBlogEditor()) return; if (btn.dataset.tab==='blog' && STATE.activeTab==='blog' && STATE.blog) { STATE.blog.view='list'; STATE.blog.current=null; } STATE.activeTab = btn.dataset.tab; render(); }
   else if (handleBlogClick(action, btn, e)) { /* blog */ }
   else if (handleAdminClick(action, btn)) { /* admin */ }
   else if (handleQuoteClick(action, btn)) { /* quotes */ }
   else if (handleAnnClick(action, btn)) { /* announcements */ }
+  else if (handleCompClick(action, btn, e)) { /* competition */ }
+  else if (action==='mobile-more') { toggleMobileMore(!$('#mobile-more')); }
+  else if (action==='mobile-more-close') { toggleMobileMore(false); }
   else if (action==='admin-health') { runSystemCheck(); }
   else if (action==='side-toggle') { try { localStorage.setItem('tc_side_collapsed', sideCollapsed()?'0':'1'); } catch(_) {} renderSideNav(); }
   else if (action==='bc-mode') { STATE.broadcastMode=btn.dataset.mode; const bc=$('#admin-broadcast'); if(bc) bc.outerHTML=renderAdminBroadcast(); }
@@ -3056,7 +3534,7 @@ document.addEventListener('change', (e) => {
   }
   if (e.target.id==='dash-strategy-select') { STATE.dashStrategy=e.target.value; STATE.dashEditStrategy=null; saveDashStrategy(e.target.value); rerenderSetupPlaybook(); return; }
   if (e.target.id==='playbook-select') { STATE.selectedPlaybookId = e.target.value; STATE.checkedRules = {}; renderTabOnly(); }
-  else if (e.target.id==='log-strategy-select') { STATE.selectedPlaybookId = e.target.value; STATE.checkedRules = {}; updateLogPreview(); }
+  else if (e.target.id==='log-strategy-select') { setLogStrategy(e.target.value); STATE.checkedRules = {}; updateLogPreview(); }
   else if (e.target.id==='log-location-select') { STATE.logFormLocation = e.target.value; updateLogPreview(); }
   else if (e.target.id==='history-strategy-filter') { STATE.historyStrategyFilter = e.target.value; renderTabOnly(); }
   else if (e.target.id==='history-mistake-filter') { STATE.historyMistakeFilter = e.target.value; renderTabOnly(); }
@@ -3388,16 +3866,22 @@ async function updateExistingTrade(id){
   // Exit cleared => trade is open again, so P&L/R go back to 0 instead of keeping the old result.
   const pnl=canPnl?Math.round((type==='LONG'?(exit-entry)*qty:(entry-exit)*qty)*100)/100:(hasExit?(t.pnl||0):0);
   const rr=(Number.isFinite(sl)&&Number.isFinite(entry)&&hasExit&&entry!==sl)?Math.round(((type==='LONG'?exit-entry:entry-exit)/Math.abs(entry-sl))*100)/100:(hasExit?(t.rr||0):0);
-  const strategy=$('#edit-strategy')?.value || t.strategy;
+  let strategy=$('#edit-strategy')?.value || t.strategy, competitionId=null, compRules=[], compObj=null;
+  if(String(strategy).startsWith('comp:')){
+    compObj=compById(strategy.slice(5));
+    if(compObj){ competitionId=compObj.id; strategy=compObj.strategy; compRules=compObj.accepting ? [...document.querySelectorAll('[data-edit-comp-rule]:checked')].map(x=>Number(x.dataset.editCompRule)).sort((a,b)=>a-b) : (t.compRules||[]); }
+    else strategy=t.strategy;
+  }
   const isSetupTrade=strategy!==NO_SETUP_STRATEGY;
   const mistake=$('#edit-mistake')?.value || t.mistake || 'none';
   const quality=Number($('#edit-quality')?.value) || t.quality || 3;
   const notes=$('#edit-notes') ? $('#edit-notes').value.trim() : (t.notes||'');
   const snapshot = JSON.parse(JSON.stringify(t));
-  Object.assign(t,{symbol:symbol.toUpperCase(),type,emotions,quantity:Number.isFinite(qty)?qty:t.quantity,entryPrice:Number.isFinite(entry)?entry:null,exitPrice:Number.isFinite(exit)?exit:null,stopLoss:Number.isFinite(sl)?sl:null,tradeDateTime:$('#edit-trade-datetime')?.value || t.tradeDateTime || t.date,emotion,exitReason:$('#edit-exit-reason')?.value.trim()||'',notes,strategy,isSetupTrade,mistake,quality,followedPlan:isSetupTrade&&mistake==='none',updatedAt:new Date().toISOString(),images,beforeImage:images[0]||null,afterImage:images[1]||null,image:images[0]||null,pnl,rr});
+  Object.assign(t,{symbol:symbol.toUpperCase(),type,emotions,quantity:Number.isFinite(qty)?qty:t.quantity,entryPrice:Number.isFinite(entry)?entry:null,exitPrice:Number.isFinite(exit)?exit:null,stopLoss:Number.isFinite(sl)?sl:null,tradeDateTime:$('#edit-trade-datetime')?.value || t.tradeDateTime || t.date,emotion,exitReason:$('#edit-exit-reason')?.value.trim()||'',notes,strategy,isSetupTrade,competitionId,compRules,mistake,quality,followedPlan:isSetupTrade&&mistake==='none'&&(!compObj||compRules.length===compObj.rules.length),updatedAt:new Date().toISOString(),images,beforeImage:images[0]||null,afterImage:images[1]||null,image:images[0]||null,pnl,rr});
   const saved = await saveUserData('Trade', ['trades']);
   if (!saved) { Object.assign(t, snapshot); return; }
   STATE.editingTradeId=null; render();
+  if (competitionId) compAfterSave(t, STATE.lastSave?.competition, snapshot.competitionId===competitionId ? 'update ho gaya' : 'jud gaya');
 }
 
 document.addEventListener('input', (e) => {
@@ -3427,7 +3911,10 @@ document.addEventListener('submit', async (e) => {
     const plannedTP = parseFloat($('#log-planned-tp')?.value) || null;
     const plannedRR = plannedSL && plannedEntry !== plannedSL && plannedTP ? Math.round((Math.abs(plannedTP-plannedEntry)/Math.abs(plannedEntry-plannedSL))*100)/100 : null;
     const selectedStrategy = findStrategy(STATE.selectedPlaybookId);
-    const strategyName = STATE.logFormIsSetup ? (selectedStrategy.name || 'No Strategy') : 'Bina Setup (Tukke Baazi)';
+    // 🏆 Sir's competition strategy picked -> the trade is tagged and the server copies it to the competition
+    const comp = STATE.logFormIsSetup && STATE.logCompId ? liveComps().find(c => c.id === STATE.logCompId) : null;
+    const compRules = comp ? [...(STATE.logCompRules||[])].filter(i => i < comp.rules.length).sort((a,b)=>a-b) : [];
+    const strategyName = !STATE.logFormIsSetup ? 'Bina Setup (Tukke Baazi)' : comp ? comp.strategy : (selectedStrategy.name || 'No Strategy');
     const mindset = findMindset(STATE.selectedMindsetId);
     const newTrade = {
       id:`t-${Date.now()}`, symbol: symbol.toUpperCase(), type: $('#log-type').value, isSetupTrade: STATE.logFormIsSetup,
@@ -3435,15 +3922,18 @@ document.addEventListener('submit', async (e) => {
       stopLoss: $('#log-sl').value ? parseFloat($('#log-sl').value) : null, takeProfit: null,
       strategy: strategyName, emotions: finalEmotions, emotion: finalEmotions.join(' · '), emotionPreset: null, device: STATE.logFormDevice, location: STATE.logFormLocation,
       notes: ($('#log-notes')?.value || '').trim(), exitReason: $('#log-exit-reason')?.value.trim() || '', image: currentLogImages()[0] || null, beforeImage: currentLogImages()[0] || null, afterImage: currentLogImages()[1] || null, images: currentLogImages(),
-      plannedEntry, plannedSL, plannedTP, plannedRR, mistake: $('#log-mistake').value, quality: Number($('#log-quality').value), followedPlan: STATE.logFormIsSetup && $('#log-mistake').value==='none',
-      date: new Date().toISOString(), tradeDateTime: $('#log-trade-datetime')?.value || new Date().toISOString(), pnl: p.pnl, rr: p.rr, xpEarned: p.xp
+      plannedEntry, plannedSL, plannedTP, plannedRR, mistake: $('#log-mistake').value, quality: Number($('#log-quality').value), followedPlan: STATE.logFormIsSetup && $('#log-mistake').value==='none' && (!comp || compRules.length===comp.rules.length),
+      date: new Date().toISOString(), tradeDateTime: $('#log-trade-datetime')?.value || new Date().toISOString(), pnl: p.pnl, rr: p.rr, xpEarned: p.xp,
+      ...(comp ? { competitionId: comp.id, compRules } : {})
     };
     STATE.trades.unshift(newTrade);
     const saved = await saveUserData('Trade', ['trades']);
     if (!saved) { STATE.trades = STATE.trades.filter(t => t.id !== newTrade.id); return; }
     STATE.logFormImage = ''; STATE.logFormBeforeImage = ''; STATE.logFormAfterImage = ''; STATE.logFormImages = []; STATE.logEmotions = []; STATE.logCustomEmotion = '';
+    STATE.logCompRules = [];
     STATE.activeTab = 'history';
     render();
+    compAfterSave(newTrade, STATE.lastSave?.competition);
   }
   else if (e.target.id==='notes-form') {
     e.preventDefault();
