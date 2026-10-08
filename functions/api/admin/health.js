@@ -1,7 +1,7 @@
 import { getUserFromRequest, json, ensureSchema, isAdminUser } from '../../_lib/auth.js';
 
 // GET /api/admin/health (admin) -> server-side launch checks: database tables, R2 image storage, admins, push keys.
-const TABLES = ['users', 'sessions', 'user_data', 'user_session_notes', 'user_activity', 'login_attempts', 'blog_posts', 'quotes', 'announcements', 'push_subscriptions', 'app_settings'];
+const TABLES = ['users', 'sessions', 'user_data', 'user_session_notes', 'user_activity', 'login_attempts', 'blog_posts', 'quotes', 'announcements', 'push_subscriptions', 'app_settings', 'competitions', 'competition_entries', 'competition_claps'];
 export async function onRequestGet({ request, env }) {
   const me = await getUserFromRequest(request, env);
   if (!me) return json({ error: 'Not authenticated' }, { status: 401 });
