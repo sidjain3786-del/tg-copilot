@@ -270,3 +270,33 @@ Shared: symbol, direction, entry / exit / SL, R result, emotion, mistake, exit r
 
 **New files:** `functions/_lib/competition.js`, `functions/api/competitions/index.js`, `functions/api/competitions/[id].js`, `functions/api/competitions/[id]/entries.js`, `functions/api/competitions/[id]/declare.js`, `functions/api/competition-entries/[id].js`, `functions/api/competition-entries/[id]/clap.js`, `functions/api/comp-img/[name].js`.
 **Changed:** `app.js`, `theme.css`, `sw.js`, `schema.sql`, `functions/api/data.js`, `functions/api/admin/health.js`, `functions/_lib/auth.js`, `functions/_lib/settings.js`, `functions/_lib/admin-delete.js`.
+
+## Update 30 — 💯 100 Trades Challenge (App version 30)
+**Idea (from the "100 Trades, One Better Trader" blog):** a trader picks ONE strategy and journals 100 trades on it, with an honest review every 25 trades.
+
+**How it keeps the trader on one strategy**
+- Strategy is locked for the whole challenge. Changing it = **Restart** (counter back to 0, a reason is required, the old attempt stays in history and Sir sees the restart count).
+- Log Trade pre-selects the challenge strategy and shows "Challenge trade 37/100 · Stage 2". Picking another strategy, or Quick trade, shows a warning that the trade won't count; those trades are shown as "challenge ke bahar".
+- Only trades logged **after** the start count (no back-filling old trades).
+- **Review every 25 trades is compulsory:** trades beyond 25 / 50 / 75 are kept but shown as "review ka intezaar" until that review is done. The server also refuses a review before its trades exist.
+
+**The 4 stages**
+1. Trades 1–25 — understand your behaviour. Review: numbers for the 25 trades (rules followed, win rate, avg R, SL %, mistakes, top mistake, top emotion) + "which mistake repeated?" and "in which situation were rules broken?"
+2. Trades 26–50 — find the pattern. Review: pick ONE weakness + write your own rule for it (shown in Log Trade on every challenge trade after that).
+3. Trades 51–75 — work on that weakness. Review: the chosen mistake before vs now.
+4. Trades 76–100 — final report: first 25 vs last 25 (rules followed, mistakes, focus mistake, win rate, avg R, expectancy) + overall win rate, avg win / loss, expectancy, max drawdown. Challenge is then complete and a new one can start.
+
+**Screens:** new "💯 100 Trades Challenge" tab (sidebar → Journal; phone → More) with a 100-box grid in 4 blocks (green = rules followed, orange = rule broken, red = mistake, striped = waiting for review), stage track, stage and overall numbers, focus card, history of attempts. Dashboard card with progress. Admin panel (and the tab for admins): every trader's strategy, progress, stage / pending review, review answers, trades outside the strategy, restarts, last trade. Feature switch "💯 100 Trades Challenge".
+
+**Technical:** new table `trade_challenges` (created automatically). New files `functions/_lib/challenge.js`, `functions/api/challenge/index.js`, `functions/api/challenge/all.js`. Changed: `app.js`, `theme.css`, `sw.js`, `schema.sql`, `functions/_lib/auth.js`, `functions/_lib/settings.js`, `functions/_lib/admin-delete.js`, `functions/api/admin/health.js`. Tests: 19 API checks, 29 browser checks (desktop + phone, full 100-trade run), competition and older-feature tests re-run (71 + 56 + 28).
+
+## Update 31 — ⏰ Auto reminders (App version 31)
+Morning / evening / night notifications go to traders' phones automatically.
+
+**Admin → ⏰ Auto reminders:** master on/off; each reminder has its time (Indian time), days (default Mon–Fri), title, messages (one per line — a different line each day; `{name}` = trader's first name, `{trades}` = trades logged today), who gets it ("Sab traders" or "Sirf jinhone aaj koi trade log nahi kiya") and which screen opens on tap. "📲 Mere phone par test" sends it to the admin's own devices only (unsaved edits too). Up to 6 reminders. Defaults (off until switched on): 8:45 am "Good morning, traders!", 3:45 pm "Don't forget to journal" (only to traders with no trade logged today), 9:30 pm "Din ka summary".
+
+**Traders:** dashboard strip — "🔔 Notification on karo" if notifications are off; otherwise "Daily reminders on · Band karo" (their choice is respected by every reminder).
+
+**How it runs:** Cloudflare Pages has no timer, so a tiny free Cloudflare Worker (`cron-worker/worker.js`, also shown in the Admin card with a Copy button) calls `/api/cron/tick` every 5 minutes with a secret key. The tick sends whatever is due once per day per reminder (up to 90 min late if the timer was missed, never later), 40 devices per call. One-time setup (steps also in the Admin card): add `CRON_SECRET` to the Pages project and redeploy; create the Worker, give it `SITE_URL` and the same `CRON_SECRET`; add the Cron Trigger `*/5 * * * *`. The Admin card and System check show "Automation chal raha hai" once it works.
+
+**Technical:** new table `user_prefs` (created automatically). New files `functions/_lib/reminders.js`, `functions/api/reminders/index.js`, `functions/api/cron/tick.js`. Changed: `app.js`, `theme.css`, `sw.js`, `schema.sql`, `functions/api/notify/latest.js`, `functions/_lib/auth.js`, `functions/_lib/admin-delete.js`, `functions/api/admin/health.js`. Tests: 11 timing checks, 18 API checks with a fake push service (48 devices, batches, opt-out, "not journaled" filter), 17 browser checks, the Worker code run against the server, and all earlier suites re-run.

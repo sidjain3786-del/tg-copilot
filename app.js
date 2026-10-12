@@ -1,4 +1,4 @@
-const APP_VERSION = '29';   // shown in Admin → System check; bump on every release
+const APP_VERSION = '31';   // shown in Admin → System check; bump on every release
 /* ============================================================
    Trader Co-Pilot — vanilla JS (no framework)
    Talks to /api/* (Cloudflare Pages Functions + D1) for
@@ -317,6 +317,8 @@ function showApp(){
   if(STATE.user && !STATE.quotes?.loaded) loadQuotes();
   if(STATE.user && !STATE.ann?.loaded) loadAnnouncements();
   if(STATE.user && !STATE.comp?.loaded) setTimeout(()=>loadCompetitions(), 1200);
+  if(STATE.user && !STATE.chal?.loaded) setTimeout(()=>loadChallenge(), 900);
+  if(STATE.user && !STATE.rem?.loaded) setTimeout(()=>loadReminders(), 1000);
   applyFeatureClasses();
   if(!PUSH.checked) checkPush(); $('#loading-screen').style.display='none'; $('#auth-screen').style.display='none'; $('#app-screen').style.display='block'; render(); }
 
@@ -356,7 +358,7 @@ $('#auth-form').addEventListener('submit', async (e) => {
 
 $('#logout-btn').addEventListener('click', async () => {
   try { await api('/api/logout', 'POST'); } catch (e) { console.warn('Logout request failed', e); }
-  IMAGE_URL_CACHE.clear(); IMAGE_STORE_AVAILABLE = true; STATE.blog = null; STATE.admin = null; STATE.quotes = null; STATE.ann = null; STATE.comp = null; STATE.logCompId = null; STATE.logCompRules = []; STATE.features = {}; $('#comp-toast')?.remove(); $('#privacy-notice')?.remove();
+  IMAGE_URL_CACHE.clear(); IMAGE_STORE_AVAILABLE = true; STATE.blog = null; STATE.admin = null; STATE.quotes = null; STATE.ann = null; STATE.comp = null; STATE.chal = null; STATE.rem = null; STATE.logStratTouched = false; STATE.logCompId = null; STATE.logCompRules = []; STATE.features = {}; $('#comp-toast')?.remove(); $('#privacy-notice')?.remove();
   STATE.user = null; STATE.trades = []; STATE.notes = []; STATE.customStrategies = []; STATE.sessionNotes = {};
   setAuthMode('login');
   showAuth();
@@ -825,6 +827,7 @@ const TABS = [
   {id:'log', label:'📝 Log Trade & Chart Screenshot'},
   {id:'notes', label:'🧾 Notes & Learnings'},
   {id:'history', label:'📜 Trade History Log'},
+  {id:'challenge', label:'💯 100 Trades'},
   {id:'analysis', label:'📊 Daily & Session Analysis'},
   {id:'risk', label:'🛡️ Risk Center'},
   {id:'competition', label:'🏆 Competition'},
@@ -834,7 +837,7 @@ const TABS = [
 function visibleTabs(){ return TABS.filter(t=>(t.id!=='admin' || isAdmin()) && (!TAB_FEATURE[t.id] || featureVisible(TAB_FEATURE[t.id]))); }
 /* ---------------- desktop sidebar navigation ---------------- */
 const SIDE_GROUPS = [
-  ['Journal', [['copilot','⚡','Dashboard'],['log','➕','Log Trade'],['history','📜','Trade History'],['notes','🧠','Notes & Learnings']]],
+  ['Journal', [['copilot','⚡','Dashboard'],['log','➕','Log Trade'],['history','📜','Trade History'],['notes','🧠','Notes & Learnings'],['challenge','💯','100 Trades Challenge']]],
   ['Insights', [['analysis','📊','Session Analysis'],['risk','🛡️','Risk Center']]],
   ['Community', [['competition','🏆','Competition'],['blog','📰','Blog']]],
   ['Admin', [['admin','🛠️','Admin Panel']]]
@@ -860,8 +863,8 @@ function renderTabNav(){
   ).join('');
   try { placeTabIndicator(); } catch (e) { console.warn('indicator skipped', e); }
   renderSideNav();
-  const mobileIcons = {copilot:'⚡',log:'➕',notes:'🧠',history:'📜',analysis:'📊',risk:'🛡️',blog:'📰',admin:'🛠️',competition:'🏆'};
-  const mobileLabels = {copilot:'Home',log:'Log',notes:'Notes',history:'History',analysis:'Analysis',risk:'Risk',blog:'Blog',admin:'Admin',competition:'Contest'};
+  const mobileIcons = {copilot:'⚡',log:'➕',notes:'🧠',history:'📜',analysis:'📊',risk:'🛡️',blog:'📰',admin:'🛠️',competition:'🏆',challenge:'💯'};
+  const mobileLabels = {copilot:'Home',log:'Log',notes:'Notes',history:'History',analysis:'Analysis',risk:'Risk',blog:'Blog',admin:'Admin',competition:'Contest',challenge:'100 Trades'};
   const unread = STATE.blog?.loaded ? blogUnreadCount() : 0;
   const mobile = $('#mobile-tab-nav');
   const MOBILE_MAIN=['copilot','log','history','notes','competition'];
@@ -939,7 +942,9 @@ function renderCopilotTab(){
     <div class="hero-actions"><button class="btn-cta" data-action="set-tab" data-tab="log">＋ Log New Trade</button><button type="button" class="btn-hero-ghost" data-action="open-weekly-report">📄 Weekly report</button></div>
   </section>
   ${renderCompDashBanner()}
+  ${renderChalDashCard()}
   ${renderDashMessages()}
+  ${renderRemStrip()}
 
   <div class="dashboard-kpis">
     <div class="card dashboard-kpi"><span class="uppercase-label">Total Trades</span><strong>${total}</strong><small>${wins} wins · ${losses} losses</small></div>
@@ -1065,6 +1070,7 @@ function addLogImages(images){
   renderLogImagePreview(); updateLogPreview();
 }
 function renderLogTab(){
+  chPreselect();
   const strategyOptions = logStrategyOptionsHtml(), canPickStrategy = allStrategies().length || liveComps().length;
   return `
   <div class="card log-trade-card">
@@ -1125,6 +1131,7 @@ function renderLogTab(){
           <label class="log-strategy-label">🎯 Strategy <button type="button" class="pb-link" data-action="open-strategy-manager" ${allStrategies().length?'':'data-new="1"'}>${allStrategies().length?'⚙️ Manage':'＋ Add strategy'}</button></label>
           <select id="log-strategy-select" ${canPickStrategy ? '' : 'disabled'}>${strategyOptions}</select>
         </div><div id="log-comp-panel" data-live="${liveComps().length?'1':''}">${renderLogCompPanel()}</div>` : ''}
+        <div id="log-chal-note">${renderLogChallengeNote()}</div>
       </div>
 
       <details class="log-advanced">
@@ -2190,6 +2197,8 @@ function renderAdminTab(){
     </section>
     <div class="adm-kpis">${k.map(([l,v,c])=>`<div class="${c}"><span>${l}</span><strong>${v}</strong></div>`).join('')}</div>
     ${renderAdminBroadcast()}
+    ${renderAdminReminders()}
+    ${renderChalAdmin()}
     ${renderAdminFeaturesPanel()}
     ${renderAdminHealthPanel()}
     <section class="card adm-list">
@@ -2410,6 +2419,7 @@ function renderQuoteCard(){
 function rerenderQuoteCard(){
   const wrap=$('#dash-msgs'); if(wrap) wrap.outerHTML=renderDashMessages(); else { const el=$('#quote-card'); if(el) el.outerHTML=renderQuoteCard(); }
   const bc=$('#admin-broadcast'); if(bc) bc.outerHTML=renderAdminBroadcast();
+  const rs=$('#rem-strip'); if(rs && typeof renderRemStrip==='function') rs.outerHTML=renderRemStrip();
 }
 function renderAdminQuotePanel(){
   const q=quoteState();
@@ -2462,6 +2472,7 @@ const FEATURES = [
   ['notes','🧠 Notes & Learnings','Notes tab'],
   ['history','📜 Trade History','History tab'],
   ['competition','🏆 Competition','Discipline Challenge tab'],
+  ['challenge','💯 100 Trades Challenge','Challenge tab aur dashboard card'],
   ['blog','📰 Blog','Blog tab'],
   ['playbook','🎯 Setup Playbook','Dashboard ka strategy card'],
   ['report','📄 Weekly report','PDF report buttons'],
@@ -2469,7 +2480,7 @@ const FEATURES = [
   ['announcements','📢 Announcements','Dashboard ke announcements'],
   ['voice','🎤 Voice typing','Mic buttons']
 ];
-const TAB_FEATURE = { risk:'risk', analysis:'analysis', notes:'notes', history:'history', blog:'blog', competition:'competition' };
+const TAB_FEATURE = { risk:'risk', analysis:'analysis', notes:'notes', history:'history', blog:'blog', competition:'competition', challenge:'challenge' };
 function featureOn(k){ return STATE.features?.[k] !== false; }
 function featureVisible(k){ return isAdmin() || featureOn(k); }      // admins always see everything
 function applyFeatureClasses(){
@@ -2603,7 +2614,9 @@ const HEALTH_FILES = [
   // 🏆 competition files that live in sub-folders (the ones most easily missed while uploading). "syscheck" is a made-up id: a JSON "not found" answer proves the file is deployed.
   ['/api/competitions/syscheck','functions/api/competitions/[id].js'], ['/api/competitions/syscheck/entries','functions/api/competitions/[id]/entries.js'],
   ['/api/competitions/syscheck/declare','functions/api/competitions/[id]/declare.js','POST'], ['/api/competition-entries/syscheck','functions/api/competition-entries/[id].js','PUT'],
-  ['/api/competition-entries/syscheck/clap','functions/api/competition-entries/[id]/clap.js','POST'], ['/api/comp-img/syscheck.png','functions/api/comp-img/[name].js']
+  ['/api/competition-entries/syscheck/clap','functions/api/competition-entries/[id]/clap.js','POST'], ['/api/comp-img/syscheck.png','functions/api/comp-img/[name].js'],
+  ['/api/challenge','functions/api/challenge/index.js'], ['/api/challenge/all','functions/api/challenge/all.js'],
+  ['/api/reminders','functions/api/reminders/index.js'], ['/api/cron/tick?check=1','functions/api/cron/tick.js']
 ];
 const HEALTH_STATIC = [['/theme.css','theme.css','text/css'],['/vendor/jspdf.umd.min.js','vendor/jspdf.umd.min.js','javascript'],['/vendor/jspdf.plugin.autotable.min.js','vendor/jspdf.plugin.autotable.min.js','javascript'],['/icon.svg','icon.svg','svg'],['/badge-96.png','badge-96.png','image/png'],['/manifest.webmanifest','manifest.webmanifest','']];
 async function runSystemCheck(){
@@ -2735,6 +2748,7 @@ function setLogStrategy(value){
   if(String(value).startsWith('comp:')){ const id=value.slice(5); if(STATE.logCompId!==id){ STATE.logCompId=id; STATE.logCompRules=[]; } }
   else { STATE.logCompId=null; STATE.logCompRules=[]; STATE.selectedPlaybookId=value; }
   const panel=$('#log-comp-panel'); if(panel) panel.innerHTML=renderLogCompPanel();
+  STATE.logStratTouched=true; if(typeof updateLogChallengeNote==='function') updateLogChallengeNote();
 }
 /* ---------- Edit Trade: same choice while editing ---------- */
 function editCompPanelHtml(t, value){
@@ -3073,6 +3087,399 @@ document.addEventListener('input', e=>{
   if(e.target.dataset.cm){ f.criteria[e.target.dataset.cm]=Number(e.target.value)||1; }
 });
 
+/* ================= 💯 100 TRADES CHALLENGE =================
+   One strategy, 100 journaled trades, a review every 25 trades (the blog's 4 stages).
+   Only trades logged AFTER the start, on the challenge strategy, count. Trades past a
+   stage wait until that stage's review is done. Changing strategy = Restart from 0. */
+const CH_STAGES=[
+  {n:25, from:1, title:'Apna behaviour samjho', goal:'Har trade poora journal karo — entry reason, SL, emotion, mistake, screenshot. Abhi kuch badalna nahi, sirf baseline banao.'},
+  {n:50, from:26, title:'Repeat hone wale patterns pakdo', goal:'Dekho kaunsi galti, kis situation mein, baar-baar ho rahi hai. Review mein ek weakness chunoge.'},
+  {n:75, from:51, title:'Ek weakness par kaam karo', goal:'Stage 2 mein chuni hui weakness ke liye apna rule har trade mein follow karo.'},
+  {n:100, from:76, title:'Dekho kya badla', goal:'Aakhri 25 trades. End mein pehle 25 vs aakhri 25 ka report banega.'}
+];
+function chState(){ return STATE.chal || (STATE.chal={ loaded:false, loading:false, active:null, history:[], modal:null, admin:null }); }
+async function loadChallenge(force=false){
+  const s=chState(); if(s.loading||(s.loaded&&!force)) return;
+  s.loading=true;
+  try { const r=await api('/api/challenge'); s.active=r.active; s.history=r.history||[]; s.loaded=true; s.error=''; }
+  catch(e){ s.error=e.message||'Load nahi hua.'; }
+  finally { s.loading=false; }
+  if(STATE.activeTab==='challenge') renderTabOnly();
+  else if(STATE.activeTab==='copilot'){ const el=$('#chal-dash'); if(el) el.outerHTML=renderChalDashCard(); }
+  else if(STATE.activeTab==='log') updateLogChallengeNote(true);
+}
+/* same counting rules as functions/_lib/challenge.js */
+const chNorm=s=>String(s||'').trim().toLowerCase().replace(/\s+/g,' ');
+function chKey(t){
+  const raw=String(t?.tradeDateTime||''), p=n=>String(n).padStart(2,'0');
+  let local=/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(raw)?raw.slice(0,16):'';
+  if(!local){ const d=new Date(raw||t?.date||0); if(!Number.isNaN(d.getTime())){ const x=new Date(d.getTime()+5.5*3600000); local=`${x.getUTCFullYear()}-${p(x.getUTCMonth()+1)}-${p(x.getUTCDate())}T${p(x.getUTCHours())}:${p(x.getUTCMinutes())}`; } }
+  return `${local}|${t?.date||''}|${t?.id||''}`;
+}
+function chSplit(ch){
+  const name=chNorm(ch.strategy), start=Date.parse(ch.startedAt), inside=[], outside=[];
+  STATE.trades.forEach(t=>{ if(!(Date.parse(t.date||'')>=start)) return; (t.isSetupTrade!==false && chNorm(t.strategy)===name ? inside : outside).push(t); });
+  inside.sort((a,b)=>chKey(a)<chKey(b)?-1:1);
+  return { inside, outside };
+}
+function chProgress(ch){
+  const { inside, outside }=chSplit(ch), rv=ch.reviews||{};
+  const gate=CH_STAGES.map(x=>x.n).find(n=>!rv[n]) ?? 100, counted=Math.min(inside.length, gate, 100);
+  const due=CH_STAGES.map(x=>x.n).find(x=>!rv[x] && inside.length>=x)||null;
+  const stageIdx=due ? CH_STAGES.findIndex(x=>x.n===due) : Math.min(3, Math.floor(Math.min(counted,99)/25));   // a pending review keeps the trader on that stage
+  return { inside, outside, counted, logged:inside.length, waiting:Math.max(0,Math.min(inside.length,100)-counted), gate, reviewDue:due, stage:CH_STAGES[stageIdx] };
+}
+const chR=v=>`${v>0?'+':''}${(Math.round(v*100)/100).toFixed(2)}R`;
+/* numbers for a group of trades (R only where an SL was set) */
+function chStats(list){
+  const closed=list.filter(t=>!isOpenTrade(t)), withR=closed.filter(t=>Number(t.stopLoss)>0 && Number.isFinite(Number(t.rr)));
+  const wins=closed.filter(t=>Number(t.pnl)>0).length, rs=withR.map(t=>Number(t.rr)), w=rs.filter(r=>r>0), l=rs.filter(r=>r<=0);
+  const avg=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:0;
+  const mist={}; list.forEach(t=>{ if(t.mistake&&t.mistake!=='none') mist[t.mistake]=(mist[t.mistake]||0)+1; });
+  const emo={}; list.forEach(t=>tradeEmotions(t).forEach(e=>{ emo[e]=(emo[e]||0)+1; }));
+  let peak=0, cum=0, dd=0; rs.forEach(r=>{ cum+=r; peak=Math.max(peak,cum); dd=Math.min(dd,cum-peak); });
+  const top=o=>{ const e=Object.entries(o).sort((a,b)=>b[1]-a[1])[0]; return e?{id:e[0],count:e[1]}:null; };
+  const winRate=closed.length?Math.round(wins/closed.length*100):0, lossRate=closed.length?1-wins/closed.length:0;
+  return { n:list.length, closed:closed.length, winRate, ruleRate:list.length?Math.round(list.filter(t=>t.followedPlan).length/list.length*100):0,
+    slRate:list.length?Math.round(list.filter(t=>Number(t.stopLoss)>0).length/list.length*100):0,
+    avgR:Math.round(avg(rs)*100)/100, avgWinR:Math.round(avg(w)*100)/100, avgLossR:Math.round(avg(l)*100)/100, netR:Math.round(rs.reduce((a,b)=>a+b,0)*100)/100,
+    expectancy:Math.round(((winRate/100)*avg(w)+lossRate*avg(l))*100)/100, maxDD:Math.round(dd*100)/100,
+    mistakes:Object.values(mist).reduce((a,b)=>a+b,0), mistakeMap:mist, topMistake:top(mist), topEmotion:top(emo) };
+}
+/* ---------- Log Trade: keep the trader on the challenge strategy ---------- */
+function chPreselect(){
+  const ch=featureVisible('challenge')?chState().active:null; if(!ch || STATE.logStratTouched) return;
+  const own=allStrategies().find(p=>chNorm(p.name)===chNorm(ch.strategy));
+  if(own){ STATE.selectedPlaybookId=own.id; STATE.logCompId=null; return; }
+  const comp=liveComps().find(c=>chNorm(c.strategy)===chNorm(ch.strategy)); if(comp){ STATE.logCompId=comp.id; }
+}
+function logSelectedStrategyName(){
+  if(!STATE.logFormIsSetup) return NO_SETUP_STRATEGY;
+  if(STATE.logCompId){ const c=liveComps().find(x=>x.id===STATE.logCompId); if(c) return c.strategy; }
+  return findStrategy(STATE.selectedPlaybookId).name||'';
+}
+function renderLogChallengeNote(){
+  const ch=featureVisible('challenge')?chState().active:null; if(!ch) return '';
+  const p=chProgress(ch), on=chNorm(logSelectedStrategyName())===chNorm(ch.strategy);
+  if(!on){
+    const own=allStrategies().find(x=>chNorm(x.name)===chNorm(ch.strategy)), comp=liveComps().find(c=>chNorm(c.strategy)===chNorm(ch.strategy));
+    const pick=own?`data-value="${esc(own.id)}"`:comp?`data-value="comp:${esc(comp.id)}"`:'';
+    return `<div class="chal-note off" role="status"><b>⚠️ Yeh trade 100 Trades Challenge mein nahi ginega.</b> Aapki challenge strategy <b>${esc(ch.strategy)}</b> hai — doosri strategy ke trades “challenge ke bahar” gine jaate hain.${pick?` <button type="button" class="pb-link" data-action="chal-pick-strategy" ${pick}>${esc(ch.strategy)} chuno</button>`:''}</div>`;
+  }
+  const next=Math.min(p.logged+1,100);
+  return `<div class="chal-note on" role="status"><span class="chal-note-num">💯 #${next}</span><div><b>Challenge trade ${next}/100</b> · Stage ${CH_STAGES.indexOf(p.stage)+1}: ${esc(p.stage.title)}${p.reviewDue?`<br><span class="chal-warn">⚠️ ${p.reviewDue} trades ka review baaki hai — yeh trade save hoga, par review ke baad hi ginega.</span>`:''}${ch.focus?`<br><span class="chal-focus">🎯 Aapka rule: “${esc(ch.focus.rule)}”</span>`:''}</div></div>`;
+}
+function updateLogChallengeNote(reselect){
+  const el=$('#log-chal-note'); if(!el) return;
+  if(reselect && !STATE.logStratTouched){ chPreselect(); refreshLogStrategySelect(); }
+  el.innerHTML=renderLogChallengeNote();
+}
+/* after a trade is saved: celebrate the 25 / 50 / 75 / 100 milestones */
+function chAfterSave(before){
+  const ch=chState().active; if(!ch) return;
+  const p=chProgress(ch);
+  if(p.reviewDue && p.logged>before && CH_STAGES.some(x=>x.n===p.reviewDue && before<x.n)) compToast(`<strong>🎯 ${p.reviewDue} challenge trades poore!</strong><p>Ab Stage ${CH_STAGES.findIndex(x=>x.n===p.reviewDue)+1} ka review karo — usse pata chalega kya repeat ho raha hai. Review ke baad hi aage ke trades ginenge.</p><button type="button" class="btn-primary btn-small" data-action="chal-open-review" data-stage="${p.reviewDue}">Review karo</button>`, 12000);
+}
+/* ---------- dashboard card ---------- */
+function renderChalDashCard(){
+  if(!featureVisible('challenge')) return '<div id="chal-dash" hidden></div>';
+  const s=chState(); if(!s.loaded) return '<div id="chal-dash" hidden></div>';
+  const ch=s.active;
+  if(!ch) return `<button type="button" id="chal-dash" class="chal-dash cta" data-action="set-tab" data-tab="challenge"><span class="chal-dash-num">100</span><span class="chal-dash-text"><b>100 Trades Challenge</b><small>Ek strategy · 100 trades · har 25 par review. Shuru karo →</small></span></button>`;
+  const p=chProgress(ch);
+  return `<button type="button" id="chal-dash" class="chal-dash ${p.reviewDue?'due':''}" data-action="set-tab" data-tab="challenge"><span class="chal-dash-num">${p.counted}</span><span class="chal-dash-text"><b>100 Trades Challenge · ${esc(ch.strategy)}</b><small>${p.reviewDue?`⚠️ ${p.reviewDue} trades ka review baaki hai`:`Stage ${CH_STAGES.indexOf(p.stage)+1}: ${esc(p.stage.title)}`}</small><span class="chal-bar"><i style="width:${p.counted}%"></i></span></span><span class="chal-dash-of">/100</span></button>`;
+}
+/* ---------- the tab ---------- */
+function chStrategyChoices(){ return [...new Set([...allStrategies().map(x=>x.name), ...liveComps().map(c=>c.strategy)].filter(Boolean))]; }
+function renderChallengeTab(){
+  const s=chState();
+  if(!s.loaded){ setTimeout(()=>loadChallenge(),0); return `<section class="card"><p class="card-sub">${s.error?esc(s.error):'Challenge load ho raha hai…'}</p></section>`; }
+  return `${s.active?renderChalActive(s.active):renderChalIntro()}${renderChalHistory()}${isAdmin()?renderChalAdmin():''}${renderChalModal()}`;
+}
+function renderChalIntro(){
+  const s=chState(), last=s.history[0], choices=chStrategyChoices();
+  return `${last&&last.status==='completed'?renderChalReport(last):''}
+  <section class="chal-hero">
+    <div class="chal-hero-text">
+      <span class="chal-kicker">100 Trades Challenge</span>
+      <h2>Ek strategy. 100 trades.<br><em>Ek behtar trader.</em></h2>
+      <p>6 mahine trading karne se koi behtar nahi banta. 100 <b>poore journal kiye hue</b> trades ek hi strategy par — aur har 25 trades par imaandaar review — aapko dikhayenge ki aap kya galti repeat kar rahe ho.</p>
+      <ul class="chal-rules">
+        <li><b>Strategy lock:</b> 100 trades tak ek hi strategy. Badalni hai to Restart — counter 0 se.</li>
+        <li><b>Har 25 trades par review</b> — review kiye bina aage ke trades nahi ginenge.</li>
+        <li>Sirf challenge shuru hone ke <b>baad</b> log kiye trades ginenge. Doosri strategy ke trades “bahar” gine jaate hain.</li>
+        <li><b>Jaldi mat karo.</b> Setup na bane to trade force mat karo — 100 trades mein mahine lag sakte hain, wahi sahi hai.</li>
+      </ul>
+    </div>
+    <div class="chal-start card">
+      <h3 class="section-title">Challenge shuru karo</h3>
+      ${choices.length?`<label class="adm-field"><span>Kaunsi strategy par 100 trades?</span><select id="chal-start-strategy">${choices.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('')}</select></label>
+      <p class="comp-note">Woh strategy chuno jiske rules aapko saaf pata hain aur jiska setup aapke market time mein aata hai.</p>
+      <button type="button" class="btn-cta" data-action="chal-start">💯 Challenge shuru karo</button>`
+      :`<p class="card-sub">Pehle ek strategy banao (naam, entry / exit rules) — phir usi par challenge shuru hoga.</p><button type="button" class="btn-primary" data-action="open-strategy-manager" data-new="1">＋ Strategy banao</button>`}
+    </div>
+  </section>
+  <section class="chal-stages-intro">${CH_STAGES.map((x,i)=>`<div><span>Trades ${x.from}–${x.n}</span><b>${esc(x.title)}</b><p>${esc(x.goal)}</p></div>`).join('')}</section>`;
+}
+function chCell(t, i, p){
+  const n=i+1;
+  if(!t) return `<span class="chal-cell empty" title="Trade #${n}"></span>`;
+  const waiting=n>p.counted, open=isOpenTrade(t), clean=t.followedPlan && (!t.mistake||t.mistake==='none');
+  const cls=waiting?'waiting':open?'open':clean?'clean':(t.mistake&&t.mistake!=='none')?'mistake':'broke';
+  const rr=Number(t.stopLoss)>0&&!open&&Number.isFinite(Number(t.rr))?` · ${chR(Number(t.rr))}`:'';
+  return `<span class="chal-cell ${cls}" title="#${n} · ${esc(t.symbol||'')} · ${esc(formatTradeTime(t))}${rr}${t.mistake&&t.mistake!=='none'?' · '+esc(mistakeLabel(t.mistake)):''}${waiting?' · review ke baad ginega':''}"></span>`;
+}
+function renderChalActive(ch){
+  const p=chProgress(ch), rv=ch.reviews||{}, idx=CH_STAGES.indexOf(p.stage);
+  const segs=CH_STAGES.map(x=>p.inside.slice(x.from-1,Math.min(x.n,p.counted)));
+  const cur=chStats(segs[idx]), all=chStats(p.inside.slice(0,p.counted));
+  const stat=(l,v,sub)=>`<div><span>${l}</span><strong>${v}</strong>${sub?`<small>${sub}</small>`:''}</div>`;
+  const statRow=st=>st.n?[stat('Rules follow',st.ruleRate+'%'),stat('Win rate',st.closed?st.winRate+'%':'—'),stat('Avg R',st.closed?chR(st.avgR):'—'),stat('Expectancy',st.closed?chR(st.expectancy):'—','har trade par'),stat('SL lagaya',st.slRate+'%'),stat('Top galti',st.topMistake?esc(mistakeLabel(st.topMistake.id)):'Koi nahi',st.topMistake?`${st.topMistake.count} baar`:'')].join(''):'<p class="pb-empty">Is stage mein abhi koi trade nahi.</p>';
+  return `<section class="chal-hero active">
+    <div class="chal-hero-text">
+      <span class="chal-kicker">100 Trades Challenge${ch.attempt>1?` · attempt ${ch.attempt}`:''}</span>
+      <h2>${esc(ch.strategy)}</h2>
+      <p class="chal-meta">Shuru: ${esc(fmtDay(new Date(ch.startedAt),{day:'numeric',month:'short',year:'numeric'}))} · Stage ${idx+1} of 4 — <b>${esc(p.stage.title)}</b></p>
+      <div class="chal-count"><strong>${p.counted}</strong><span>/100 trades</span></div>
+      <div class="chal-bar big"><i style="width:${p.counted}%"></i></div>
+      ${p.waiting?`<p class="chal-waiting">⏸ ${p.waiting} trade${p.waiting>1?'s':''} review ka intezaar kar rahe hain</p>`:''}
+      <div class="chal-hero-actions"><button type="button" class="btn-cta" data-action="chal-log">➕ Challenge trade log karo</button><button type="button" class="comp-ghost" data-action="chal-open-restart">Strategy badlo / restart</button><button type="button" class="comp-ghost" data-action="chal-stop">Challenge band karo</button></div>
+    </div>
+    <div class="chal-grid" role="img" aria-label="${p.counted} of 100 trades done">${CH_STAGES.map((x,si)=>`<div class="chal-block ${si===idx?'current':''}">${Array.from({length:25},(_,k)=>chCell(p.inside[x.from-1+k], x.from-1+k, p)).join('')}</div>`).join('')}</div>
+  </section>
+  <div class="chal-legend"><span><i class="clean"></i>Rules ke saath</span><span><i class="broke"></i>Rule toota</span><span><i class="mistake"></i>Mistake</span><span><i class="open"></i>Open</span><span><i class="waiting"></i>Review ka intezaar</span></div>
+  ${p.reviewDue?`<section class="chal-due"><div><b>🎯 ${p.reviewDue} trades poore — Stage ${CH_STAGES.findIndex(x=>x.n===p.reviewDue)+1} ka review karo</b><p>${p.reviewDue===100?'Aakhri review: pehle 25 vs aakhri 25 ka report banega aur challenge poora hoga.':'5 minute lagenge. Review ke bina aage ke trades nahi ginenge.'}</p></div><button type="button" class="btn-primary" data-action="chal-open-review" data-stage="${p.reviewDue}">Review karo</button></section>`:''}
+  ${ch.focus?`<section class="chal-focus-card"><span>🎯 Stage 3 focus</span><b>${esc(mistakeLabel(ch.focus.mistake))}</b><p>Mera rule: “${esc(ch.focus.rule)}”</p></section>`:''}
+  ${p.outside.length?`<p class="chal-outside">↔️ Challenge shuru hone ke baad <b>${p.outside.length}</b> trade${p.outside.length>1?'s':''} doosri strategy ya bina setup ke liye gaye — yeh challenge mein nahi gine gaye.</p>`:''}
+  <section class="chal-track">${CH_STAGES.map((x,i)=>{ const done=!!rv[x.n], now=i===idx&&!done; return `<div class="chal-step ${done?'done':now?'now':''}"><span class="chal-step-dot">${done?'✓':i+1}</span><div><small>Trades ${x.from}–${x.n}</small><b>${esc(x.title)}</b><p>${esc(x.goal)}</p>${done?`<button type="button" class="pb-link" data-action="chal-view-review" data-stage="${x.n}">Review dekho</button>`:''}</div></div>`; }).join('')}</section>
+  <div class="chal-stats-grid">
+    <section class="card"><h3 class="section-title">Is stage ke numbers <small>(trades ${p.stage.from}–${Math.max(p.stage.from,Math.min(p.stage.n,p.counted))})</small></h3><div class="chal-stats">${statRow(cur)}</div></section>
+    <section class="card"><h3 class="section-title">Ab tak ke saare challenge trades <small>(${p.counted})</small></h3><div class="chal-stats">${statRow(all)}</div></section>
+  </div>`;
+}
+function renderChalHistory(){
+  const h=chState().history; if(!h.length) return '';
+  const label={completed:'✅ Poora',restarted:'↺ Restart',stopped:'⏹ Band'};
+  return `<section class="card chal-history"><h3 class="section-title">Pichhle challenges</h3><ul>${h.map(c=>`<li><b>${esc(c.strategy)}</b><span class="chal-tag ${c.status}">${label[c.status]||c.status}</span><small>${esc(fmtDay(new Date(c.startedAt),{day:'numeric',month:'short'}))}${c.endedAt?' – '+esc(fmtDay(new Date(c.endedAt),{day:'numeric',month:'short'})):''} · ${Object.keys(c.reviews||{}).length}/4 reviews${c.endReason?` · “${esc(c.endReason)}”`:''}</small>${c.status==='completed'?`<button type="button" class="pb-link" data-action="chal-view-report" data-id="${esc(c.id)}">Report dekho</button>`:''}</li>`).join('')}</ul></section>`;
+}
+function renderChalReport(c){
+  const f=c.reviews?.[100]?.stats||{}, a=f.first||{}, b=f.last||{}, o=f.all||{};
+  const row=(l,x,y,fmt,better)=>{ const d=(y??0)-(x??0), good=better==='up'?d>0:d<0; return `<tr><td>${l}</td><td class="num">${x===undefined?'—':fmt(x)}</td><td class="num">${y===undefined?'—':fmt(y)}</td><td class="num ${d===0?'':good?'positive':'negative'}">${x===undefined||y===undefined?'':d===0?'Same':good?'✓ Behtar':'✗ Kharab'}</td></tr>`; };
+  const pct=v=>v+'%', r=v=>chR(v), n=v=>String(v);
+  return `<section class="chal-report">
+    <div class="chal-report-head"><span class="chal-kicker">Challenge poora 🎉</span><h2>100 trades · ${esc(c.strategy)}</h2><p>${esc(fmtDay(new Date(c.startedAt),{day:'numeric',month:'short'}))} – ${esc(fmtDay(new Date(c.endedAt||c.startedAt),{day:'numeric',month:'short',year:'numeric'}))}</p></div>
+    <div class="chal-report-grid">
+      <div class="comp-board-wrap"><table class="comp-board"><thead><tr><th>Pehle 25 vs aakhri 25</th><th class="num">1–25</th><th class="num">76–100</th><th class="num">Badlav</th></tr></thead><tbody>
+        ${row('Rules follow',a.ruleRate,b.ruleRate,pct,'up')}${row('Mistakes',a.mistakes,b.mistakes,n,'down')}${f.focusMistake?row('Focus galti ('+esc(mistakeLabel(f.focusMistake))+')',a.focusCount,b.focusCount,n,'down'):''}${row('Win rate',a.winRate,b.winRate,pct,'up')}${row('Avg R',a.avgR,b.avgR,r,'up')}${row('Expectancy',a.expectancy,b.expectancy,r,'up')}
+      </tbody></table></div>
+      <div class="chal-stats">${[['Win rate',(o.winRate??'—')+'%'],['Avg win',o.avgWinR!==undefined?chR(o.avgWinR):'—'],['Avg loss',o.avgLossR!==undefined?chR(o.avgLossR):'—'],['Expectancy',o.expectancy!==undefined?chR(o.expectancy):'—'],['Max drawdown',o.maxDD!==undefined?chR(o.maxDD):'—'],['Rules follow',(o.ruleRate??'—')+'%']].map(([l,v])=>`<div><span>${l}</span><strong>${v}</strong></div>`).join('')}</div>
+    </div>
+    ${c.reviews?.[100]?.answers?.q2?`<p class="chal-next">Agle 100 trades ka plan: “${esc(c.reviews[100].answers.q2)}”</p>`:''}
+  </section>`;
+}
+/* ---------- reviews ---------- */
+const CH_Q={
+  25:[['q1','Sabse zyada kaunsi galti repeat hui?','e.g. Confirmation se pehle entry'],['q2','Kis situation mein rules toote?','e.g. 2 loss ke baad, fast move dekh kar, news par']],
+  50:[['q1','Pehle 50 trades mein kaunsa pattern dikha?','e.g. Subah ke pehle 15 min mein FOMO entry']],
+  75:[['q1','Apna rule follow karna kaisa raha? Kya kaam aaya, kya nahi?','']],
+  100:[['q1','100 trades ki sabse badi seekh kya rahi?',''],['q2','Agle 100 trades mein kya improve karoge?','']]
+};
+function chReviewStats(ch, stage){
+  const p=chProgress(ch), seg=p.inside.slice(stage-25, stage), st=chStats(seg);
+  if(stage===100){
+    const fm=ch.focus?.mistake, cnt=list=>fm?list.filter(t=>t.mistake===fm).length:undefined;
+    const first=chStats(p.inside.slice(0,25)), last=chStats(p.inside.slice(75,100)), all=chStats(p.inside.slice(0,100));
+    const pick=x=>({ruleRate:x.ruleRate,mistakes:x.mistakes,winRate:x.winRate,avgR:x.avgR,expectancy:x.expectancy});
+    return { first:{...pick(first),focusCount:cnt(p.inside.slice(0,25))}, last:{...pick(last),focusCount:cnt(p.inside.slice(75,100))}, all:{winRate:all.winRate,avgWinR:all.avgWinR,avgLossR:all.avgLossR,expectancy:all.expectancy,maxDD:all.maxDD,ruleRate:all.ruleRate,netR:all.netR}, focusMistake:fm||null };
+  }
+  const out={ n:st.n, ruleRate:st.ruleRate, winRate:st.winRate, avgR:st.avgR, expectancy:st.expectancy, slRate:st.slRate, mistakes:st.mistakes, topMistake:st.topMistake, topEmotion:st.topEmotion };
+  if(stage===75 && ch.focus){ const before=p.inside.slice(0,50).filter(t=>t.mistake===ch.focus.mistake).length, now=seg.filter(t=>t.mistake===ch.focus.mistake).length; out.focusBefore=before; out.focusNow=now; }
+  return out;
+}
+function renderChalModal(){
+  const s=chState(), m=s.modal; if(!m) return '';
+  const close=`<button type="button" class="modal-x" data-action="chal-close" aria-label="Close">×</button>`;
+  const shell=(title,sub,body)=>`<div class="edit-overlay sm-overlay" data-action="chal-backdrop"><div class="edit-modal sm-modal comp-submit chal-modal" role="dialog" aria-modal="true" aria-labelledby="chal-m-title"><div class="edit-modal-head"><div><h2 class="section-title" id="chal-m-title">${title}</h2>${sub?`<p class="card-sub">${sub}</p>`:''}</div>${close}</div>${body}<p class="sm-error" role="status">${m.error?esc(m.error):''}</p></div></div>`;
+  if(m.type==='restart'){
+    const choices=chStrategyChoices();
+    return shell('Strategy badlo / restart', 'Restart karne par counter <b>0 se</b> shuru hoga. Purana attempt history mein rahega aur Sir ko dikhega.', `
+      <label class="adm-field"><span>Nayi strategy</span><select id="chal-r-strategy">${choices.map(n=>`<option value="${esc(n)}" ${n===(m.strategy||s.active?.strategy)?'selected':''}>${esc(n)}</option>`).join('')}</select></label>
+      <label class="adm-field"><span>Restart kyun kar rahe ho? <small>(imaandaari se — yeh bhi ek data point hai)</small></span><textarea id="chal-r-reason" rows="2" maxlength="300" placeholder="e.g. Is strategy ka setup mere trading time mein nahi aata">${esc(m.reason||'')}</textarea></label>
+      <div class="sm-form-actions"><button type="button" class="btn-secondary" data-action="chal-close">Cancel</button><button type="button" class="btn-danger" data-action="chal-restart" ${m.busy?'disabled':''}>↺ Restart karo</button></div>`);
+  }
+  if(m.type==='report'){ const c=s.history.find(x=>x.id===m.id); return c?shell('Challenge report','',renderChalReport(c)):''; }
+  const ch=m.view ? (m.challenge||s.active) : s.active; if(!ch) return '';
+  const stage=m.stage, info=CH_STAGES.find(x=>x.n===stage), stored=ch.reviews?.[stage];
+  const st=stored?stored.stats:chReviewStats(ch, stage), ans=stored?stored.answers:(m.answers||{});
+  const box=(l,v)=>`<div><span>${l}</span><strong>${v}</strong></div>`;
+  const statsHtml = stage===100
+    ? renderChalReport({ ...ch, reviews:{ ...(ch.reviews||{}), 100:{ stats:st, answers:ans } }, endedAt:new Date().toISOString() })
+    : `<div class="chal-stats">${box('Rules follow',st.ruleRate+'%')}${box('Win rate',st.winRate+'%')}${box('Avg R',chR(st.avgR||0))}${box('SL lagaya',st.slRate+'%')}${box('Mistakes',st.mistakes)}${box('Top galti',st.topMistake?esc(mistakeLabel(st.topMistake.id))+' ×'+st.topMistake.count:'Koi nahi')}${st.topEmotion?box('Sabse common emotion',esc(st.topEmotion.id)+' ×'+st.topEmotion.count):''}${st.focusBefore!==undefined?box('Focus galti',`${st.focusBefore} → ${st.focusNow}`):''}</div>`;
+  const q=CH_Q[stage].map(([k,l,ph])=>`<label class="adm-field"><span>${esc(l)}</span>${stored?`<p class="chal-ans">${esc(ans[k]||'—')}</p>`:`<textarea data-chal-q="${k}" rows="2" maxlength="1000" placeholder="${esc(ph)}">${esc(ans[k]||'')}</textarea>`}</label>`).join('');
+  const focus = stage===50 ? (stored ? (ch.focus?`<div class="chal-focus-card"><span>🎯 Chuni hui weakness</span><b>${esc(mistakeLabel(ch.focus.mistake))}</b><p>Rule: “${esc(ch.focus.rule)}”</p></div>`:'')
+    : `<div class="chal-focus-pick"><label class="adm-field"><span>Agle 25 trades (51–75) mein <b>ek</b> weakness par kaam karoge — kaunsi?</span><select id="chal-focus-mistake">${MISTAKE_OPTIONS.filter(x=>x[0]!=='none').map(x=>`<option value="${x[0]}" ${(m.focusMistake||st.topMistake?.id)===x[0]?'selected':''}>${esc(x[1])}</option>`).join('')}</select></label>
+      <label class="adm-field"><span>Uske liye aapka naya rule</span><input id="chal-focus-rule" maxlength="200" value="${esc(m.focusRule||'')}" placeholder="e.g. 5-min candle close ke bina entry nahi"></label><p class="comp-note">Yeh rule Log Trade mein har challenge trade par yaad dilaya jayega.</p></div>`) : '';
+  return shell(`${stage===100?'🏁 Final review':`Stage ${CH_STAGES.indexOf(info)+1} review`} — trades ${stage-24}–${stage}`, esc(info.title), `
+    ${statsHtml}${focus}${q}
+    ${stored?`<p class="comp-note">Review kiya: ${esc(fmtDay(new Date(stored.at),{day:'numeric',month:'short',year:'numeric'}))}</p>`:`<div class="sm-form-actions"><button type="button" class="btn-secondary" data-action="chal-close">Baad mein</button><button type="button" class="btn-primary" data-action="chal-submit-review" ${m.busy?'disabled':''}>${m.busy?'Save ho raha hai…':stage===100?'🏁 Challenge poora karo':'✅ Review save karo'}</button></div>`}`);
+}
+async function chSubmitReview(){
+  const s=chState(), m=s.modal, ch=s.active; if(!m||!ch||m.busy) return;
+  const answers={}; document.querySelectorAll('[data-chal-q]').forEach(el=>{ answers[el.dataset.chalQ]=el.value.trim(); });
+  m.answers=answers;
+  if(Object.values(answers).some(v=>v.length<5)){ m.error='Har sawaal ka jawab likho (kam se kam 5 akshar).'; renderTabOnly(); return; }
+  const body={ action:'review', stage:m.stage, answers, stats:chReviewStats(ch, m.stage) };
+  if(m.stage===50){ m.focusMistake=$('#chal-focus-mistake')?.value; m.focusRule=($('#chal-focus-rule')?.value||'').trim(); body.focus={ mistake:m.focusMistake, rule:m.focusRule }; if(m.focusRule.length<5){ m.error='Apna naya rule likho.'; renderTabOnly(); return; } }
+  m.busy=true; m.error=''; renderTabOnly();
+  try{ const r=await api('/api/challenge','POST',body); s.modal=null; await loadChallenge(true);
+    if(r.completed){ STATE.activeTab='challenge'; renderTabOnly(); compToast('<strong>🎉 100 Trades Challenge poora!</strong><p>Aapka report Challenge tab mein hai. Ab agla challenge shuru kar sakte ho.</p>', 9000); }
+  }catch(e){ m.busy=false; m.error=e.message||'Save nahi hua.'; renderTabOnly(); }
+}
+/* ---------- admin: everyone's progress ---------- */
+async function loadChalAdmin(){
+  const s=chState(); s.admin={ loading:true, traders:[] };
+  try{ s.admin={ loaded:true, traders:(await api('/api/challenge/all')).traders||[] }; }catch(e){ s.admin={ loaded:true, error:e.message, traders:[] }; }
+  if(STATE.activeTab==='challenge'||STATE.activeTab==='admin') renderTabOnly();
+}
+function renderChalAdmin(){
+  const s=chState();
+  if(!s.admin){ setTimeout(()=>loadChalAdmin(),0); return ''; }
+  if(s.admin.loading) return `<section class="card chal-admin"><p class="card-sub">Traders ke challenges load ho rahe hain…</p></section>`;
+  const T=s.admin.traders, act=T.filter(t=>t.current?.status==='active');
+  return `<section class="card chal-admin" id="chal-admin"><div class="adm-quote-head"><h3 class="section-title">💯 100 Trades Challenge — sabki progress</h3><button type="button" class="btn-secondary btn-small" data-action="chal-admin-reload">↻ Refresh</button></div>
+    ${s.admin.error?`<p class="sm-error">${esc(s.admin.error)}</p>`:''}
+    ${T.length?`<p class="card-sub">${act.length} traders challenge mein · ${T.filter(t=>t.completed).length} ne poora kiya · ${T.reduce((a,t)=>a+t.restarts,0)} restarts</p>
+    <div class="comp-board-wrap"><table class="comp-board chal-admin-table"><thead><tr><th>Trader</th><th>Strategy</th><th>Progress</th><th>Stage / review</th><th class="num">Bahar ke trades</th><th class="num">Restarts</th><th>Last trade</th></tr></thead><tbody>${T.map(t=>{ const c=t.current; if(!c) return `<tr><td><b>${esc(t.name)}</b><small>${esc(t.email)}</small></td><td colspan="6"><small>${t.stopped?'Challenge band kar diya':'Koi challenge nahi'}</small></td></tr>`;
+      const rv=Object.keys(c.reviews||{}).length;
+      return `<tr><td><b>${esc(t.name)}</b><small>${esc(t.email)}</small></td><td>${esc(c.strategy)}${c.focus?`<small>🎯 ${esc(c.focus.rule)}</small>`:''}</td><td><div class="score-cell"><span class="scorebar ${c.counted>=75?'great':c.counted>=25?'':'ok'}" style="--v:${c.counted}%"><i></i></span><b>${c.counted}</b></div></td><td>${c.status==='completed'?'<span class="chal-tag completed">✅ Poora</span>':c.reviewDue?`<span class="chal-tag due">${c.reviewDue} ka review baaki</span>`:`Stage ${Math.min(4,Math.floor(Math.min(c.counted,99)/25)+1)} · ${rv}/4 reviews`}${rv?`<details class="chal-adm-rv"><summary>Reviews</summary>${Object.entries(c.reviews).map(([k,v])=>`<p><b>${k}:</b> ${Object.values(v.answers||{}).map(esc).join(' · ')}</p>`).join('')}</details>`:''}</td><td class="num ${c.outside>c.counted/2?'negative':''}">${c.outside}</td><td class="num">${t.restarts}</td><td><small>${c.lastTradeAt?esc(timeAgo(c.lastTradeAt)):'—'}</small></td></tr>`; }).join('')}</tbody></table></div>`
+    :'<p class="card-sub">Abhi kisi trader ne challenge shuru nahi kiya.</p>'}
+  </section>`;
+}
+function handleChalClick(action, btn, e){
+  if(!action || !action.startsWith('chal-')) return false;
+  const s=chState();
+  if(action==='chal-start'){ const strategy=$('#chal-start-strategy')?.value; if(!strategy) return true;
+    if(!confirm(`“${strategy}” par 100 Trades Challenge shuru karein?\n\n100 trades tak yahi strategy rahegi. Badalne par counter 0 se shuru hoga.`)) return true;
+    api('/api/challenge','POST',{action:'start',strategy}).then(r=>{ s.active=r.active; STATE.logStratTouched=false; renderTabOnly(); }).catch(err=>alert(err.message)); return true; }
+  if(action==='chal-log'){ STATE.logStratTouched=false; STATE.logFormIsSetup=true; chPreselect(); STATE.activeTab='log'; render(); window.scrollTo({top:0}); return true; }
+  if(action==='chal-pick-strategy'){ const sel=$('#log-strategy-select'); if(sel) sel.value=btn.dataset.value; setLogStrategy(btn.dataset.value); STATE.logStratTouched=false; updateLogChallengeNote(); return true; }
+  if(action==='chal-open-review'){ $('#comp-toast')?.remove(); s.modal={ type:'review', stage:Number(btn.dataset.stage) }; if(STATE.activeTab!=='challenge'){ STATE.activeTab='challenge'; render(); } else renderTabOnly(); return true; }
+  if(action==='chal-view-review'){ s.modal={ type:'review', stage:Number(btn.dataset.stage), view:true }; renderTabOnly(); return true; }
+  if(action==='chal-view-report'){ s.modal={ type:'report', id:btn.dataset.id }; renderTabOnly(); return true; }
+  if(action==='chal-open-restart'){ s.modal={ type:'restart' }; renderTabOnly(); return true; }
+  if(action==='chal-close' || (action==='chal-backdrop' && e.target===btn)){ s.modal=null; renderTabOnly(); return true; }
+  if(action==='chal-backdrop') return true;
+  if(action==='chal-submit-review'){ chSubmitReview(); return true; }
+  if(action==='chal-restart'){ const m=s.modal, strategy=$('#chal-r-strategy')?.value, reason=($('#chal-r-reason')?.value||'').trim(); m.strategy=strategy; m.reason=reason;
+    if(reason.length<5){ m.error='Restart ki wajah likho.'; renderTabOnly(); return true; }
+    m.busy=true; api('/api/challenge','POST',{action:'restart',strategy,reason}).then(()=>{ s.modal=null; STATE.logStratTouched=false; return loadChallenge(true); }).catch(err=>{ m.busy=false; m.error=err.message; renderTabOnly(); }); return true; }
+  if(action==='chal-stop'){ const reason=prompt('Challenge band kyun kar rahe ho? (Sir ko dikhega)',''); if(reason===null) return true;
+    api('/api/challenge','POST',{action:'stop',reason}).then(()=>loadChallenge(true)).catch(err=>alert(err.message)); return true; }
+  if(action==='chal-admin-reload'){ loadChalAdmin(); return true; }
+  return false;
+}
+
+/* ================= ⏰ AUTO REMINDERS =================
+   Admin sets morning / evening / night messages; a small Cloudflare Worker calls
+   /api/cron/tick every 5 minutes and the server sends whatever is due (Indian time). */
+const REM_DAYS=['S','M','T','W','T','F','S'], REM_DAY_NAMES=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const REM_TABS=[['copilot','Dashboard'],['log','Log Trade'],['notes','Notes'],['history','Trade History'],['analysis','Analysis'],['challenge','100 Trades'],['competition','Competition'],['blog','Blog']];
+const REM_WORKER=`export default {
+  async scheduled(event, env, ctx) { ctx.waitUntil(tick(env)); },
+  async fetch(request, env) { return Response.json(await tick(env)); }
+};
+async function tick(env) {
+  const out = [];
+  for (let i = 0; i < 20; i++) {
+    const r = await fetch(env.SITE_URL + '/api/cron/tick', { method: 'POST', headers: { 'X-Cron-Key': env.CRON_SECRET } });
+    const j = await r.json().catch(() => ({ error: r.status }));
+    out.push(j);
+    if (!j.more) break;
+  }
+  return out;
+}`;
+function remState(){ return STATE.rem || (STATE.rem={ loaded:false, mine:null, admin:null, draft:null, busy:false, msg:'' }); }
+async function loadReminders(){
+  const s=remState();
+  try { const r=await api('/api/reminders'); s.mine={ enabled:r.enabled, times:r.times||[], myOff:r.myOff }; if(isAdmin()){ s.admin=r; s.draft=s.draft||{ enabled:r.enabled, slots:structuredClone(r.slots) }; } s.loaded=true; }
+  catch(e){ s.loaded=true; s.error=e.message; }
+  const st=$('#rem-strip'); if(st) st.outerHTML=renderRemStrip();
+  const ad=$('#admin-reminders'); if(ad) ad.outerHTML=renderAdminReminders();
+}
+const remTime=t=>{ const [h,m]=String(t||'0:0').split(':').map(Number); return `${((h+11)%12)+1}:${String(m).padStart(2,'0')} ${h<12?'am':'pm'}`; };
+/* trader: dashboard strip — turn notifications on, or reminders off */
+function renderRemStrip(){
+  const s=remState(), m=s.mine; if(!m||!m.enabled||!m.times.length) return '<div id="rem-strip" hidden></div>';
+  const times=m.times.map(x=>remTime(x.time)).join(' · ');
+  if(!PUSH.subscribed) return `<div id="rem-strip" class="rem-strip cta"><span class="rem-ico" aria-hidden="true">⏰</span><p><b>Roz ke trading reminders pao</b><small>${esc(times)} — journal, summary aur plan yaad dilane ke liye.</small></p><button type="button" class="btn-primary btn-small" data-action="push-on" ${PUSH.busy?'disabled':''}>${PUSH.busy?'…':'🔔 Notification on karo'}</button></div>`;
+  return `<div id="rem-strip" class="rem-strip ${m.myOff?'off':''}"><span class="rem-ico" aria-hidden="true">⏰</span><p><b>Daily reminders ${m.myOff?'band hain':'on'}</b><small>${esc(times)}</small></p><button type="button" class="qotd-link" data-action="rem-mine" data-off="${m.myOff?'0':'1'}">${m.myOff?'On karo':'Band karo'}</button></div>`;
+}
+/* admin: schedule editor + automation status */
+function remSecret(){ const s=remState(); if(!s.secret){ const a=new Uint8Array(18); crypto.getRandomValues(a); s.secret='tg_'+Array.from(a,b=>b.toString(16).padStart(2,'0')).join(''); } return s.secret; }
+function renderAdminReminders(){
+  const s=remState(), a=s.admin, d=s.draft;
+  if(!a||!d) return `<section class="card adm-rem" id="admin-reminders"><h3 class="section-title">⏰ Auto reminders</h3><p class="card-sub">${s.error?esc(s.error):'Load ho raha hai…'}</p></section>`;
+  const fresh=a.lastTick && Date.now()-Date.parse(a.lastTick)<30*60000;
+  const status = !a.cronSecretSet ? ['warn','⚠️ Automation abhi set nahi hai — neeche "Ek baar ka setup" ke steps karo. Tab tak reminders apne aap nahi jayenge.']
+    : fresh ? ['ok',`✅ Automation chal raha hai · last check ${esc(timeAgo(a.lastTick))}`]
+    : ['warn',`⚠️ CRON_SECRET set hai, par reminder Worker ${a.lastTick?`${esc(timeAgo(a.lastTick))} se`:'abhi tak'} call nahi kar raha — setup ke step 2–4 check karo.`];
+  const slot=(x,i)=>`<div class="rem-slot ${x.on?'':'is-off'}">
+    <div class="rem-slot-top">
+      <label class="adm-switch ${x.on?'on':''}"><input type="checkbox" data-rf="on" data-i="${i}" ${x.on?'checked':''}><span class="adm-switch-ui" aria-hidden="true"></span><span class="sr-only">Reminder on</span></label>
+      <label class="rem-time"><span class="sr-only">Time</span><input type="time" data-rf="time" data-i="${i}" value="${esc(x.time)}"></label>
+      <div class="rem-days" role="group" aria-label="Days">${REM_DAYS.map((l,k)=>`<button type="button" class="${x.days.includes(k)?'on':''}" data-action="rem-day" data-i="${i}" data-day="${k}" aria-pressed="${x.days.includes(k)}" title="${REM_DAY_NAMES[k]}">${l}</button>`).join('')}</div>
+      <span class="rem-sent">${a.sentToday?.[x.id]===a.today?'✓ Aaj bheja':''}</span>
+    </div>
+    <label class="adm-field"><span>Title</span><input data-rf="title" data-i="${i}" maxlength="60" value="${esc(x.title)}"></label>
+    <label class="adm-field"><span>Message <small>(har line ek alag message — roz agli line jayegi · <code>{name}</code> = trader ka naam · <code>{trades}</code> = aaj ke trades)</small></span><textarea data-rf="messages" data-i="${i}" rows="3" maxlength="1200">${esc(x.messages)}</textarea></label>
+    <div class="rem-slot-row">
+      <label class="adm-field"><span>Kisko</span><select data-rf="target" data-i="${i}"><option value="all" ${x.target==='all'?'selected':''}>Sab traders</option><option value="notJournaled" ${x.target==='notJournaled'?'selected':''}>Sirf jinhone aaj koi trade log nahi kiya</option></select></label>
+      <label class="adm-field"><span>Tap karne par khule</span><select data-rf="tab" data-i="${i}">${REM_TABS.map(([v,l])=>`<option value="${v}" ${x.tab===v?'selected':''}>${l}</option>`).join('')}</select></label>
+      <div class="rem-slot-actions"><button type="button" class="btn-secondary btn-small" data-action="rem-test" data-i="${i}">📲 Mere phone par test</button><button type="button" class="be-del" data-action="rem-del" data-i="${i}" title="Delete" aria-label="Delete reminder">🗑️</button></div>
+    </div>
+  </div>`;
+  return `<section class="card adm-rem" id="admin-reminders">
+    <div class="adm-quote-head"><div><h3 class="section-title">⏰ Auto reminders</h3><p class="card-sub">Subah, shaam, raat — traders ke phone par apne aap notification. ${a.devices} devices par notification on${a.tradersOff?` · ${a.tradersOff} traders ne reminders band kiye`:''}.</p></div>
+      <label class="adm-switch big ${d.enabled?'on':''}"><input type="checkbox" data-rf="enabled" ${d.enabled?'checked':''}><span class="adm-switch-ui" aria-hidden="true"></span><span>${d.enabled?'On':'Off'}</span></label></div>
+    <p class="rem-status ${status[0]}">${status[1]}${a.lastRun?`<br><small>Pichhla reminder: <b>${esc(a.lastRun.title)}</b> · ${esc(timeAgo(a.lastRun.at))} · ${a.lastRun.sent} device${a.lastRun.sent===1?'':'s'}</small>`:''}</p>
+    <div class="rem-slots">${d.slots.map(slot).join('')}</div>
+    <div class="rem-foot">${d.slots.length<6?'<button type="button" class="btn-secondary btn-small" data-action="rem-add">＋ Reminder add karo</button>':'<span></span>'}<span class="rem-msg" role="status">${esc(s.msg||'')}</span><button type="button" class="btn-primary" data-action="rem-save" ${s.busy?'disabled':''}>${s.busy?'Save ho raha hai…':'💾 Save'}</button></div>
+    <details class="rem-setup" ${a.cronSecretSet&&fresh?'':'open'}><summary>🔧 Ek baar ka setup — reminders apne aap bhejne ke liye</summary>
+      <ol>
+        <li><b>Password banao:</b> Cloudflare → <b>Workers &amp; Pages → tg-copilot → Settings → Variables and Secrets → Add</b> → naam <code>CRON_SECRET</code>, type <b>Secret</b>, value yeh: <code class="rem-secret">${esc(remSecret())}</code> <button type="button" class="qotd-link" data-action="rem-copy" data-text="${esc(remSecret())}">Copy</button> → Save → <b>Deployments → Retry deployment</b>.</li>
+        <li><b>Worker banao:</b> Workers &amp; Pages → <b>Create → Worker</b> → naam <code>tg-reminders</code> → Deploy → <b>Edit code</b> → saara code hata kar yeh paste karo → <b>Deploy</b>. <button type="button" class="qotd-link" data-action="rem-copy" data-text="${esc(REM_WORKER)}">Code copy karo</button><pre class="rem-code">${esc(REM_WORKER)}</pre></li>
+        <li>Worker → <b>Settings → Variables and Secrets</b>: <code>SITE_URL</code> = <code>${esc(location.origin)}</code> (Text) aur <code>CRON_SECRET</code> = upar wala same password (Secret).</li>
+        <li>Worker → <b>Settings → Trigger events → Add → Cron Triggers</b> → <code>*/5 * * * *</code> (har 5 minute) → Add.</li>
+        <li>5 minute baad yahan “✅ Automation chal raha hai” dikhega. Time hamesha <b>Indian time</b> mein chalta hai.</li>
+      </ol>
+    </details>
+  </section>`;
+}
+function remRerender(){ const ad=$('#admin-reminders'); if(ad) ad.outerHTML=renderAdminReminders(); }
+async function remSave(){
+  const s=remState(); if(s.busy||!s.draft) return; s.busy=true; s.msg=''; remRerender();
+  try{ const r=await api('/api/reminders','PUT',s.draft); s.draft={ enabled:r.enabled, slots:r.slots }; s.msg='✓ Save ho gaya'; s.busy=false; await loadReminders(); }
+  catch(e){ s.busy=false; s.msg='⚠ '+(e.message||'Save nahi hua'); remRerender(); }
+}
+function handleRemClick(action, btn){
+  if(!action || !action.startsWith('rem-')) return false;
+  const s=remState(), d=s.draft, i=Number(btn.dataset.i);
+  if(action==='rem-mine'){ const off=btn.dataset.off==='1'; api('/api/reminders','POST',{action:'mine',off}).then(()=>{ s.mine.myOff=off; const st=$('#rem-strip'); if(st) st.outerHTML=renderRemStrip(); }).catch(e=>alert(e.message)); return true; }
+  if(action==='rem-day'){ const k=Number(btn.dataset.day), x=d.slots[i]; x.days=x.days.includes(k)?x.days.filter(v=>v!==k):[...x.days,k].sort(); s.msg=''; remRerender(); return true; }
+  if(action==='rem-add'){ d.slots.push({ id:'slot-'+Date.now().toString(36).slice(-6), on:true, time:'12:00', days:[1,2,3,4,5], target:'all', tab:'copilot', title:'📌 Reminder', messages:'' }); remRerender(); return true; }
+  if(action==='rem-del'){ if(confirm('Yeh reminder hata dein?')){ d.slots.splice(i,1); s.msg='Save dabana mat bhoolna'; remRerender(); } return true; }
+  if(action==='rem-save'){ remSave(); return true; }
+  if(action==='rem-test'){ const x=d.slots[i]; if(!x.messages.trim()){ alert('Pehle message likho.'); return true; } btn.disabled=true; btn.textContent='Bhej rahe hain…';
+    api('/api/reminders','POST',{action:'test',slot:x.id,slots:d.slots}).then(r=>{ btn.textContent=`✓ ${r.sent} device par bheja`; }).catch(e=>{ alert(e.message); btn.textContent='📲 Mere phone par test'; }).finally(()=>{ btn.disabled=false; }); return true; }
+  if(action==='rem-copy'){ const txt=btn.dataset.text; (navigator.clipboard?.writeText(txt)||Promise.reject()).then(()=>{ const o=btn.textContent; btn.textContent='✓ Copied'; setTimeout(()=>{ if(btn.isConnected) btn.textContent=o; },1500); }).catch(()=>prompt('Copy karo:',txt)); return true; }
+  return false;
+}
+document.addEventListener('input', e=>{ const el=e.target, d=STATE.rem?.draft; if(!d||!el.dataset.rf||el.dataset.rf==='enabled'||el.dataset.rf==='on') return; d.slots[Number(el.dataset.i)][el.dataset.rf]=el.value; STATE.rem.msg=''; });
+document.addEventListener('change', e=>{ const el=e.target, d=STATE.rem?.draft; if(!d||!el.dataset.rf) return;
+  if(el.dataset.rf==='enabled'){ d.enabled=el.checked; remRerender(); }
+  else if(el.dataset.rf==='on'){ d.slots[Number(el.dataset.i)].on=el.checked; remRerender(); }
+  else d.slots[Number(el.dataset.i)][el.dataset.rf]=el.value; });
+
 /* ---------------- strategy manager ---------------- */
 function strategyUsage(name){
   return { trades: STATE.trades.filter(t=>sameName(t.strategy,name)).length, notes: STATE.notes.filter(n=>noteMatchesStrategy(n,name)).length, exactNotes: STATE.notes.filter(n=>sameName(n.strategy,name)).length };
@@ -3163,6 +3570,7 @@ function render(){
   else if (STATE.activeTab==='blog') { content.innerHTML = renderBlogTab(); if(blogState().view==='list'&&blogState().loaded) markBlogSeen(); }
   else if (STATE.activeTab==='admin') content.innerHTML = renderAdminTab();
   else if (STATE.activeTab==='competition') content.innerHTML = renderCompetitionTab();
+  else if (STATE.activeTab==='challenge') content.innerHTML = renderChallengeTab();
   afterTabRender();
 }
 function renderTabOnly(){ // re-render just the active tab (after in-tab interactions)
@@ -3176,6 +3584,7 @@ function renderTabOnly(){ // re-render just the active tab (after in-tab interac
   else if (STATE.activeTab==='blog') content.innerHTML = renderBlogTab();
   else if (STATE.activeTab==='admin') content.innerHTML = renderAdminTab();
   else if (STATE.activeTab==='competition') content.innerHTML = renderCompetitionTab();
+  else if (STATE.activeTab==='challenge') content.innerHTML = renderChallengeTab();
   renderTabNav();
   afterTabRender();
 }
@@ -3194,6 +3603,8 @@ document.addEventListener('click', async (e) => {
   else if (handleQuoteClick(action, btn)) { /* quotes */ }
   else if (handleAnnClick(action, btn)) { /* announcements */ }
   else if (handleCompClick(action, btn, e)) { /* competition */ }
+  else if (handleChalClick(action, btn, e)) { /* 100 trades challenge */ }
+  else if (handleRemClick(action, btn)) { /* auto reminders */ }
   else if (action==='mobile-more') { toggleMobileMore(!$('#mobile-more')); }
   else if (action==='mobile-more-close') { toggleMobileMore(false); }
   else if (action==='admin-health') { runSystemCheck(); }
@@ -3926,6 +4337,7 @@ document.addEventListener('submit', async (e) => {
       date: new Date().toISOString(), tradeDateTime: $('#log-trade-datetime')?.value || new Date().toISOString(), pnl: p.pnl, rr: p.rr, xpEarned: p.xp,
       ...(comp ? { competitionId: comp.id, compRules } : {})
     };
+    const chBefore = chState().active ? chProgress(chState().active).logged : 0;
     STATE.trades.unshift(newTrade);
     const saved = await saveUserData('Trade', ['trades']);
     if (!saved) { STATE.trades = STATE.trades.filter(t => t.id !== newTrade.id); return; }
@@ -3934,6 +4346,7 @@ document.addEventListener('submit', async (e) => {
     STATE.activeTab = 'history';
     render();
     compAfterSave(newTrade, STATE.lastSave?.competition);
+    STATE.logStratTouched = false; chAfterSave(chBefore);
   }
   else if (e.target.id==='notes-form') {
     e.preventDefault();

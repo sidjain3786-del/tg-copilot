@@ -16,6 +16,8 @@ export async function deleteTrader(env, me, id) {
   await run('DELETE FROM competition_claps WHERE entry_id IN (SELECT id FROM competition_entries WHERE user_id = ?)');
   await run('DELETE FROM competition_claps WHERE user_id = ?');
   await run('DELETE FROM competition_entries WHERE user_id = ?');
+  await run('DELETE FROM trade_challenges WHERE user_id = ?');
+  await run('DELETE FROM user_prefs WHERE user_id = ?');
   await env.DB.prepare('DELETE FROM login_attempts WHERE email = ?').bind(u.email).run().catch(() => null);
   await env.DB.prepare('DELETE FROM users WHERE id = ?').bind(u.id).run();
   let images = 0;
