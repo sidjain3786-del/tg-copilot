@@ -321,3 +321,31 @@ Morning / evening / night notifications go to traders' phones automatically.
 - **Honest verdict at 100:** edge dikha / profit hai par discipline kam / rules follow hue par edge nahi / pehle execution theek karo — plus clean trades, risk breaks, best streak, missed setups in the report.
 - **Daily challenge nudge** (Admin → Auto reminders, default 7 pm): a personal notification only to traders whose review is due or who logged no challenge trade for 3+ days.
 - Technical: new columns on `trade_challenges` (risk, max_per_day, feedback, extras) and `user_prefs.pending` — added automatically. Old challenges keep "no daily limit". New file `functions/_lib/notify.js`. Changed: `app.js`, `theme.css`, `sw.js`, `schema.sql`, `functions/_lib/challenge.js`, `functions/_lib/auth.js`, `functions/_lib/reminders.js`, `functions/api/challenge/index.js`, `functions/api/challenge/all.js`, `functions/api/cron/tick.js`, `functions/api/reminders/index.js`, `functions/api/notify/latest.js`. Tests: 16 API + 28 browser checks, and every earlier suite re-run.
+
+## Update 34 — 📋 Challenge ke saare trades (App version 34)
+- **Admin → 100 Trades Challenge table → "📋 Saare trades"** opens every trade of that trader's challenge, one by one: number (#1–#100), symbol, date / time, entry / SL / exit / quantity, R result, ₹ risk vs the limit, rules ticked and **which rule was missed**, mistake, emotion, quality, note, exit reason and chart screenshots (tap to open big).
+- Every trade is marked: ✓ Clean · Rule toota · Risk toota · Mistake · Review ka intezaar · Din ki limit se upar (not counted) · Challenge ke bahar (other strategy / bina setup). Filter chips for each; the 100-box grid on top — tap a box to jump to that trade. Top numbers: counted, rules follow, clean %, win rate, expectancy, streak, plus missed setups / impulse notes.
+- Traders get the same list for their own challenge ("📋 Saare challenge trades" on the Challenge tab).
+- Uses the existing admin-only journal API, so other traders still can't see anyone's trades.
+- Changed: `app.js`, `theme.css`, `sw.js`.
+
+## Update 35 — Competition aur 100 Trades Challenge alag-alag (App version 35)
+**Admin tab ab 5 hisson mein hai:** 👥 Traders · 🏆 Competition · 💯 100 Trades Challenge · 🔔 Notifications · ⚙️ Settings.
+- **🏆 Competition:** shows every competition with its strategy, dates and prize, plus "＋ Naya competition", "✏️ Edit" and "Feed, leaderboard & winners →".
+- **💯 100 Trades Challenge:** has its own **Challenge ki strategies**: name, description, entry, exit and rules. Each strategy can be added, edited, switched off ("Band karo") or deleted. A switch controls whether traders may also use their own strategy. The progress table, feedback and "📋 Saare trades" now live here too.
+- The Challenge tab no longer shows the admin table. The admin sees a link there to Admin → 💯 instead.
+
+**Strategies are now separate:**
+- A competition strategy no longer appears when a trader starts or restarts a challenge. The choices are 💯 Sir's challenge strategies, plus the trader's own strategies if the switch allows it.
+- Log Trade shows three groups: 🏆 Competition · 💯 100 Trades Challenge · Meri strategies.
+- A challenge trade never goes into the competition. A competition trade never counts in the challenge; this applies to new challenges, and old running challenges keep the earlier counting.
+- A challenge strategy and a competition strategy cannot share the same name. The server refuses it on both sides.
+- A strategy that a running challenge uses cannot be renamed or deleted. It can only be switched off, which hides it from new challenges while running ones continue.
+
+**Changed / new files:**
+- `app.js`, `theme.css`, `sw.js`
+- **new** `functions/api/challenge/config.js`
+- `functions/_lib/challenge.js`
+- `functions/api/challenge/index.js`
+- `functions/api/competitions/index.js`
+- `functions/api/competitions/[id].js`

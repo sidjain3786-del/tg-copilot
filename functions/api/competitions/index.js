@@ -1,5 +1,6 @@
 import { getUserFromRequest, json, readJson, ensureSchema, isAdminUser } from '../../_lib/auth.js';
 import { compToJson, normCriteria, aliasFor, weeksOf } from '../../_lib/competition.js';
+import { getChalConfig, norm as chNorm } from '../../_lib/challenge.js';
 
 // GET  /api/competitions -> list (newest first) with my anonymous name + my entry count
 // POST /api/competitions (admin) -> create a competition on Sir's strategy
@@ -24,6 +25,7 @@ export async function onRequestPost({ request, env }) {
     if (!isAdminUser(user, env)) return json({ error: 'Sirf admin competition bana sakta hai.' }, { status: 403 });
     await ensureSchema(env);
     const v = validate(await readJson(request)); if (v.error) return json({ error: v.error }, { status: 400 });
+    if ((await getChalConfig(env)).strategies.some(x => chNorm(x.name) === chNorm(v.strategy))) return json({ error: `“${v.strategy}” 100 Trades Challenge ki strategy ka naam hai. Competition ki strategy ka naam alag rakho.` }, { status: 400 });
     const id = crypto.randomUUID(), now = new Date().toISOString();
     await env.DB.prepare(`INSERT INTO competitions (id, title, strategy, description, rules, entry_criteria, exit_criteria, start_date, end_date, criteria, status, created_at, created_by, prize_weekly, prize_final, week_results) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, '{}')`)
       .bind(id, v.title, v.strategy, v.description, JSON.stringify(v.rules), v.entryCriteria, v.exitCriteria, v.startDate, v.endDate, JSON.stringify(v.criteria), now, user.id, v.prizeWeekly, v.prizeFinal).run();

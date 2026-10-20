@@ -1,5 +1,5 @@
 import { getUserFromRequest, json, readJson, ensureSchema, parseColumn } from '../../_lib/auth.js';
-import { STAGES, progress, rowToChallenge, parse, cleanRisk, cleanCap } from '../../_lib/challenge.js';
+import { STAGES, progress, rowToChallenge, parse, cleanRisk, cleanCap, getChalConfig, pickStrategy } from '../../_lib/challenge.js';
 
 // GET  /api/challenge -> my active challenge + past attempts
 // POST /api/challenge { action: 'start' | 'review' | 'restart' | 'stop', ... }
@@ -10,7 +10,7 @@ export async function onRequestGet({ request, env }) {
     await ensureSchema(env);
     const { results } = await env.DB.prepare('SELECT * FROM trade_challenges WHERE user_id = ? ORDER BY started_at DESC LIMIT 20').bind(user.id).all();
     const all = results.map(rowToChallenge);
-    return json({ active: all.find(c => c.status === 'active') || null, history: all.filter(c => c.status !== 'active') });
+    return json({ active: all.find(c => c.status === 'active') || null, history: all.filter(c => c.status !== 'active'), config: await getChalConfig(env) });
   } catch (e) { console.error('challenge get', e); return json({ error: 'Challenge load nahi hua.' }, { status: 500 }); }
 }
 
@@ -24,23 +24,26 @@ export async function onRequestPost({ request, env }) {
     const row = await env.DB.prepare(`SELECT * FROM trade_challenges WHERE user_id = ? AND status = 'active' ORDER BY started_at DESC LIMIT 1`).bind(user.id).first();
     const now = new Date().toISOString();
     const end = (status, reason) => env.DB.prepare('UPDATE trade_challenges SET status = ?, ended_at = ?, end_reason = ? WHERE id = ?').bind(status, now, clip(reason, 300), row.id).run();
-    const start = async (strategy, attempt, risk, cap) => {
-      const s = clip(strategy, 80); if (s.length < 2) return json({ error: 'Strategy chuno.' }, { status: 400 });
-      const id = crypto.randomUUID();
-      await env.DB.prepare(`INSERT INTO trade_challenges (id, user_id, strategy, started_at, status, reviews, focus, attempt, risk, max_per_day, feedback, extras) VALUES (?, ?, ?, ?, 'active', '{}', 'null', ?, ?, ?, '{}', '{}')`).bind(id, user.id, s, now, attempt, cleanRisk(risk), cleanCap(cap)).run();
+    const start = async (pick, attempt, risk, cap) => {
+      if (pick.error) return json({ error: pick.error }, { status: 400 });
+      const id = crypto.randomUUID(), extras = JSON.stringify({ v: 2, strategyId: pick.strategyId || null });   // v2: competition trades stay out of the challenge
+      await env.DB.prepare(`INSERT INTO trade_challenges (id, user_id, strategy, started_at, status, reviews, focus, attempt, risk, max_per_day, feedback, extras) VALUES (?, ?, ?, ?, 'active', '{}', 'null', ?, ?, ?, '{}', ?)`).bind(id, user.id, pick.name, now, attempt, cleanRisk(risk), cleanCap(cap), extras).run();
       return json({ active: rowToChallenge(await env.DB.prepare('SELECT * FROM trade_challenges WHERE id = ?').bind(id).first()) });
     };
     const attempts = async () => ((await env.DB.prepare('SELECT COUNT(*) AS n FROM trade_challenges WHERE user_id = ?').bind(user.id).first())?.n || 0) + 1;
 
     if (b.action === 'start') {
       if (row) return json({ error: 'Ek challenge pehle se chal raha hai. Strategy badalni hai to "Restart" karo.' }, { status: 400 });
-      return start(b.strategy, await attempts(), b.risk, b.maxPerDay ?? 3);
+      return start(pickStrategy(await getChalConfig(env), b), await attempts(), b.risk, b.maxPerDay ?? 3);
     }
     if (!row) return json({ error: 'Koi challenge nahi chal raha.' }, { status: 400 });
     if (b.action === 'restart') {
       if (clip(b.reason, 300).length < 5) return json({ error: 'Restart ki wajah likho (kam se kam 5 akshar).' }, { status: 400 });
+      const same = !b.strategyId && (!b.strategy || b.strategy === row.strategy), oldId = parse(row.extras, {}).strategyId || null;
+      const pick = same ? { name: row.strategy, strategyId: oldId } : pickStrategy(await getChalConfig(env), b);
+      if (pick.error) return json({ error: pick.error }, { status: 400 });
       await end('restarted', b.reason);
-      return start(b.strategy || row.strategy, await attempts(), b.risk ?? row.risk, b.maxPerDay ?? row.max_per_day);
+      return start(pick, await attempts(), b.risk ?? row.risk, b.maxPerDay ?? row.max_per_day);
     }
     const extras = parse(row.extras, {});
     const saveExtras = () => env.DB.prepare('UPDATE trade_challenges SET extras = ? WHERE id = ?').bind(JSON.stringify(extras), row.id).run();

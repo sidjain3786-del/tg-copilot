@@ -1,6 +1,7 @@
 import { getUserFromRequest, json, readJson, ensureSchema, isAdminUser } from '../../_lib/auth.js';
 import { compToJson, normCriteria, aliasFor, leaderboard, weeksOf, weekState, parseJson, publicWinners, clapMap, feedRow, userNames, scoreEntry, dropImage, FEED_PAGE } from '../../_lib/competition.js';
 import { validate } from './index.js';
+import { getChalConfig, norm as chNorm } from '../../_lib/challenge.js';
 
 // GET    /api/competitions/<id> -> competition + anonymous feed + overall and weekly leaderboards (admins also get real names)
 // PUT    /api/competitions/<id> (admin) -> edit (scores are recalculated if the rules or weights change)
@@ -40,6 +41,7 @@ export async function onRequestPut({ request, env, params }) {
     const c = await env.DB.prepare('SELECT * FROM competitions WHERE id = ?').bind(String(params.id)).first();
     if (!c) return json({ error: 'Competition nahi mila.' }, { status: 404 });
     const v = validate(await readJson(request)); if (v.error) return json({ error: v.error }, { status: 400 });
+    if ((await getChalConfig(env)).strategies.some(x => chNorm(x.name) === chNorm(v.strategy))) return json({ error: `“${v.strategy}” 100 Trades Challenge ki strategy ka naam hai. Competition ki strategy ka naam alag rakho.` }, { status: 400 });
     const rulesJson = JSON.stringify(v.rules), critJson = JSON.stringify(v.criteria);
     await env.DB.prepare(`UPDATE competitions SET title=?, strategy=?, description=?, rules=?, entry_criteria=?, exit_criteria=?, start_date=?, end_date=?, criteria=?, prize_weekly=?, prize_final=? WHERE id=?`)
       .bind(v.title, v.strategy, v.description, rulesJson, v.entryCriteria, v.exitCriteria, v.startDate, v.endDate, critJson, v.prizeWeekly, v.prizeFinal, c.id).run();

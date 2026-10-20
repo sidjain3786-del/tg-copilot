@@ -1236,3 +1236,71 @@ button.journal-chip.chip-comp { border: 1px solid #F6D58A; background: var(--mar
 .rem-nudge { background: #EEF3FA; } .rem-nudge b { font-size: .9rem; } .rem-nudge .card-sub { margin: 0; font-size: .78rem; }
 @media (max-width: 560px) { .chal-start-row { grid-template-columns: 1fr; } .chal-streak { margin-left: 0; flex-basis: 100%; } .chal-count { flex-wrap: wrap; } }
 .chal-stats strong { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.2; }
+
+/* ----- 💯 challenge: every trade, one by one ----- */
+.chal-trades-modal { width: min(980px, 100%); }
+.chal-adm-open { display: inline-flex; margin-top: .35rem; }
+.chal-tm-top { display: grid; grid-template-columns: minmax(0, 260px) minmax(0, 1fr); gap: 1rem; align-items: start; margin-bottom: .8rem; }
+.chal-tm-grid { display: grid; grid-template-columns: repeat(10, minmax(0,1fr)); gap: 4px; padding: 8px; border-radius: 12px; background: #13233F; }
+.chal-tm-grid .chal-cell { border: 0; padding: 0; cursor: pointer; } .chal-tm-grid .chal-cell.empty { cursor: default; background: rgba(255,255,255,.08); }
+.chal-tm-grid button.chal-cell:focus-visible { outline: 2px solid #E9A100; outline-offset: 1px; }
+.chal-tm-filters { margin: .3rem 0 .8rem; } .chal-tm-filters button span { opacity: .7; margin-left: .2rem; }
+.chal-tm-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: .7rem; }
+.chal-tc { border: 1px solid var(--line); border-left: 4px solid #0B9A6A; border-radius: var(--r-sm); padding: .7rem .8rem; background: #fff; display: grid; gap: .45rem; transition: box-shadow .3s; }
+.chal-tc.broke { border-left-color: #E08A00; } .chal-tc.risk { border-left-color: #8A5CF6; } .chal-tc.mistake { border-left-color: #E0413F; } .chal-tc.waiting, .chal-tc.over { border-left-color: #E9A100; } .chal-tc.outside { border-left-color: #98A2B3; opacity: .85; }
+.chal-tc.flash { box-shadow: 0 0 0 3px rgba(233,161,0,.6); }
+.chal-tc header { display: flex; align-items: center; gap: .55rem; } .chal-tc header > div { flex: 1; min-width: 0; } .chal-tc header small { display: block; font-size: .72rem; color: var(--muted); }
+.chal-tc-n { font-family: var(--font-display); font-weight: 800; font-size: 1.05rem; color: var(--ink-2); min-width: 2.2rem; }
+.chal-tc-r { font-weight: 800; font-size: .8rem; padding: .15rem .45rem; border-radius: 6px; background: #EEF1F5; } .chal-tc-r.win { background: #E6F6EF; color: #08734F; } .chal-tc-r.loss { background: #FDECEC; color: #B42318; } .chal-tc-r.open { background: var(--marigold-tint); color: var(--marigold-deep); }
+.chal-tc .chal-tag { justify-self: start; } .chal-tag.ok { background: #E6F6EF; color: #08734F; } .chal-tag.warn { background: #FFF4E5; color: #8A5A00; } .chal-tag.risk { background: #F1EBFF; color: #6B3FD6; } .chal-tag.bad { background: #FDECEC; color: #B42318; } .chal-tag.wait { background: var(--marigold-tint); color: #8A5A00; } .chal-tag.out { background: #EEF1F5; color: #475467; }
+.chal-tc .comp-px { margin: 0; }
+.chal-tc-checks { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: .3rem; }
+.chal-tc-checks li { font-size: .7rem; font-weight: 600; padding: .18rem .45rem; border-radius: 6px; border: 1px solid var(--line); background: #FAFBFD; }
+.chal-tc-checks li.yes { background: #F0FAF5; color: #08734F; border-color: #CDEFDD; } .chal-tc-checks li.no { background: #FFF5F5; color: #B42318; border-color: #F3C2C1; }
+.chal-tc .comp-missed, .chal-tc .comp-note-text { margin: 0; } .chal-tc-exit { margin: 0; font-size: .78rem; color: #475467; }
+.chal-tc-imgs { display: flex; gap: .4rem; } .chal-tc-imgs img { width: 84px; height: 60px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); cursor: zoom-in; }
+@media (max-width: 700px) { .chal-tm-top { grid-template-columns: 1fr; } .chal-tm-list { grid-template-columns: 1fr; } }
+
+/* ===== Admin sections (Update 35): Competition and 100 Trades Challenge kept apart ===== */
+.adm-secnav { display: flex; gap: .4rem; overflow-x: auto; scrollbar-width: none; margin: 0 0 1rem; padding: .3rem; background: #fff; border: 1px solid var(--line); border-radius: 999px; position: sticky; top: .5rem; z-index: 5; box-shadow: var(--shadow-1); }
+.adm-secnav::-webkit-scrollbar { display: none; }
+.adm-secnav button { flex-shrink: 0; border: 0; background: transparent; color: var(--muted); border-radius: 999px; padding: .5rem .95rem; font: inherit; font-size: .82rem; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.adm-secnav button:hover { color: var(--ink); background: var(--ink-tint); }
+.adm-secnav button.active { background: var(--ink); color: #fff; }
+.adm-sec-head { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.adm-sec-head .section-title { font-size: 1.15rem; margin: 0 0 .25rem; }
+.adm-sec-head .card-sub { max-width: 62ch; margin: 0; }
+.adm-comp-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: .8rem; margin-bottom: 1rem; }
+.adm-comp-item { margin: 0; display: flex; flex-direction: column; gap: .35rem; }
+.adm-comp-top { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.adm-comp-top b { font-size: 1rem; color: var(--ink); }
+.adm-comp-meta { margin: 0; font-size: .8rem; color: var(--muted); }
+.adm-comp-actions { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: auto; padding-top: .5rem; }
+.chal-cfg-item { display: flex; justify-content: space-between; align-items: flex-start; gap: .8rem; padding: .8rem 0; border-top: 1px solid var(--line); }
+.chal-cfg-item:first-of-type { border-top: 0; }
+.chal-cfg-item.off .chal-cfg-main b { color: var(--muted); }
+.chal-cfg-main { display: flex; flex-direction: column; gap: .15rem; min-width: 0; }
+.chal-cfg-main b { color: var(--ink); }
+.chal-cfg-main small { color: var(--muted); font-size: .76rem; }
+.chal-cfg-main p { margin: .2rem 0 0; font-size: .82rem; color: var(--text); }
+.chal-cfg-main .chal-tag { align-self: flex-start; }
+.chal-cfg-actions { display: flex; gap: .35rem; flex-wrap: wrap; justify-content: flex-end; flex-shrink: 0; }
+.chal-cfg-actions .danger { color: var(--loss); }
+.chal-cfg-form { border: 1px solid var(--marigold); background: var(--marigold-tint); border-radius: var(--r-md); padding: 1rem; margin: .8rem 0; }
+.chal-cfg-form h4 { margin: 0 0 .6rem; font-family: var(--font-display); color: var(--ink); }
+.chal-cfg-form small { color: var(--muted); }
+.chal-cfg-own { margin-top: 1rem; padding-top: .8rem; border-top: 1px dashed var(--line); }
+.chal-cfg-own small { display: block; color: var(--muted); font-size: .76rem; font-weight: 400; }
+.chal-strat-info { margin: .4rem 0 .6rem; font-size: .84rem; border: 1px solid var(--line); border-radius: var(--r-sm); background: #fff; padding: .45rem .7rem; color: var(--text); }
+.chal-hero-text .chal-strat-info { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.18); color: inherit; }
+.chal-strat-info summary { cursor: pointer; font-weight: 600; }
+.chal-strat-info p { margin: .4rem 0; }
+.chal-strat-info ol { margin: .4rem 0 .2rem; padding-left: 1.2rem; }
+.chal-strat-info li { margin: .15rem 0; }
+.chal-strat-list { margin: -.2rem 0 .6rem; }
+.chal-admin-link { margin: 0 0 .8rem; font-size: .84rem; color: var(--muted); background: var(--ink-tint); border-radius: var(--r-sm); padding: .55rem .8rem; }
+@media (max-width: 600px) {
+  .chal-cfg-item { flex-direction: column; }
+  .chal-cfg-actions { justify-content: flex-start; }
+  .adm-secnav { border-radius: var(--r-md); }
+}

@@ -18,7 +18,8 @@ export function splitTrades(ch, trades) {
     if (!t || typeof t !== 'object') continue;
     const logged = Date.parse(t.date || '');
     if (!(logged >= start)) continue;                                  // no back-filling old trades
-    (t.isSetupTrade !== false && norm(t.strategy) === name ? all : outside).push(t);
+    const sep = Number((ch.extras || {}).v) >= 2 && t.competitionId;   // v2: a competition trade never counts in the challenge
+    (t.isSetupTrade !== false && !sep && norm(t.strategy) === name ? all : outside).push(t);
   }
   all.sort((a, b) => (tradeKey(a) < tradeKey(b) ? -1 : 1));
   const cap = Number(ch.max_per_day ?? ch.maxPerDay) || 0, inside = [], overCap = [], perDay = {};
@@ -44,3 +45,28 @@ export function rowToChallenge(r) {
 }
 export const cleanRisk = v => Math.max(0, Math.min(1e9, Math.round(Number(v) || 0)));
 export const cleanCap = v => { const n = Math.round(Number(v) || 0); return n > 0 ? Math.min(20, n) : 0; };
+
+// ---- Admin's own challenge strategies (separate from competition strategies) ----
+import { getSetting, putSetting } from './reminders.js';
+export const DEFAULT_CONFIG = { strategies: [], allowOwn: true };
+const cl = (v, n) => String(v ?? '').trim().slice(0, n);
+export function cleanConfig(c) {
+  const seen = new Set(), strategies = [];
+  for (const x of Array.isArray(c?.strategies) ? c.strategies.slice(0, 30) : []) {
+    const name = cl(x?.name, 80); if (name.length < 2 || seen.has(norm(name))) continue; seen.add(norm(name));
+    const rules = (Array.isArray(x.rules) ? x.rules : String(x.rules || '').split('\n')).map(r => cl(r, 200)).filter(Boolean).slice(0, 12);
+    strategies.push({ id: cl(x.id, 40) || crypto.randomUUID(), name, description: cl(x.description, 1000), entryCriteria: cl(x.entryCriteria, 1000), exitCriteria: cl(x.exitCriteria, 1000), rules, active: x.active !== false, createdAt: cl(x.createdAt, 40) || new Date().toISOString() });
+  }
+  return { strategies, allowOwn: c?.allowOwn !== false };
+}
+export async function getChalConfig(env) { return cleanConfig(await getSetting(env, 'challenge_config', DEFAULT_CONFIG)); }
+export async function saveChalConfig(env, c) { const v = cleanConfig(c); await putSetting(env, 'challenge_config', v); return v; }
+// which strategy a new challenge runs on: { name, strategyId } or { error }
+export function pickStrategy(cfg, b) {
+  const act = cfg.strategies.filter(x => x.active);
+  if (b?.strategyId) { const s = act.find(x => x.id === b.strategyId); return s ? { name: s.name, strategyId: s.id } : { error: 'Yeh challenge strategy ab available nahi hai.' }; }
+  const name = cl(b?.strategy, 80); if (name.length < 2) return { error: 'Strategy chuno.' };
+  const s = act.find(x => norm(x.name) === norm(name)); if (s) return { name: s.name, strategyId: s.id };
+  if (!cfg.allowOwn) return { error: 'Admin ki di hui challenge strategy mein se chuno.' };
+  return { name, strategyId: null };
+}
