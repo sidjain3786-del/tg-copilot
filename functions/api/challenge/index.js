@@ -1,5 +1,5 @@
 import { getUserFromRequest, json, readJson, ensureSchema, parseColumn } from '../../_lib/auth.js';
-import { STAGES, progress, rowToChallenge, parse } from '../../_lib/challenge.js';
+import { STAGES, progress, rowToChallenge, parse, cleanRisk, cleanCap } from '../../_lib/challenge.js';
 
 // GET  /api/challenge -> my active challenge + past attempts
 // POST /api/challenge { action: 'start' | 'review' | 'restart' | 'stop', ... }
@@ -24,23 +24,44 @@ export async function onRequestPost({ request, env }) {
     const row = await env.DB.prepare(`SELECT * FROM trade_challenges WHERE user_id = ? AND status = 'active' ORDER BY started_at DESC LIMIT 1`).bind(user.id).first();
     const now = new Date().toISOString();
     const end = (status, reason) => env.DB.prepare('UPDATE trade_challenges SET status = ?, ended_at = ?, end_reason = ? WHERE id = ?').bind(status, now, clip(reason, 300), row.id).run();
-    const start = async (strategy, attempt) => {
+    const start = async (strategy, attempt, risk, cap) => {
       const s = clip(strategy, 80); if (s.length < 2) return json({ error: 'Strategy chuno.' }, { status: 400 });
       const id = crypto.randomUUID();
-      await env.DB.prepare(`INSERT INTO trade_challenges (id, user_id, strategy, started_at, status, reviews, focus, attempt) VALUES (?, ?, ?, ?, 'active', '{}', 'null', ?)`).bind(id, user.id, s, now, attempt).run();
+      await env.DB.prepare(`INSERT INTO trade_challenges (id, user_id, strategy, started_at, status, reviews, focus, attempt, risk, max_per_day, feedback, extras) VALUES (?, ?, ?, ?, 'active', '{}', 'null', ?, ?, ?, '{}', '{}')`).bind(id, user.id, s, now, attempt, cleanRisk(risk), cleanCap(cap)).run();
       return json({ active: rowToChallenge(await env.DB.prepare('SELECT * FROM trade_challenges WHERE id = ?').bind(id).first()) });
     };
     const attempts = async () => ((await env.DB.prepare('SELECT COUNT(*) AS n FROM trade_challenges WHERE user_id = ?').bind(user.id).first())?.n || 0) + 1;
 
     if (b.action === 'start') {
       if (row) return json({ error: 'Ek challenge pehle se chal raha hai. Strategy badalni hai to "Restart" karo.' }, { status: 400 });
-      return start(b.strategy, await attempts());
+      return start(b.strategy, await attempts(), b.risk, b.maxPerDay ?? 3);
     }
     if (!row) return json({ error: 'Koi challenge nahi chal raha.' }, { status: 400 });
     if (b.action === 'restart') {
       if (clip(b.reason, 300).length < 5) return json({ error: 'Restart ki wajah likho (kam se kam 5 akshar).' }, { status: 400 });
       await end('restarted', b.reason);
-      return start(b.strategy || row.strategy, await attempts());
+      return start(b.strategy || row.strategy, await attempts(), b.risk ?? row.risk, b.maxPerDay ?? row.max_per_day);
+    }
+    const extras = parse(row.extras, {});
+    const saveExtras = () => env.DB.prepare('UPDATE trade_challenges SET extras = ? WHERE id = ?').bind(JSON.stringify(extras), row.id).run();
+    const fresh = async () => rowToChallenge(await env.DB.prepare('SELECT * FROM trade_challenges WHERE id = ?').bind(row.id).first());
+    if (b.action === 'settings') {   // risk per trade + daily limit
+      await env.DB.prepare('UPDATE trade_challenges SET risk = ?, max_per_day = ? WHERE id = ?').bind(cleanRisk(b.risk), cleanCap(b.maxPerDay), row.id).run();
+      return json({ active: await fresh() });
+    }
+    if (b.action === 'checkin') {    // quick look every 10 trades (10, 20, 30, 40, 60 ...)
+      const n = Number(b.n);
+      if (!(n >= 10 && n <= 90 && n % 10 === 0 && n % 25 !== 0)) return json({ error: 'Galat check-in.' }, { status: 400 });
+      const d = await env.DB.prepare('SELECT trades FROM user_data WHERE user_id = ?').bind(user.id).first();
+      if (progress(rowToChallenge(row), parseColumn(d?.trades || '[]', [])).logged < n) return json({ error: `Check-in ${n} trades ke baad hoga.` }, { status: 400 });
+      extras.checkins = extras.checkins || {};
+      extras.checkins[n] = { at: now, mistake: clip(b.mistake, 40), rule: clip(b.rule, 200), note: clip(b.note, 300) };
+      await saveExtras(); return json({ active: await fresh() });
+    }
+    if (b.action === 'missed') {     // "setup aaya par trade nahi liya" / "bina setup trade le liya"
+      const kind = b.kind === 'impulse' ? 'impulse' : 'skipped';
+      extras.missed = [...(Array.isArray(extras.missed) ? extras.missed : []), { at: now, kind, note: clip(b.note, 200) }].slice(-300);
+      await saveExtras(); return json({ active: await fresh() });
     }
     if (b.action === 'stop') { await end('stopped', b.reason || ''); return json({ active: null }); }
     if (b.action === 'review') {

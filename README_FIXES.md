@@ -307,3 +307,17 @@ Morning / evening / night notifications go to traders' phones automatically.
 - Trade delete box batata hai agar trade competition ya 100 Trades Challenge mein gina ja raha hai.
 - Admin ke deletes (blog post, quote, announcement, competition, reminder) bhi isi box se.
 - Changed: `app.js`, `theme.css`, `sw.js`. Tests: 24 new checks (desktop + phone) + all earlier suites.
+
+## Update 33 — 💯 100 Trades Challenge, upgraded (App version 33)
+- **Strategy rules tick on every challenge trade** (Log Trade). A rule not ticked = rule broken. Reviews and check-ins show the **most-broken rule**.
+- **Fixed risk per trade** (set at start, editable): Log Trade shows the trade's ₹ risk live (Entry, SL, Quantity) — above the limit (25% grace) or no SL = "risk toota" (purple box in the grid).
+- **Daily limit** (default 3 a day, 2 / 5 / no limit): extra trades that day are kept but don't count — "jaldi mat karo".
+- **Check-in every 10 trades** (10, 20, 30, 40, 60, 70, 80, 90): 30 seconds — the 10 trades' numbers, most common mistake, one rule for the next 10. Not compulsory.
+- **Sir's feedback:** Admin → challenge table → Reviews → write a line under any review / check-in → the trader gets a phone notification and sees it on the dashboard and Challenge tab.
+- **🔥 Clean streak** (rules + risk + no mistake in a row), current and best.
+- **📈 R curve** of the challenge trades with lines at 25 / 50 / 75.
+- **😶 Missed setups / ⚡ impulse trades** — one tap to note "setup aaya par nahi liya" or "bina setup le liya".
+- **🎖️ Certificates** at 25 / 50 / 75 / 100 — an image to download or share (WhatsApp / Instagram).
+- **Honest verdict at 100:** edge dikha / profit hai par discipline kam / rules follow hue par edge nahi / pehle execution theek karo — plus clean trades, risk breaks, best streak, missed setups in the report.
+- **Daily challenge nudge** (Admin → Auto reminders, default 7 pm): a personal notification only to traders whose review is due or who logged no challenge trade for 3+ days.
+- Technical: new columns on `trade_challenges` (risk, max_per_day, feedback, extras) and `user_prefs.pending` — added automatically. Old challenges keep "no daily limit". New file `functions/_lib/notify.js`. Changed: `app.js`, `theme.css`, `sw.js`, `schema.sql`, `functions/_lib/challenge.js`, `functions/_lib/auth.js`, `functions/_lib/reminders.js`, `functions/api/challenge/index.js`, `functions/api/challenge/all.js`, `functions/api/cron/tick.js`, `functions/api/reminders/index.js`, `functions/api/notify/latest.js`. Tests: 16 API + 28 browser checks, and every earlier suite re-run.

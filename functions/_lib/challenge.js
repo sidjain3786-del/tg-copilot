@@ -10,27 +10,37 @@ export function tradeKey(t) {
   if (!local) { const d = new Date(raw || t?.date || 0); if (!Number.isNaN(d.getTime())) { const x = new Date(d.getTime() + 5.5 * 3600000); local = `${x.getUTCFullYear()}-${pad(x.getUTCMonth() + 1)}-${pad(x.getUTCDate())}T${pad(x.getUTCHours())}:${pad(x.getUTCMinutes())}`; } }
   return `${local}|${t?.date || ''}|${t?.id || ''}`;
 }
-// trades logged after the start: on the challenge strategy (in order) and everything else ("outside")
+// trades logged after the start: on the challenge strategy (in order), over the daily limit, and everything else ("outside")
 export function splitTrades(ch, trades) {
   const name = norm(ch.strategy), start = Date.parse(ch.started_at || ch.startedAt);
-  const inside = [], outside = [];
+  const all = [], outside = [];
   for (const t of Array.isArray(trades) ? trades : []) {
     if (!t || typeof t !== 'object') continue;
     const logged = Date.parse(t.date || '');
     if (!(logged >= start)) continue;                                  // no back-filling old trades
-    (t.isSetupTrade !== false && norm(t.strategy) === name ? inside : outside).push(t);
+    (t.isSetupTrade !== false && norm(t.strategy) === name ? all : outside).push(t);
   }
-  inside.sort((a, b) => (tradeKey(a) < tradeKey(b) ? -1 : 1));
-  return { inside, outside };
+  all.sort((a, b) => (tradeKey(a) < tradeKey(b) ? -1 : 1));
+  const cap = Number(ch.max_per_day ?? ch.maxPerDay) || 0, inside = [], overCap = [], perDay = {};
+  for (const t of all) {
+    const day = tradeKey(t).slice(0, 10);
+    if (cap && (perDay[day] || 0) >= cap) overCap.push(t);           // "jaldi mat karo": only N trades a day count
+    else { perDay[day] = (perDay[day] || 0) + 1; inside.push(t); }
+  }
+  return { inside, outside, overCap };
 }
 // a stage review is needed before trades beyond it count
 export function progress(ch, trades) {
-  const { inside, outside } = splitTrades(ch, trades), reviews = ch.reviews || {};
+  const { inside, outside, overCap } = splitTrades(ch, trades), reviews = ch.reviews || {};
   const gate = STAGES.find(s => !reviews[s]) ?? 100;
   const counted = Math.min(inside.length, gate, 100);
-  return { counted, logged: inside.length, waiting: Math.max(0, Math.min(inside.length, 100) - counted), gate, reviewDue: STAGES.find(s => !reviews[s] && inside.length >= s) || null, outside: outside.length };
+  return { counted, logged: inside.length, waiting: Math.max(0, Math.min(inside.length, 100) - counted), gate, reviewDue: STAGES.find(s => !reviews[s] && inside.length >= s) || null, outside: outside.length, overCap: overCap.length,
+    lastLoggedAt: [...inside, ...overCap].map(t => t.date).sort().pop() || null };
 }
 export const parse = (s, d) => { try { return JSON.parse(s) ?? d; } catch { return d; } };
 export function rowToChallenge(r) {
-  return r ? { id: r.id, strategy: r.strategy, startedAt: r.started_at, status: r.status, reviews: parse(r.reviews, {}), focus: parse(r.focus, null), endedAt: r.ended_at || null, endReason: r.end_reason || '', attempt: r.attempt || 1 } : null;
+  return r ? { id: r.id, strategy: r.strategy, startedAt: r.started_at, status: r.status, reviews: parse(r.reviews, {}), focus: parse(r.focus, null), endedAt: r.ended_at || null, endReason: r.end_reason || '', attempt: r.attempt || 1,
+    risk: Number(r.risk) || 0, maxPerDay: Number(r.max_per_day) || 0, feedback: parse(r.feedback, {}), extras: parse(r.extras, {}) } : null;
 }
+export const cleanRisk = v => Math.max(0, Math.min(1e9, Math.round(Number(v) || 0)));
+export const cleanCap = v => { const n = Math.round(Number(v) || 0); return n > 0 ? Math.min(20, n) : 0; };

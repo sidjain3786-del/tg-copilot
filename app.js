@@ -1,4 +1,4 @@
-const APP_VERSION = '32';   // shown in Admin → System check; bump on every release
+const APP_VERSION = '33';   // shown in Admin → System check; bump on every release
 /* ============================================================
    Trader Co-Pilot — vanilla JS (no framework)
    Talks to /api/* (Cloudflare Pages Functions + D1) for
@@ -2748,7 +2748,7 @@ function setLogStrategy(value){
   if(String(value).startsWith('comp:')){ const id=value.slice(5); if(STATE.logCompId!==id){ STATE.logCompId=id; STATE.logCompRules=[]; } }
   else { STATE.logCompId=null; STATE.logCompRules=[]; STATE.selectedPlaybookId=value; }
   const panel=$('#log-comp-panel'); if(panel) panel.innerHTML=renderLogCompPanel();
-  STATE.logStratTouched=true; if(typeof updateLogChallengeNote==='function') updateLogChallengeNote();
+  STATE.logStratTouched=true; STATE.chalRules=[]; if(typeof updateLogChallengeNote==='function') updateLogChallengeNote();
 }
 /* ---------- Edit Trade: same choice while editing ---------- */
 function editCompPanelHtml(t, value){
@@ -3090,13 +3090,17 @@ document.addEventListener('input', e=>{
 /* ================= 💯 100 TRADES CHALLENGE =================
    One strategy, 100 journaled trades, a review every 25 trades (the blog's 4 stages).
    Only trades logged AFTER the start, on the challenge strategy, count. Trades past a
-   stage wait until that stage's review is done. Changing strategy = Restart from 0. */
+   stage wait until that stage's review is done. Changing strategy = Restart from 0.
+   v2: strategy rules ticked on every trade, fixed risk per trade, daily limit, a quick
+   check-in every 10 trades, Sir's feedback, streaks, R curve, missed-setup log,
+   shareable certificates and an honest verdict at 100. */
 const CH_STAGES=[
   {n:25, from:1, title:'Apna behaviour samjho', goal:'Har trade poora journal karo — entry reason, SL, emotion, mistake, screenshot. Abhi kuch badalna nahi, sirf baseline banao.'},
   {n:50, from:26, title:'Repeat hone wale patterns pakdo', goal:'Dekho kaunsi galti, kis situation mein, baar-baar ho rahi hai. Review mein ek weakness chunoge.'},
   {n:75, from:51, title:'Ek weakness par kaam karo', goal:'Stage 2 mein chuni hui weakness ke liye apna rule har trade mein follow karo.'},
   {n:100, from:76, title:'Dekho kya badla', goal:'Aakhri 25 trades. End mein pehle 25 vs aakhri 25 ka report banega.'}
 ];
+const CH_CHECKINS=[10,20,30,40,60,70,80,90];
 function chState(){ return STATE.chal || (STATE.chal={ loaded:false, loading:false, active:null, history:[], modal:null, admin:null }); }
 async function loadChallenge(force=false){
   const s=chState(); if(s.loading||(s.loaded&&!force)) return;
@@ -3117,34 +3121,58 @@ function chKey(t){
   return `${local}|${t?.date||''}|${t?.id||''}`;
 }
 function chSplit(ch){
-  const name=chNorm(ch.strategy), start=Date.parse(ch.startedAt), inside=[], outside=[];
-  STATE.trades.forEach(t=>{ if(!(Date.parse(t.date||'')>=start)) return; (t.isSetupTrade!==false && chNorm(t.strategy)===name ? inside : outside).push(t); });
-  inside.sort((a,b)=>chKey(a)<chKey(b)?-1:1);
-  return { inside, outside };
+  const name=chNorm(ch.strategy), start=Date.parse(ch.startedAt), all=[], outside=[];
+  STATE.trades.forEach(t=>{ if(!(Date.parse(t.date||'')>=start)) return; (t.isSetupTrade!==false && chNorm(t.strategy)===name ? all : outside).push(t); });
+  all.sort((a,b)=>chKey(a)<chKey(b)?-1:1);
+  const cap=Number(ch.maxPerDay)||0, inside=[], overCap=[], perDay={};
+  all.forEach(t=>{ const d=chKey(t).slice(0,10); if(cap && (perDay[d]||0)>=cap) overCap.push(t); else { perDay[d]=(perDay[d]||0)+1; inside.push(t); } });
+  return { inside, outside, overCap, perDay };
 }
 function chProgress(ch){
-  const { inside, outside }=chSplit(ch), rv=ch.reviews||{};
+  const { inside, outside, overCap, perDay }=chSplit(ch), rv=ch.reviews||{};
   const gate=CH_STAGES.map(x=>x.n).find(n=>!rv[n]) ?? 100, counted=Math.min(inside.length, gate, 100);
   const due=CH_STAGES.map(x=>x.n).find(x=>!rv[x] && inside.length>=x)||null;
   const stageIdx=due ? CH_STAGES.findIndex(x=>x.n===due) : Math.min(3, Math.floor(Math.min(counted,99)/25));   // a pending review keeps the trader on that stage
-  return { inside, outside, counted, logged:inside.length, waiting:Math.max(0,Math.min(inside.length,100)-counted), gate, reviewDue:due, stage:CH_STAGES[stageIdx] };
+  return { inside, outside, overCap, perDay, counted, logged:inside.length, waiting:Math.max(0,Math.min(inside.length,100)-counted), gate, reviewDue:due, stage:CH_STAGES[stageIdx] };
 }
 const chR=v=>`${v>0?'+':''}${(Math.round(v*100)/100).toFixed(2)}R`;
+const chMoney=v=>`${currencySymbol()}${Math.round(Number(v)||0).toLocaleString('en-IN')}`;
+const chIstToday=()=>new Date(Date.now()+5.5*3600000).toISOString().slice(0,10);
+/* the challenge strategy's rules (own strategy first, else Sir's competition strategy) */
+function chRules(ch){
+  const own=allStrategies().find(p=>chNorm(p.name)===chNorm(ch?.strategy));
+  if(own) return ((own.rules&&own.rules.length?own.rules:own.mandatoryRules)||[]).filter(Boolean);
+  const c=(STATE.comp?.list||[]).find(x=>chNorm(x.strategy)===chNorm(ch?.strategy)); return c?.rules||[];
+}
+const chTradeRisk=t=>{ const e=Number(t.entryPrice), sl=Number(t.stopLoss), q=Number(t.quantity); return e>0&&sl>0&&q>0&&e!==sl ? Math.abs(e-sl)*q : null; };
+/* what went right / wrong in one trade */
+function chFlags(t, ch){
+  const mistake=!!(t.mistake && t.mistake!=='none');
+  const total=Number(t.chalRulesTotal)||0, ticked=Array.isArray(t.chalRules)?t.chalRules.length:0;
+  const rulesOk= total ? ticked>=total : !!t.followedPlan;
+  const risk=chTradeRisk(t), riskOk = !(Number(ch?.risk)>0) || (risk!==null && risk<=Number(ch.risk)*1.25);
+  return { mistake, rulesOk, riskOk, risk, open:isOpenTrade(t), clean: rulesOk && riskOk && !mistake };
+}
+function chStreaks(list, ch){ let cur=0, best=0; list.forEach(t=>{ if(chFlags(t,ch).clean){ cur++; best=Math.max(best,cur); } else cur=0; }); return { cur, best }; }
 /* numbers for a group of trades (R only where an SL was set) */
-function chStats(list){
+function chStats(list, ch){
   const closed=list.filter(t=>!isOpenTrade(t)), withR=closed.filter(t=>Number(t.stopLoss)>0 && Number.isFinite(Number(t.rr)));
   const wins=closed.filter(t=>Number(t.pnl)>0).length, rs=withR.map(t=>Number(t.rr)), w=rs.filter(r=>r>0), l=rs.filter(r=>r<=0);
   const avg=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:0;
   const mist={}; list.forEach(t=>{ if(t.mistake&&t.mistake!=='none') mist[t.mistake]=(mist[t.mistake]||0)+1; });
   const emo={}; list.forEach(t=>tradeEmotions(t).forEach(e=>{ emo[e]=(emo[e]||0)+1; }));
+  const rules=chRules(ch), broken={}; list.forEach(t=>{ const tot=Number(t.chalRulesTotal)||0; if(!tot) return; for(let i=0;i<tot;i++) if(!(t.chalRules||[]).includes(i)) broken[i]=(broken[i]||0)+1; });
   let peak=0, cum=0, dd=0; rs.forEach(r=>{ cum+=r; peak=Math.max(peak,cum); dd=Math.min(dd,cum-peak); });
   const top=o=>{ const e=Object.entries(o).sort((a,b)=>b[1]-a[1])[0]; return e?{id:e[0],count:e[1]}:null; };
+  const tb=top(broken), fl=list.map(t=>chFlags(t,ch));
   const winRate=closed.length?Math.round(wins/closed.length*100):0, lossRate=closed.length?1-wins/closed.length:0;
-  return { n:list.length, closed:closed.length, winRate, ruleRate:list.length?Math.round(list.filter(t=>t.followedPlan).length/list.length*100):0,
+  return { n:list.length, closed:closed.length, winRate, ruleRate:list.length?Math.round(fl.filter(f=>f.rulesOk).length/list.length*100):0,
     slRate:list.length?Math.round(list.filter(t=>Number(t.stopLoss)>0).length/list.length*100):0,
+    riskBreaks: Number(ch?.risk)>0 ? fl.filter(f=>!f.riskOk).length : null, cleanRate:list.length?Math.round(fl.filter(f=>f.clean).length/list.length*100):0,
     avgR:Math.round(avg(rs)*100)/100, avgWinR:Math.round(avg(w)*100)/100, avgLossR:Math.round(avg(l)*100)/100, netR:Math.round(rs.reduce((a,b)=>a+b,0)*100)/100,
     expectancy:Math.round(((winRate/100)*avg(w)+lossRate*avg(l))*100)/100, maxDD:Math.round(dd*100)/100,
-    mistakes:Object.values(mist).reduce((a,b)=>a+b,0), mistakeMap:mist, topMistake:top(mist), topEmotion:top(emo) };
+    mistakes:Object.values(mist).reduce((a,b)=>a+b,0), mistakeMap:mist, topMistake:top(mist), topEmotion:top(emo),
+    topBrokenRule: tb && rules[Number(tb.id)] ? { text:rules[Number(tb.id)], count:tb.count } : null };
 }
 /* ---------- Log Trade: keep the trader on the challenge strategy ---------- */
 function chPreselect(){
@@ -3158,6 +3186,12 @@ function logSelectedStrategyName(){
   if(STATE.logCompId){ const c=liveComps().find(x=>x.id===STATE.logCompId); if(c) return c.strategy; }
   return findStrategy(STATE.selectedPlaybookId).name||'';
 }
+function chLogRiskLine(){
+  const ch=chState().active; if(!ch || !(Number(ch.risk)>0)) return '';
+  const t={ entryPrice:$('#log-entry')?.value, stopLoss:$('#log-sl')?.value, quantity:$('#log-qty')?.value }, r=chTradeRisk(t), lim=Number(ch.risk);
+  if(r===null) return `<span class="chal-risk wait">🎯 Risk limit ${chMoney(lim)} — Entry, SL aur Quantity bharo to risk check hoga.${t.stopLoss?'':' <b>SL ke bina trade “risk toota” ginega.</b>'}</span>`;
+  return r<=lim*1.25 ? `<span class="chal-risk ok">✓ Is trade ka risk ${chMoney(r)} — limit ${chMoney(lim)} ke andar</span>` : `<span class="chal-risk bad">⚠️ Is trade ka risk ${chMoney(r)} hai — aapki limit ${chMoney(lim)}. Quantity kam karo, warna “risk toota” ginega.</span>`;
+}
 function renderLogChallengeNote(){
   const ch=featureVisible('challenge')?chState().active:null; if(!ch) return '';
   const p=chProgress(ch), on=chNorm(logSelectedStrategyName())===chNorm(ch.strategy);
@@ -3166,19 +3200,37 @@ function renderLogChallengeNote(){
     const pick=own?`data-value="${esc(own.id)}"`:comp?`data-value="comp:${esc(comp.id)}"`:'';
     return `<div class="chal-note off" role="status"><b>⚠️ Yeh trade 100 Trades Challenge mein nahi ginega.</b> Aapki challenge strategy <b>${esc(ch.strategy)}</b> hai — doosri strategy ke trades “challenge ke bahar” gine jaate hain.${pick?` <button type="button" class="pb-link" data-action="chal-pick-strategy" ${pick}>${esc(ch.strategy)} chuno</button>`:''}</div>`;
   }
-  const next=Math.min(p.logged+1,100);
-  return `<div class="chal-note on" role="status"><span class="chal-note-num">💯 #${next}</span><div><b>Challenge trade ${next}/100</b> · Stage ${CH_STAGES.indexOf(p.stage)+1}: ${esc(p.stage.title)}${p.reviewDue?`<br><span class="chal-warn">⚠️ ${p.reviewDue} trades ka review baaki hai — yeh trade save hoga, par review ke baad hi ginega.</span>`:''}${ch.focus?`<br><span class="chal-focus">🎯 Aapka rule: “${esc(ch.focus.rule)}”</span>`:''}</div></div>`;
+  const next=Math.min(p.logged+1,100), cap=Number(ch.maxPerDay)||0, today=chIstToday(), todayN=(p.perDay[today]||0);
+  const rules=chRules(ch), viaComp=!!STATE.logCompId, ticks=STATE.chalRules||[];
+  return `<div class="chal-note on" role="status"><span class="chal-note-num">💯 #${next}</span><div class="chal-note-body"><b>Challenge trade ${next}/100</b> · Stage ${CH_STAGES.indexOf(p.stage)+1}: ${esc(p.stage.title)}
+    ${cap?`<br><span class="${todayN>=cap?'chal-warn':''}">${todayN>=cap?`⚠️ Aaj ke ${cap} challenge trades ho chuke — yeh trade challenge mein nahi ginega. Jaldi mat karo.`:`Aaj ka challenge trade ${todayN+1}/${cap}`}</span>`:''}
+    ${p.reviewDue?`<br><span class="chal-warn">⚠️ ${p.reviewDue} trades ka review baaki hai — yeh trade save hoga, par review ke baad hi ginega.</span>`:''}
+    ${ch.focus?`<br><span class="chal-focus">🎯 Aapka rule: “${esc(ch.focus.rule)}”</span>`:''}
+    <div id="chal-risk-line">${chLogRiskLine()}</div>
+    ${rules.length&&!viaComp?`<span class="adm-field-label">Is trade mein strategy ke kaunse rules follow kiye? <b id="chal-rule-count">${ticks.length}/${rules.length}</b></span><div class="comp-rule-checks chal-rule-checks">${rules.map((r,i)=>`<label class="adm-notify"><input type="checkbox" data-chal-rule="${i}" ${ticks.includes(i)?'checked':''}><span>${esc(r)}</span></label>`).join('')}</div>`
+      :rules.length?'<small class="chal-sub">Rules upar competition wale box mein tick karo — wahi challenge mein bhi ginenge.</small>'
+      :`<small class="chal-sub">Is strategy mein rules nahi likhe. <button type="button" class="pb-link" data-action="open-strategy-manager">Rules add karo</button> — tab har trade par tick kar paoge.</small>`}
+  </div></div>`;
 }
 function updateLogChallengeNote(reselect){
   const el=$('#log-chal-note'); if(!el) return;
   if(reselect && !STATE.logStratTouched){ chPreselect(); refreshLogStrategySelect(); }
   el.innerHTML=renderLogChallengeNote();
 }
-/* after a trade is saved: celebrate the 25 / 50 / 75 / 100 milestones */
+/* values to store on a newly logged trade */
+function chTradeFields(strategyName){
+  const ch=featureVisible('challenge')?chState().active:null; if(!ch || chNorm(strategyName)!==chNorm(ch.strategy)) return {};
+  const rules=chRules(ch); if(!rules.length) return {};
+  const ticks = STATE.logCompId ? (STATE.logCompRules||[]) : (STATE.chalRules||[]);
+  return { chalRules:[...new Set(ticks)].filter(i=>i<rules.length).sort((a,b)=>a-b), chalRulesTotal:rules.length };
+}
+/* after a trade is saved: milestones, check-ins, daily limit */
 function chAfterSave(before){
   const ch=chState().active; if(!ch) return;
   const p=chProgress(ch);
-  if(p.reviewDue && p.logged>before && CH_STAGES.some(x=>x.n===p.reviewDue && before<x.n)) compToast(`<strong>🎯 ${p.reviewDue} challenge trades poore!</strong><p>Ab Stage ${CH_STAGES.findIndex(x=>x.n===p.reviewDue)+1} ka review karo — usse pata chalega kya repeat ho raha hai. Review ke baad hi aage ke trades ginenge.</p><button type="button" class="btn-primary btn-small" data-action="chal-open-review" data-stage="${p.reviewDue}">Review karo</button>`, 12000);
+  if(p.reviewDue && p.logged>before && CH_STAGES.some(x=>x.n===p.reviewDue && before<x.n)) return compToast(`<strong>🎯 ${p.reviewDue} challenge trades poore!</strong><p>Ab Stage ${CH_STAGES.findIndex(x=>x.n===p.reviewDue)+1} ka review karo — usse pata chalega kya repeat ho raha hai. Review ke baad hi aage ke trades ginenge.</p><button type="button" class="btn-primary btn-small" data-action="chal-open-review" data-stage="${p.reviewDue}">Review karo</button>`, 12000);
+  const ck=CH_CHECKINS.find(n=>before<n && p.logged>=n);
+  if(ck) compToast(`<strong>⏱ ${ck} trades — 30 second ka check-in</strong><p>Pichhle 10 trades mein kya repeat hua? Ek chhota rule agle 10 ke liye.</p><button type="button" class="btn-primary btn-small" data-action="chal-open-checkin" data-n="${ck}">Check-in karo</button>`, 12000);
 }
 /* ---------- dashboard card ---------- */
 function renderChalDashCard(){
@@ -3186,9 +3238,15 @@ function renderChalDashCard(){
   const s=chState(); if(!s.loaded) return '<div id="chal-dash" hidden></div>';
   const ch=s.active;
   if(!ch) return `<button type="button" id="chal-dash" class="chal-dash cta" data-action="set-tab" data-tab="challenge"><span class="chal-dash-num">100</span><span class="chal-dash-text"><b>100 Trades Challenge</b><small>Ek strategy · 100 trades · har 25 par review. Shuru karo →</small></span></button>`;
-  const p=chProgress(ch);
-  return `<button type="button" id="chal-dash" class="chal-dash ${p.reviewDue?'due':''}" data-action="set-tab" data-tab="challenge"><span class="chal-dash-num">${p.counted}</span><span class="chal-dash-text"><b>100 Trades Challenge · ${esc(ch.strategy)}</b><small>${p.reviewDue?`⚠️ ${p.reviewDue} trades ka review baaki hai`:`Stage ${CH_STAGES.indexOf(p.stage)+1}: ${esc(p.stage.title)}`}</small><span class="chal-bar"><i style="width:${p.counted}%"></i></span></span><span class="chal-dash-of">/100</span></button>`;
+  const p=chProgress(ch), sk=chStreaks(p.inside.slice(0,p.counted),ch), fb=chUnseenFeedback(ch);
+  return `<button type="button" id="chal-dash" class="chal-dash ${p.reviewDue||fb?'due':''}" data-action="set-tab" data-tab="challenge"><span class="chal-dash-num">${p.counted}</span><span class="chal-dash-text"><b>100 Trades Challenge · ${esc(ch.strategy)}</b><small>${fb?'💬 Sir ka naya feedback aaya hai':p.reviewDue?`⚠️ ${p.reviewDue} trades ka review baaki hai`:`Stage ${CH_STAGES.indexOf(p.stage)+1}: ${esc(p.stage.title)}${sk.cur>=3?` · 🔥 ${sk.cur} clean streak`:''}`}</small><span class="chal-bar"><i style="width:${p.counted}%"></i></span></span><span class="chal-dash-of">/100</span></button>`;
 }
+/* Sir's feedback the trader hasn't opened yet */
+function chUnseenFeedback(ch){
+  const fb=ch?.feedback||{}; let seen={}; try{ seen=JSON.parse(localStorage.getItem('tc_chal_fb_seen')||'{}'); }catch(_){}
+  return Object.entries(fb).filter(([k,v])=>v?.at && seen[ch.id+':'+k]!==v.at).length;
+}
+function chMarkFeedbackSeen(ch){ try{ const seen=JSON.parse(localStorage.getItem('tc_chal_fb_seen')||'{}'); Object.entries(ch.feedback||{}).forEach(([k,v])=>{ seen[ch.id+':'+k]=v.at; }); localStorage.setItem('tc_chal_fb_seen', JSON.stringify(seen)); }catch(_){} }
 /* ---------- the tab ---------- */
 function chStrategyChoices(){ return [...new Set([...allStrategies().map(x=>x.name), ...liveComps().map(c=>c.strategy)].filter(Boolean))]; }
 function renderChallengeTab(){
@@ -3196,6 +3254,7 @@ function renderChallengeTab(){
   if(!s.loaded){ setTimeout(()=>loadChallenge(),0); return `<section class="card"><p class="card-sub">${s.error?esc(s.error):'Challenge load ho raha hai…'}</p></section>`; }
   return `${s.active?renderChalActive(s.active):renderChalIntro()}${renderChalHistory()}${isAdmin()?renderChalAdmin():''}${renderChalModal()}`;
 }
+function chCapSelect(id, val){ return `<select id="${id}">${[[2,'2 trades'],[3,'3 trades (suggested)'],[5,'5 trades'],[0,'Koi limit nahi']].map(([v,l])=>`<option value="${v}" ${Number(val)===v?'selected':''}>${l}</option>`).join('')}</select>`; }
 function renderChalIntro(){
   const s=chState(), last=s.history[0], choices=chStrategyChoices();
   return `${last&&last.status==='completed'?renderChalReport(last):''}
@@ -3206,73 +3265,119 @@ function renderChalIntro(){
       <p>6 mahine trading karne se koi behtar nahi banta. 100 <b>poore journal kiye hue</b> trades ek hi strategy par — aur har 25 trades par imaandaar review — aapko dikhayenge ki aap kya galti repeat kar rahe ho.</p>
       <ul class="chal-rules">
         <li><b>Strategy lock:</b> 100 trades tak ek hi strategy. Badalni hai to Restart — counter 0 se.</li>
-        <li><b>Har 25 trades par review</b> — review kiye bina aage ke trades nahi ginenge.</li>
-        <li>Sirf challenge shuru hone ke <b>baad</b> log kiye trades ginenge. Doosri strategy ke trades “bahar” gine jaate hain.</li>
-        <li><b>Jaldi mat karo.</b> Setup na bane to trade force mat karo — 100 trades mein mahine lag sakte hain, wahi sahi hai.</li>
+        <li><b>Har trade par rules tick</b> karoge, aur <b>risk fix</b> rahega — dono ka hisaab rakha jayega.</li>
+        <li><b>Har 25 trades par review</b> (review ke bina aage ke trades nahi ginenge) aur har 10 par chhota check-in.</li>
+        <li><b>Jaldi mat karo.</b> Din mein sirf kuch trades ginenge — setup na bane to trade force mat karo.</li>
       </ul>
     </div>
     <div class="chal-start card">
       <h3 class="section-title">Challenge shuru karo</h3>
       ${choices.length?`<label class="adm-field"><span>Kaunsi strategy par 100 trades?</span><select id="chal-start-strategy">${choices.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('')}</select></label>
-      <p class="comp-note">Woh strategy chuno jiske rules aapko saaf pata hain aur jiska setup aapke market time mein aata hai.</p>
+      <div class="chal-start-row"><label class="adm-field"><span>Har trade ka risk <small>(₹, optional)</small></span><input id="chal-start-risk" type="number" min="0" step="any" inputmode="decimal" placeholder="e.g. 500"></label>
+        <label class="adm-field"><span>Ek din mein max</span>${chCapSelect('chal-start-cap',3)}</label></div>
+      <p class="comp-note">Woh strategy chuno jiske rules aapko saaf pata hain. Rules strategy mein likhe honge to har trade par tick kar paoge.</p>
       <button type="button" class="btn-cta" data-action="chal-start">💯 Challenge shuru karo</button>`
       :`<p class="card-sub">Pehle ek strategy banao (naam, entry / exit rules) — phir usi par challenge shuru hoga.</p><button type="button" class="btn-primary" data-action="open-strategy-manager" data-new="1">＋ Strategy banao</button>`}
     </div>
   </section>
-  <section class="chal-stages-intro">${CH_STAGES.map((x,i)=>`<div><span>Trades ${x.from}–${x.n}</span><b>${esc(x.title)}</b><p>${esc(x.goal)}</p></div>`).join('')}</section>`;
+  <section class="chal-stages-intro">${CH_STAGES.map(x=>`<div><span>Trades ${x.from}–${x.n}</span><b>${esc(x.title)}</b><p>${esc(x.goal)}</p></div>`).join('')}</section>`;
 }
-function chCell(t, i, p){
+function chCell(t, i, p, ch){
   const n=i+1;
   if(!t) return `<span class="chal-cell empty" title="Trade #${n}"></span>`;
-  const waiting=n>p.counted, open=isOpenTrade(t), clean=t.followedPlan && (!t.mistake||t.mistake==='none');
-  const cls=waiting?'waiting':open?'open':clean?'clean':(t.mistake&&t.mistake!=='none')?'mistake':'broke';
-  const rr=Number(t.stopLoss)>0&&!open&&Number.isFinite(Number(t.rr))?` · ${chR(Number(t.rr))}`:'';
-  return `<span class="chal-cell ${cls}" title="#${n} · ${esc(t.symbol||'')} · ${esc(formatTradeTime(t))}${rr}${t.mistake&&t.mistake!=='none'?' · '+esc(mistakeLabel(t.mistake)):''}${waiting?' · review ke baad ginega':''}"></span>`;
+  const waiting=n>p.counted, f=chFlags(t,ch);
+  const cls=waiting?'waiting':f.mistake?'mistake':!f.riskOk?'risk':!f.rulesOk?'broke':f.open?'open':'clean';
+  const rr=Number(t.stopLoss)>0&&!f.open&&Number.isFinite(Number(t.rr))?` · ${chR(Number(t.rr))}`:'';
+  return `<span class="chal-cell ${cls}" title="#${n} · ${esc(t.symbol||'')} · ${esc(formatTradeTime(t))}${rr}${f.mistake?' · '+esc(mistakeLabel(t.mistake)):''}${!f.riskOk?' · risk toota':''}${!f.rulesOk?' · rule toota':''}${waiting?' · review ke baad ginega':''}"></span>`;
+}
+/* cumulative R of the counted trades, stage lines at 25 / 50 / 75 */
+function chRCurve(list){
+  const pts=[0]; list.forEach(t=>{ const r=Number(t.stopLoss)>0&&!isOpenTrade(t)&&Number.isFinite(Number(t.rr))?Number(t.rr):0; pts.push(pts[pts.length-1]+r); });
+  if(pts.length<3) return '<p class="pb-empty">2-3 trades ke baad yahan R ka graph banega.</p>';
+  const W=600, H=160, P=8, max=Math.max(1,...pts), min=Math.min(-1,...pts), n=100;
+  const x=i=>P+(W-2*P)*i/n, y=v=>P+(H-2*P)*(max-v)/(max-min);
+  const line=pts.map((v,i)=>`${i?'L':'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' '), last=pts[pts.length-1];
+  return `<svg class="chal-curve" viewBox="0 0 ${W} ${H}" role="img" aria-label="Challenge trades ka cumulative R: ${chR(last)}">
+    ${[25,50,75].map(s=>`<line x1="${x(s)}" x2="${x(s)}" y1="${P}" y2="${H-P}" class="stage"/><text x="${x(s)+4}" y="${P+10}" class="lbl">${s}</text>`).join('')}
+    <line x1="${P}" x2="${W-P}" y1="${y(0)}" y2="${y(0)}" class="zero"/>
+    <path d="${line}" class="${last>=0?'up':'down'}"/><circle cx="${x(pts.length-1)}" cy="${y(last)}" r="4" class="${last>=0?'up':'down'}"/>
+  </svg><p class="chal-curve-cap">Ab tak <b class="${last>=0?'positive':'negative'}">${chR(last)}</b> · ${list.length} trades</p>`;
+}
+function chPendingCheckin(ch, p){
+  const done=ch.extras?.checkins||{}, hidden=chState().hideCheckin||{};
+  return CH_CHECKINS.filter(n=>p.logged>=n && !done[n] && !hidden[n]).pop()||null;
 }
 function renderChalActive(ch){
-  const p=chProgress(ch), rv=ch.reviews||{}, idx=CH_STAGES.indexOf(p.stage);
+  const p=chProgress(ch), rv=ch.reviews||{}, idx=CH_STAGES.indexOf(p.stage), fb=ch.feedback||{};
   const segs=CH_STAGES.map(x=>p.inside.slice(x.from-1,Math.min(x.n,p.counted)));
-  const cur=chStats(segs[idx]), all=chStats(p.inside.slice(0,p.counted));
+  const cur=chStats(segs[idx],ch), all=chStats(p.inside.slice(0,p.counted),ch), sk=chStreaks(p.inside.slice(0,p.counted),ch);
+  const missed=Array.isArray(ch.extras?.missed)?ch.extras.missed:[], skipped=missed.filter(m=>m.kind==='skipped').length, impulse=missed.filter(m=>m.kind==='impulse').length;
+  const ckN=chPendingCheckin(ch,p), unseen=chUnseenFeedback(ch);
   const stat=(l,v,sub)=>`<div><span>${l}</span><strong>${v}</strong>${sub?`<small>${sub}</small>`:''}</div>`;
-  const statRow=st=>st.n?[stat('Rules follow',st.ruleRate+'%'),stat('Win rate',st.closed?st.winRate+'%':'—'),stat('Avg R',st.closed?chR(st.avgR):'—'),stat('Expectancy',st.closed?chR(st.expectancy):'—','har trade par'),stat('SL lagaya',st.slRate+'%'),stat('Top galti',st.topMistake?esc(mistakeLabel(st.topMistake.id)):'Koi nahi',st.topMistake?`${st.topMistake.count} baar`:'')].join(''):'<p class="pb-empty">Is stage mein abhi koi trade nahi.</p>';
-  return `<section class="chal-hero active">
+  const statRow=st=>st.n?[stat('Rules follow',st.ruleRate+'%'),stat('Win rate',st.closed?st.winRate+'%':'—'),stat('Avg R',st.closed?chR(st.avgR):'—'),stat('Expectancy',st.closed?chR(st.expectancy):'—','har trade par'),
+    st.riskBreaks!==null?stat('Risk toota',st.riskBreaks,`limit ${chMoney(ch.risk)}`):stat('SL lagaya',st.slRate+'%'),
+    stat('Top galti',st.topMistake?esc(mistakeLabel(st.topMistake.id)):'Koi nahi',st.topMistake?`${st.topMistake.count} baar`:''),
+    ...(st.topBrokenRule?[stat('Sabse zyada toota rule',esc(st.topBrokenRule.text),`${st.topBrokenRule.count} baar`)]:[])].join(''):'<p class="pb-empty">Is stage mein abhi koi trade nahi.</p>';
+  if(unseen) setTimeout(()=>chMarkFeedbackSeen(ch),1500);
+  return `${unseen?`<section class="chal-fb-new" role="status"><b>💬 Sir ne aapke review par feedback diya hai</b><p>${Object.values(fb).sort((a,b)=>a.at<b.at?1:-1).slice(0,1).map(f=>esc(f.text)).join('')}</p></section>`:''}
+  <section class="chal-hero active">
     <div class="chal-hero-text">
       <span class="chal-kicker">100 Trades Challenge${ch.attempt>1?` · attempt ${ch.attempt}`:''}</span>
       <h2>${esc(ch.strategy)}</h2>
       <p class="chal-meta">Shuru: ${esc(fmtDay(new Date(ch.startedAt),{day:'numeric',month:'short',year:'numeric'}))} · Stage ${idx+1} of 4 — <b>${esc(p.stage.title)}</b></p>
-      <div class="chal-count"><strong>${p.counted}</strong><span>/100 trades</span></div>
+      <div class="chal-count"><strong>${p.counted}</strong><span>/100 trades</span><span class="chal-streak" title="Lagatar clean trades (rules + risk + koi mistake nahi)">🔥 ${sk.cur} streak <small>best ${sk.best}</small></span></div>
       <div class="chal-bar big"><i style="width:${p.counted}%"></i></div>
       ${p.waiting?`<p class="chal-waiting">⏸ ${p.waiting} trade${p.waiting>1?'s':''} review ka intezaar kar rahe hain</p>`:''}
+      ${p.overCap.length?`<p class="chal-waiting">⏳ ${p.overCap.length} trade${p.overCap.length>1?'s':''} din ki limit (${ch.maxPerDay}) se upar the — gine nahi gaye</p>`:''}
+      <p class="chal-meta chal-limits">${Number(ch.risk)>0?`🎯 Risk ${chMoney(ch.risk)}/trade`:'🎯 Risk limit set nahi'} · ${Number(ch.maxPerDay)?`📅 Din mein max ${ch.maxPerDay}`:'📅 Din ki limit nahi'} <button type="button" class="comp-ghost" data-action="chal-open-settings">Badlo</button></p>
       <div class="chal-hero-actions"><button type="button" class="btn-cta" data-action="chal-log">➕ Challenge trade log karo</button><button type="button" class="comp-ghost" data-action="chal-open-restart">Strategy badlo / restart</button><button type="button" class="comp-ghost" data-action="chal-stop">Challenge band karo</button></div>
     </div>
-    <div class="chal-grid" role="img" aria-label="${p.counted} of 100 trades done">${CH_STAGES.map((x,si)=>`<div class="chal-block ${si===idx?'current':''}">${Array.from({length:25},(_,k)=>chCell(p.inside[x.from-1+k], x.from-1+k, p)).join('')}</div>`).join('')}</div>
+    <div class="chal-grid" role="img" aria-label="${p.counted} of 100 trades done">${CH_STAGES.map((x,si)=>`<div class="chal-block ${si===idx?'current':''}">${Array.from({length:25},(_,k)=>chCell(p.inside[x.from-1+k], x.from-1+k, p, ch)).join('')}</div>`).join('')}</div>
   </section>
-  <div class="chal-legend"><span><i class="clean"></i>Rules ke saath</span><span><i class="broke"></i>Rule toota</span><span><i class="mistake"></i>Mistake</span><span><i class="open"></i>Open</span><span><i class="waiting"></i>Review ka intezaar</span></div>
-  ${p.reviewDue?`<section class="chal-due"><div><b>🎯 ${p.reviewDue} trades poore — Stage ${CH_STAGES.findIndex(x=>x.n===p.reviewDue)+1} ka review karo</b><p>${p.reviewDue===100?'Aakhri review: pehle 25 vs aakhri 25 ka report banega aur challenge poora hoga.':'5 minute lagenge. Review ke bina aage ke trades nahi ginenge.'}</p></div><button type="button" class="btn-primary" data-action="chal-open-review" data-stage="${p.reviewDue}">Review karo</button></section>`:''}
+  <div class="chal-legend"><span><i class="clean"></i>Clean (rules + risk)</span><span><i class="broke"></i>Rule toota</span><span><i class="risk"></i>Risk toota</span><span><i class="mistake"></i>Mistake</span><span><i class="open"></i>Open</span><span><i class="waiting"></i>Review ka intezaar</span></div>
+  ${p.reviewDue?`<section class="chal-due"><div><b>🎯 ${p.reviewDue} trades poore — Stage ${CH_STAGES.findIndex(x=>x.n===p.reviewDue)+1} ka review karo</b><p>${p.reviewDue===100?'Aakhri review: pehle 25 vs aakhri 25 ka report banega aur challenge poora hoga.':'5 minute lagenge. Review ke bina aage ke trades nahi ginenge.'}</p></div><button type="button" class="btn-primary" data-action="chal-open-review" data-stage="${p.reviewDue}">Review karo</button></section>`
+    :ckN?`<section class="chal-due checkin"><div><b>⏱ ${ckN} trades — 30 second ka check-in</b><p>Trades ${ckN-9}–${ckN} mein kya repeat hua? Agle 10 ke liye ek chhota rule.</p></div><div class="chal-due-actions"><button type="button" class="comp-ghost dark" data-action="chal-hide-checkin" data-n="${ckN}">Baad mein</button><button type="button" class="btn-primary" data-action="chal-open-checkin" data-n="${ckN}">Check-in karo</button></div></section>`:''}
   ${ch.focus?`<section class="chal-focus-card"><span>🎯 Stage 3 focus</span><b>${esc(mistakeLabel(ch.focus.mistake))}</b><p>Mera rule: “${esc(ch.focus.rule)}”</p></section>`:''}
   ${p.outside.length?`<p class="chal-outside">↔️ Challenge shuru hone ke baad <b>${p.outside.length}</b> trade${p.outside.length>1?'s':''} doosri strategy ya bina setup ke liye gaye — yeh challenge mein nahi gine gaye.</p>`:''}
-  <section class="chal-track">${CH_STAGES.map((x,i)=>{ const done=!!rv[x.n], now=i===idx&&!done; return `<div class="chal-step ${done?'done':now?'now':''}"><span class="chal-step-dot">${done?'✓':i+1}</span><div><small>Trades ${x.from}–${x.n}</small><b>${esc(x.title)}</b><p>${esc(x.goal)}</p>${done?`<button type="button" class="pb-link" data-action="chal-view-review" data-stage="${x.n}">Review dekho</button>`:''}</div></div>`; }).join('')}</section>
+  <section class="chal-track">${CH_STAGES.map((x,i)=>{ const done=!!rv[x.n], now=i===idx&&!done; return `<div class="chal-step ${done?'done':now?'now':''}"><span class="chal-step-dot">${done?'✓':i+1}</span><div><small>Trades ${x.from}–${x.n}</small><b>${esc(x.title)}</b><p>${esc(x.goal)}</p>${fb[x.n]?`<p class="chal-step-fb">💬 Sir: “${esc(fb[x.n].text)}”</p>`:''}${done?`<span class="chal-step-links"><button type="button" class="pb-link" data-action="chal-view-review" data-stage="${x.n}">Review dekho</button><button type="button" class="pb-link" data-action="chal-cert" data-stage="${x.n}">🎖️ Certificate</button></span>`:''}</div></div>`; }).join('')}</section>
   <div class="chal-stats-grid">
     <section class="card"><h3 class="section-title">Is stage ke numbers <small>(trades ${p.stage.from}–${Math.max(p.stage.from,Math.min(p.stage.n,p.counted))})</small></h3><div class="chal-stats">${statRow(cur)}</div></section>
     <section class="card"><h3 class="section-title">Ab tak ke saare challenge trades <small>(${p.counted})</small></h3><div class="chal-stats">${statRow(all)}</div></section>
+  </div>
+  <div class="chal-stats-grid">
+    <section class="card"><h3 class="section-title">📈 R ka safar</h3>${chRCurve(p.inside.slice(0,p.counted))}</section>
+    <section class="card chal-missed"><h3 class="section-title">😶 Chhoote setups & impulse trades</h3>
+      <p class="card-sub">Dar se setup chhodna bhi utni hi badi galti hai jitni FOMO. Ek tap mein note karo.</p>
+      <div class="chal-missed-btns"><button type="button" class="btn-secondary btn-small" data-action="chal-missed" data-kind="skipped">😶 Setup aaya, trade nahi liya <b>${skipped}</b></button><button type="button" class="btn-secondary btn-small" data-action="chal-missed" data-kind="impulse">⚡ Bina setup trade le liya <b>${impulse}</b></button></div>
+      ${missed.length?`<ul class="chal-missed-list">${missed.slice(-4).reverse().map(m=>`<li><span>${m.kind==='skipped'?'😶':'⚡'}</span><small>${esc(timeAgo(m.at))}</small>${m.note?` — ${esc(m.note)}`:''}</li>`).join('')}</ul>`:''}
+    </section>
   </div>`;
 }
 function renderChalHistory(){
   const h=chState().history; if(!h.length) return '';
   const label={completed:'✅ Poora',restarted:'↺ Restart',stopped:'⏹ Band'};
-  return `<section class="card chal-history"><h3 class="section-title">Pichhle challenges</h3><ul>${h.map(c=>`<li><b>${esc(c.strategy)}</b><span class="chal-tag ${c.status}">${label[c.status]||c.status}</span><small>${esc(fmtDay(new Date(c.startedAt),{day:'numeric',month:'short'}))}${c.endedAt?' – '+esc(fmtDay(new Date(c.endedAt),{day:'numeric',month:'short'})):''} · ${Object.keys(c.reviews||{}).length}/4 reviews${c.endReason?` · “${esc(c.endReason)}”`:''}</small>${c.status==='completed'?`<button type="button" class="pb-link" data-action="chal-view-report" data-id="${esc(c.id)}">Report dekho</button>`:''}</li>`).join('')}</ul></section>`;
+  return `<section class="card chal-history"><h3 class="section-title">Pichhle challenges</h3><ul>${h.map(c=>`<li><b>${esc(c.strategy)}</b><span class="chal-tag ${c.status}">${label[c.status]||c.status}</span><small>${esc(fmtDay(new Date(c.startedAt),{day:'numeric',month:'short'}))}${c.endedAt?' – '+esc(fmtDay(new Date(c.endedAt),{day:'numeric',month:'short'})):''} · ${Object.keys(c.reviews||{}).length}/4 reviews${c.endReason?` · “${esc(c.endReason)}”`:''}</small>${c.status==='completed'?`<button type="button" class="pb-link" data-action="chal-view-report" data-id="${esc(c.id)}">Report dekho</button><button type="button" class="pb-link" data-action="chal-cert" data-stage="100" data-id="${esc(c.id)}">🎖️ Certificate</button>`:''}</li>`).join('')}</ul></section>`;
+}
+/* an honest one-line verdict for the 100-trade report */
+function chVerdict(o){
+  const e=Number(o.expectancy)||0, r=Number(o.ruleRate)||0;
+  if(e>0.2 && r>=70) return ['good','✅ Is strategy mein edge dikha', `Rules ke saath ${chR(e)} har trade par. Ab risk badhane se pehle agle 100 trades isi discipline se karo — 100 trades bhi chhota sample hai.`];
+  if(e>0 && r<70) return ['warn','⚠️ Profit hai, par discipline kam', `Sirf ${r}% trades rules ke saath the — yeh profit kitna kismat hai, kehna mushkil. Pehle rules-follow 80%+ karo.`];
+  if(e<=0 && r>=70) return ['warn','🔍 Rules follow hue, par edge nahi dikha', 'Execution theek tha, phir bhi result negative. Strategy refine karo ya backtest karo — risk mat badhao.'];
+  return ['bad','🛠️ Pehle execution theek karo', `Rules ${r}% hi follow hue aur result negative hai. Agle challenge mein sirf ek kaam: har trade rules ke saath.`];
 }
 function renderChalReport(c){
   const f=c.reviews?.[100]?.stats||{}, a=f.first||{}, b=f.last||{}, o=f.all||{};
-  const row=(l,x,y,fmt,better)=>{ const d=(y??0)-(x??0), good=better==='up'?d>0:d<0; return `<tr><td>${l}</td><td class="num">${x===undefined?'—':fmt(x)}</td><td class="num">${y===undefined?'—':fmt(y)}</td><td class="num ${d===0?'':good?'positive':'negative'}">${x===undefined||y===undefined?'':d===0?'Same':good?'✓ Behtar':'✗ Kharab'}</td></tr>`; };
-  const pct=v=>v+'%', r=v=>chR(v), n=v=>String(v);
+  const row=(l,x,y,fmt,better)=>{ const d=(y??0)-(x??0), good=better==='up'?d>0:d<0; return `<tr><td>${l}</td><td class="num">${x===undefined||x===null?'—':fmt(x)}</td><td class="num">${y===undefined||y===null?'—':fmt(y)}</td><td class="num ${d===0?'':good?'positive':'negative'}">${x===undefined||y===undefined||x===null||y===null?'':d===0?'Same':good?'✓ Behtar':'✗ Kharab'}</td></tr>`; };
+  const pct=v=>v+'%', r=v=>chR(v), n=v=>String(v), v=chVerdict(o);
   return `<section class="chal-report">
     <div class="chal-report-head"><span class="chal-kicker">Challenge poora 🎉</span><h2>100 trades · ${esc(c.strategy)}</h2><p>${esc(fmtDay(new Date(c.startedAt),{day:'numeric',month:'short'}))} – ${esc(fmtDay(new Date(c.endedAt||c.startedAt),{day:'numeric',month:'short',year:'numeric'}))}</p></div>
+    <div class="chal-verdict ${v[0]}"><b>${v[1]}</b><p>${esc(v[2])}</p></div>
     <div class="chal-report-grid">
       <div class="comp-board-wrap"><table class="comp-board"><thead><tr><th>Pehle 25 vs aakhri 25</th><th class="num">1–25</th><th class="num">76–100</th><th class="num">Badlav</th></tr></thead><tbody>
-        ${row('Rules follow',a.ruleRate,b.ruleRate,pct,'up')}${row('Mistakes',a.mistakes,b.mistakes,n,'down')}${f.focusMistake?row('Focus galti ('+esc(mistakeLabel(f.focusMistake))+')',a.focusCount,b.focusCount,n,'down'):''}${row('Win rate',a.winRate,b.winRate,pct,'up')}${row('Avg R',a.avgR,b.avgR,r,'up')}${row('Expectancy',a.expectancy,b.expectancy,r,'up')}
+        ${row('Rules follow',a.ruleRate,b.ruleRate,pct,'up')}${row('Clean trades',a.cleanRate,b.cleanRate,pct,'up')}${row('Mistakes',a.mistakes,b.mistakes,n,'down')}${a.riskBreaks!==undefined&&a.riskBreaks!==null?row('Risk toota',a.riskBreaks,b.riskBreaks,n,'down'):''}${f.focusMistake?row('Focus galti ('+esc(mistakeLabel(f.focusMistake))+')',a.focusCount,b.focusCount,n,'down'):''}${row('Win rate',a.winRate,b.winRate,pct,'up')}${row('Avg R',a.avgR,b.avgR,r,'up')}${row('Expectancy',a.expectancy,b.expectancy,r,'up')}
       </tbody></table></div>
-      <div class="chal-stats">${[['Win rate',(o.winRate??'—')+'%'],['Avg win',o.avgWinR!==undefined?chR(o.avgWinR):'—'],['Avg loss',o.avgLossR!==undefined?chR(o.avgLossR):'—'],['Expectancy',o.expectancy!==undefined?chR(o.expectancy):'—'],['Max drawdown',o.maxDD!==undefined?chR(o.maxDD):'—'],['Rules follow',(o.ruleRate??'—')+'%']].map(([l,v])=>`<div><span>${l}</span><strong>${v}</strong></div>`).join('')}</div>
+      <div class="chal-stats">${[['Win rate',(o.winRate??'—')+'%'],['Avg win',o.avgWinR!==undefined?chR(o.avgWinR):'—'],['Avg loss',o.avgLossR!==undefined?chR(o.avgLossR):'—'],['Expectancy',o.expectancy!==undefined?chR(o.expectancy):'—'],['Max drawdown',o.maxDD!==undefined?chR(o.maxDD):'—'],['Rules follow',(o.ruleRate??'—')+'%'],...(o.bestStreak!==undefined?[['Best streak',`🔥 ${o.bestStreak}`]]:[]),...(o.skipped!==undefined?[['Chhoote setups',o.skipped],['Impulse trades',o.impulse]]:[])].map(([l,v])=>`<div><span>${l}</span><strong>${v}</strong></div>`).join('')}</div>
     </div>
     ${c.reviews?.[100]?.answers?.q2?`<p class="chal-next">Agle 100 trades ka plan: “${esc(c.reviews[100].answers.q2)}”</p>`:''}
   </section>`;
@@ -3285,21 +3390,29 @@ const CH_Q={
   100:[['q1','100 trades ki sabse badi seekh kya rahi?',''],['q2','Agle 100 trades mein kya improve karoge?','']]
 };
 function chReviewStats(ch, stage){
-  const p=chProgress(ch), seg=p.inside.slice(stage-25, stage), st=chStats(seg);
+  const p=chProgress(ch), seg=p.inside.slice(stage-25, stage), st=chStats(seg,ch);
   if(stage===100){
     const fm=ch.focus?.mistake, cnt=list=>fm?list.filter(t=>t.mistake===fm).length:undefined;
-    const first=chStats(p.inside.slice(0,25)), last=chStats(p.inside.slice(75,100)), all=chStats(p.inside.slice(0,100));
-    const pick=x=>({ruleRate:x.ruleRate,mistakes:x.mistakes,winRate:x.winRate,avgR:x.avgR,expectancy:x.expectancy});
-    return { first:{...pick(first),focusCount:cnt(p.inside.slice(0,25))}, last:{...pick(last),focusCount:cnt(p.inside.slice(75,100))}, all:{winRate:all.winRate,avgWinR:all.avgWinR,avgLossR:all.avgLossR,expectancy:all.expectancy,maxDD:all.maxDD,ruleRate:all.ruleRate,netR:all.netR}, focusMistake:fm||null };
+    const first=chStats(p.inside.slice(0,25),ch), last=chStats(p.inside.slice(75,100),ch), all=chStats(p.inside.slice(0,100),ch);
+    const pick=x=>({ruleRate:x.ruleRate,cleanRate:x.cleanRate,mistakes:x.mistakes,riskBreaks:x.riskBreaks,winRate:x.winRate,avgR:x.avgR,expectancy:x.expectancy});
+    const missed=Array.isArray(ch.extras?.missed)?ch.extras.missed:[];
+    return { first:{...pick(first),focusCount:cnt(p.inside.slice(0,25))}, last:{...pick(last),focusCount:cnt(p.inside.slice(75,100))},
+      all:{winRate:all.winRate,avgWinR:all.avgWinR,avgLossR:all.avgLossR,expectancy:all.expectancy,maxDD:all.maxDD,ruleRate:all.ruleRate,netR:all.netR,bestStreak:chStreaks(p.inside.slice(0,100),ch).best,skipped:missed.filter(m=>m.kind==='skipped').length,impulse:missed.filter(m=>m.kind==='impulse').length},
+      focusMistake:fm||null };
   }
-  const out={ n:st.n, ruleRate:st.ruleRate, winRate:st.winRate, avgR:st.avgR, expectancy:st.expectancy, slRate:st.slRate, mistakes:st.mistakes, topMistake:st.topMistake, topEmotion:st.topEmotion };
+  const out={ n:st.n, ruleRate:st.ruleRate, cleanRate:st.cleanRate, winRate:st.winRate, avgR:st.avgR, expectancy:st.expectancy, slRate:st.slRate, riskBreaks:st.riskBreaks, mistakes:st.mistakes, topMistake:st.topMistake, topEmotion:st.topEmotion, topBrokenRule:st.topBrokenRule };
   if(stage===75 && ch.focus){ const before=p.inside.slice(0,50).filter(t=>t.mistake===ch.focus.mistake).length, now=seg.filter(t=>t.mistake===ch.focus.mistake).length; out.focusBefore=before; out.focusNow=now; }
   return out;
+}
+function chStatBoxes(st){
+  const box=(l,v)=>`<div><span>${l}</span><strong>${v}</strong></div>`;
+  return `<div class="chal-stats">${box('Rules follow',st.ruleRate+'%')}${st.cleanRate!==undefined?box('Clean trades',st.cleanRate+'%'):''}${box('Win rate',st.winRate+'%')}${box('Avg R',chR(st.avgR||0))}${st.riskBreaks!==null&&st.riskBreaks!==undefined?box('Risk toota',st.riskBreaks):box('SL lagaya',st.slRate+'%')}${box('Mistakes',st.mistakes)}${box('Top galti',st.topMistake?esc(mistakeLabel(st.topMistake.id))+' ×'+st.topMistake.count:'Koi nahi')}${st.topBrokenRule?box('Sabse zyada toota rule',esc(st.topBrokenRule.text)+' ×'+st.topBrokenRule.count):''}${st.topEmotion?box('Sabse common emotion',esc(st.topEmotion.id)+' ×'+st.topEmotion.count):''}${st.focusBefore!==undefined?box('Focus galti',`${st.focusBefore} → ${st.focusNow}`):''}</div>`;
 }
 function renderChalModal(){
   const s=chState(), m=s.modal; if(!m) return '';
   const close=`<button type="button" class="modal-x" data-action="chal-close" aria-label="Close">×</button>`;
   const shell=(title,sub,body)=>`<div class="edit-overlay sm-overlay" data-action="chal-backdrop"><div class="edit-modal sm-modal comp-submit chal-modal" role="dialog" aria-modal="true" aria-labelledby="chal-m-title"><div class="edit-modal-head"><div><h2 class="section-title" id="chal-m-title">${title}</h2>${sub?`<p class="card-sub">${sub}</p>`:''}</div>${close}</div>${body}<p class="sm-error" role="status">${m.error?esc(m.error):''}</p></div></div>`;
+  const actions=(label, act)=>`<div class="sm-form-actions"><button type="button" class="btn-secondary" data-action="chal-close">Cancel</button><button type="button" class="btn-primary" data-action="${act}" ${m.busy?'disabled':''}>${m.busy?'Save ho raha hai…':label}</button></div>`;
   if(m.type==='restart'){
     const choices=chStrategyChoices();
     return shell('Strategy badlo / restart', 'Restart karne par counter <b>0 se</b> shuru hoga. Purana attempt history mein rahega aur Sir ko dikhega.', `
@@ -3307,20 +3420,32 @@ function renderChalModal(){
       <label class="adm-field"><span>Restart kyun kar rahe ho? <small>(imaandaari se — yeh bhi ek data point hai)</small></span><textarea id="chal-r-reason" rows="2" maxlength="300" placeholder="e.g. Is strategy ka setup mere trading time mein nahi aata">${esc(m.reason||'')}</textarea></label>
       <div class="sm-form-actions"><button type="button" class="btn-secondary" data-action="chal-close">Cancel</button><button type="button" class="btn-danger" data-action="chal-restart" ${m.busy?'disabled':''}>↺ Restart karo</button></div>`);
   }
+  if(m.type==='settings'){ const ch=s.active; if(!ch) return '';
+    return shell('Risk aur din ki limit', 'Risk limit se upar (25% chhoot ke saath) ya bina SL wala trade “risk toota” ginega. Din ki limit se upar ke trades challenge mein nahi ginte.', `
+      <div class="chal-start-row"><label class="adm-field"><span>Har trade ka risk (₹) <small>0 = koi limit nahi</small></span><input id="chal-s-risk" type="number" min="0" step="any" inputmode="decimal" value="${Number(ch.risk)||''}"></label><label class="adm-field"><span>Ek din mein max</span>${chCapSelect('chal-s-cap',Number(ch.maxPerDay)||0)}</label></div>
+      <p class="comp-note">Badalne par pichhle trades bhi isi hisaab se dobara gine jayenge.</p>${actions('💾 Save','chal-save-settings')}`); }
+  if(m.type==='missed'){
+    return shell(m.kind==='skipped'?'😶 Setup aaya, trade nahi liya':'⚡ Bina setup trade le liya', m.kind==='skipped'?'Kyun nahi liya? (dar, doubt, screen par nahi the…)':'Kya hua tha? (FOMO, bore ho rahe the, loss recover karna tha…)', `
+      <label class="adm-field"><span>Ek line <small>(optional)</small></span><input id="chal-m-note" maxlength="200" placeholder="${m.kind==='skipped'?'e.g. 2 loss ke baad dar lag raha tha':'e.g. Fast move dekh kar FOMO'}"></label>${actions('Note karo','chal-save-missed')}`);
+  }
+  if(m.type==='checkin'){ const ch=s.active; if(!ch) return ''; const p=chProgress(ch), seg=p.inside.slice(m.n-10,m.n), st=chStats(seg,ch), done=ch.extras?.checkins?.[m.n];
+    return shell(`⏱ Check-in — trades ${m.n-9}–${m.n}`, '30 second. Bas dekho kya repeat ho raha hai.', `${chStatBoxes(st)}
+      ${done?`<p class="chal-ans">Galti: ${esc(mistakeLabel(done.mistake)||'—')} · Rule: “${esc(done.rule||'—')}”</p>`:`<label class="adm-field"><span>In 10 mein sabse common galti</span><select id="chal-c-mistake">${MISTAKE_OPTIONS.map(x=>`<option value="${x[0]}" ${(st.topMistake?.id||'none')===x[0]?'selected':''}>${esc(x[1])}</option>`).join('')}</select></label>
+      <label class="adm-field"><span>Agle 10 trades ke liye ek chhota rule</span><input id="chal-c-rule" maxlength="200" placeholder="e.g. Pehle 15 minute koi trade nahi"></label>${actions('✅ Check-in save karo','chal-save-checkin')}`}`); }
+  if(m.type==='cert') return shell('🎖️ Certificate', 'Download karo ya WhatsApp / Instagram par share karo.', `<div class="chal-cert-wrap">${m.img?`<img src="${m.img}" alt="Challenge certificate" class="chal-cert-img">`:'<p class="card-sub">Ban raha hai…</p>'}</div>
+      <div class="sm-form-actions"><button type="button" class="btn-secondary" data-action="chal-close">Band karo</button>${m.img?`<a class="btn-secondary" href="${m.img}" download="100-trades-${m.stage}.png">⬇️ Download</a>${navigator.share?'<button type="button" class="btn-primary" data-action="chal-cert-share">📤 Share</button>':''}`:''}</div>`);
   if(m.type==='report'){ const c=s.history.find(x=>x.id===m.id); return c?shell('Challenge report','',renderChalReport(c)):''; }
   const ch=m.view ? (m.challenge||s.active) : s.active; if(!ch) return '';
   const stage=m.stage, info=CH_STAGES.find(x=>x.n===stage), stored=ch.reviews?.[stage];
   const st=stored?stored.stats:chReviewStats(ch, stage), ans=stored?stored.answers:(m.answers||{});
-  const box=(l,v)=>`<div><span>${l}</span><strong>${v}</strong></div>`;
-  const statsHtml = stage===100
-    ? renderChalReport({ ...ch, reviews:{ ...(ch.reviews||{}), 100:{ stats:st, answers:ans } }, endedAt:new Date().toISOString() })
-    : `<div class="chal-stats">${box('Rules follow',st.ruleRate+'%')}${box('Win rate',st.winRate+'%')}${box('Avg R',chR(st.avgR||0))}${box('SL lagaya',st.slRate+'%')}${box('Mistakes',st.mistakes)}${box('Top galti',st.topMistake?esc(mistakeLabel(st.topMistake.id))+' ×'+st.topMistake.count:'Koi nahi')}${st.topEmotion?box('Sabse common emotion',esc(st.topEmotion.id)+' ×'+st.topEmotion.count):''}${st.focusBefore!==undefined?box('Focus galti',`${st.focusBefore} → ${st.focusNow}`):''}</div>`;
+  const statsHtml = stage===100 ? renderChalReport({ ...ch, reviews:{ ...(ch.reviews||{}), 100:{ stats:st, answers:ans } }, endedAt:new Date().toISOString() }) : chStatBoxes(st);
   const q=CH_Q[stage].map(([k,l,ph])=>`<label class="adm-field"><span>${esc(l)}</span>${stored?`<p class="chal-ans">${esc(ans[k]||'—')}</p>`:`<textarea data-chal-q="${k}" rows="2" maxlength="1000" placeholder="${esc(ph)}">${esc(ans[k]||'')}</textarea>`}</label>`).join('');
   const focus = stage===50 ? (stored ? (ch.focus?`<div class="chal-focus-card"><span>🎯 Chuni hui weakness</span><b>${esc(mistakeLabel(ch.focus.mistake))}</b><p>Rule: “${esc(ch.focus.rule)}”</p></div>`:'')
     : `<div class="chal-focus-pick"><label class="adm-field"><span>Agle 25 trades (51–75) mein <b>ek</b> weakness par kaam karoge — kaunsi?</span><select id="chal-focus-mistake">${MISTAKE_OPTIONS.filter(x=>x[0]!=='none').map(x=>`<option value="${x[0]}" ${(m.focusMistake||st.topMistake?.id)===x[0]?'selected':''}>${esc(x[1])}</option>`).join('')}</select></label>
       <label class="adm-field"><span>Uske liye aapka naya rule</span><input id="chal-focus-rule" maxlength="200" value="${esc(m.focusRule||'')}" placeholder="e.g. 5-min candle close ke bina entry nahi"></label><p class="comp-note">Yeh rule Log Trade mein har challenge trade par yaad dilaya jayega.</p></div>`) : '';
+  const fb=ch.feedback?.[stage];
   return shell(`${stage===100?'🏁 Final review':`Stage ${CH_STAGES.indexOf(info)+1} review`} — trades ${stage-24}–${stage}`, esc(info.title), `
-    ${statsHtml}${focus}${q}
+    ${statsHtml}${focus}${q}${fb?`<div class="chal-fb"><span>💬 Sir ka feedback</span><p>${esc(fb.text)}</p></div>`:''}
     ${stored?`<p class="comp-note">Review kiya: ${esc(fmtDay(new Date(stored.at),{day:'numeric',month:'short',year:'numeric'}))}</p>`:`<div class="sm-form-actions"><button type="button" class="btn-secondary" data-action="chal-close">Baad mein</button><button type="button" class="btn-primary" data-action="chal-submit-review" ${m.busy?'disabled':''}>${m.busy?'Save ho raha hai…':stage===100?'🏁 Challenge poora karo':'✅ Review save karo'}</button></div>`}`);
 }
 async function chSubmitReview(){
@@ -3332,10 +3457,53 @@ async function chSubmitReview(){
   if(m.stage===50){ m.focusMistake=$('#chal-focus-mistake')?.value; m.focusRule=($('#chal-focus-rule')?.value||'').trim(); body.focus={ mistake:m.focusMistake, rule:m.focusRule }; if(m.focusRule.length<5){ m.error='Apna naya rule likho.'; renderTabOnly(); return; } }
   m.busy=true; m.error=''; renderTabOnly();
   try{ const r=await api('/api/challenge','POST',body); s.modal=null; await loadChallenge(true);
-    if(r.completed){ STATE.activeTab='challenge'; renderTabOnly(); compToast('<strong>🎉 100 Trades Challenge poora!</strong><p>Aapka report Challenge tab mein hai. Ab agla challenge shuru kar sakte ho.</p>', 9000); }
+    if(r.completed){ STATE.activeTab='challenge'; renderTabOnly(); compToast('<strong>🎉 100 Trades Challenge poora!</strong><p>Aapka report aur certificate Challenge tab mein hai.</p>', 9000); }
+    else compToast(`<strong>✅ Review save ho gaya</strong><p>Apna stage certificate share karo — doosre traders ko bhi motivation milega.</p><button type="button" class="btn-primary btn-small" data-action="chal-cert" data-stage="${m.stage}">🎖️ Certificate</button>`, 9000);
   }catch(e){ m.busy=false; m.error=e.message||'Save nahi hua.'; renderTabOnly(); }
 }
-/* ---------- admin: everyone's progress ---------- */
+async function chPost(body, okMsg){
+  const s=chState(), m=s.modal; if(m){ if(m.busy) return; m.busy=true; m.error=''; renderTabOnly(); }
+  try{ const r=await api('/api/challenge','POST',body); s.active=r.active||s.active; s.modal=null; renderTabOnly(); if(okMsg) undoToastLite(okMsg); }
+  catch(e){ if(m){ m.busy=false; m.error=e.message||'Save nahi hua.'; renderTabOnly(); } else alert(e.message); }
+}
+function undoToastLite(text){ $('#tc-undo')?.remove(); const el=document.createElement('div'); el.id='tc-undo'; el.className='tc-undo'; el.setAttribute('role','status'); el.innerHTML=`<span>${esc(text)}</span>`; document.body.appendChild(el); setTimeout(()=>el.remove(),3500); }
+/* ---------- certificate (drawn on a canvas, shared as an image) ---------- */
+async function chMakeCertificate(stage, challenge){
+  const ch=challenge||chState().active; if(!ch) return null;
+  try{ await document.fonts?.load('800 64px "Bricolage Grotesque"'); }catch(_){}
+  const done=stage===100, list=challenge&&challenge.status==='completed' ? null : chProgress(ch).inside.slice(0,stage);
+  const st=list ? chStats(list,ch) : (ch.reviews?.[100]?.stats?.all||{});
+  const W=1080, H=1350, c=document.createElement('canvas'); c.width=W; c.height=H; const x=c.getContext('2d');
+  const disp='"Bricolage Grotesque", "Segoe UI", sans-serif', body='"IBM Plex Sans", "Segoe UI", sans-serif';
+  x.fillStyle='#13233F'; x.fillRect(0,0,W,H);
+  const g=x.createRadialGradient(W,0,0,W,0,900); g.addColorStop(0,'rgba(233,161,0,.35)'); g.addColorStop(1,'rgba(233,161,0,0)'); x.fillStyle=g; x.fillRect(0,0,W,H);
+  x.strokeStyle='rgba(233,161,0,.55)'; x.lineWidth=4; x.strokeRect(40,40,W-80,H-80);
+  x.fillStyle='#E9A100'; x.font=`600 30px ${body}`; x.fillText('100 TRADES CHALLENGE', 96, 150);
+  x.fillStyle='#FFFFFF'; x.font=`800 104px ${disp}`; x.fillText(done?'Challenge':`Stage ${CH_STAGES.findIndex(s=>s.n===stage)+1}`, 96, 280); x.fillStyle='#E9A100'; x.fillText('Complete', 96, 390);
+  x.fillStyle='#C9D6E8'; x.font=`400 36px ${body}`; x.fillText(`${String(STATE.user?.name||'Trader').slice(0,28)} ne ${stage} trades`, 96, 470); x.fillText(`poore journal kiye — ${String(ch.strategy).slice(0,26)}`, 96, 520);
+  // 100 squares, filled up to this stage
+  const s0=96, top=590, sz=34, gap=8;
+  for(let i=0;i<100;i++){ const col=i%10, row=Math.floor(i/10); x.fillStyle = i<stage ? (i<25?'#2D5287':i<50?'#4A6FA0':i<75?'#9DB2CF':'#E9A100') : 'rgba(255,255,255,.08)'; x.beginPath(); x.roundRect?.(s0+col*(sz+gap), top+row*(sz+gap), sz, sz, 6); if(!x.roundRect) x.rect(s0+col*(sz+gap), top+row*(sz+gap), sz, sz); x.fill(); }
+  const stats=[['Rules follow',(st.ruleRate??'—')+'%'],['Win rate',(st.winRate??'—')+'%'],['Expectancy',st.expectancy!==undefined?chR(st.expectancy):'—']];
+  stats.forEach(([l,v],i)=>{ const sx=560, sy=620+i*130; x.fillStyle='#9FB0C8'; x.font=`600 26px ${body}`; x.fillText(l.toUpperCase(), sx, sy); x.fillStyle='#FFFFFF'; x.font=`800 64px ${disp}`; x.fillText(String(v), sx, sy+66); });
+  x.fillStyle='#FFFFFF'; x.font=`700 38px ${disp}`; x.fillText('Better Data. Better Decisions.', 96, 1110); x.fillStyle='#E9A100'; x.fillText('One Better Trader.', 96, 1160);
+  x.fillStyle='#9FB0C8'; x.font=`400 28px ${body}`; x.fillText(`Trading Gupshup · TG Journal · ${fmtDay(new Date(),{day:'numeric',month:'short',year:'numeric'})}`, 96, 1250);
+  return c.toDataURL('image/png');
+}
+async function chOpenCert(stage, id){
+  const s=chState(), ch=id ? s.history.find(x=>x.id===id) : s.active; if(!ch) return;
+  $('#comp-toast')?.remove();
+  s.modal={ type:'cert', stage, img:null }; if(STATE.activeTab!=='challenge'){ STATE.activeTab='challenge'; render(); } else renderTabOnly();
+  const img=await chMakeCertificate(stage, id?ch:null); if(s.modal?.type==='cert'){ s.modal.img=img; renderTabOnly(); }
+}
+async function chShareCert(){
+  const m=chState().modal; if(!m?.img) return;
+  try{ const blob=await (await fetch(m.img)).blob(), file=new File([blob],`100-trades-${m.stage}.png`,{type:'image/png'});
+    if(navigator.canShare?.({files:[file]})) await navigator.share({ files:[file], title:'100 Trades Challenge', text:'Maine 100 Trades Challenge ka stage poora kiya — TG Journal' });
+    else await navigator.share({ title:'100 Trades Challenge', text:'Maine 100 Trades Challenge ka stage poora kiya — TG Journal', url:location.origin });
+  }catch(_){}
+}
+/* ---------- admin: everyone's progress + feedback ---------- */
 async function loadChalAdmin(){
   const s=chState(); s.admin={ loading:true, traders:[] };
   try{ s.admin={ loaded:true, traders:(await api('/api/challenge/all')).traders||[] }; }catch(e){ s.admin={ loaded:true, error:e.message, traders:[] }; }
@@ -3346,27 +3514,40 @@ function renderChalAdmin(){
   if(!s.admin){ setTimeout(()=>loadChalAdmin(),0); return ''; }
   if(s.admin.loading) return `<section class="card chal-admin"><p class="card-sub">Traders ke challenges load ho rahe hain…</p></section>`;
   const T=s.admin.traders, act=T.filter(t=>t.current?.status==='active');
+  const reviews=c=>{ const keys=[...Object.keys(c.reviews||{}), ...Object.keys(c.extras?.checkins||{}).map(n=>'c'+n)].sort((a,b)=>Number(String(a).replace('c',''))-Number(String(b).replace('c','')));
+    return keys.length?`<details class="chal-adm-rv"><summary>Reviews (${keys.length})${Object.keys(c.feedback||{}).length?' · 💬':''}</summary>${keys.map(k=>{ const isC=String(k).startsWith('c'), v=isC?c.extras.checkins[k.slice(1)]:c.reviews[k], fb=c.feedback?.[k];
+      return `<div class="chal-adm-item"><p><b>${isC?`⏱ ${k.slice(1)}`:`Stage ${k}`}:</b> ${isC?`${esc(mistakeLabel(v.mistake))} · “${esc(v.rule||'')}”`:Object.values(v.answers||{}).map(esc).join(' · ')}</p>
+        <div class="chal-adm-fb"><textarea data-chal-fb="${esc(c.id)}:${k}" rows="2" maxlength="600" placeholder="💬 Feedback likho — trader ko notification jayega">${esc(fb?.text||'')}</textarea><button type="button" class="btn-secondary btn-small" data-action="chal-send-fb" data-id="${esc(c.id)}" data-stage="${k}">${fb?'Update':'Bhejo'}</button></div></div>`; }).join('')}</details>`:''; };
   return `<section class="card chal-admin" id="chal-admin"><div class="adm-quote-head"><h3 class="section-title">💯 100 Trades Challenge — sabki progress</h3><button type="button" class="btn-secondary btn-small" data-action="chal-admin-reload">↻ Refresh</button></div>
     ${s.admin.error?`<p class="sm-error">${esc(s.admin.error)}</p>`:''}
-    ${T.length?`<p class="card-sub">${act.length} traders challenge mein · ${T.filter(t=>t.completed).length} ne poora kiya · ${T.reduce((a,t)=>a+t.restarts,0)} restarts</p>
-    <div class="comp-board-wrap"><table class="comp-board chal-admin-table"><thead><tr><th>Trader</th><th>Strategy</th><th>Progress</th><th>Stage / review</th><th class="num">Bahar ke trades</th><th class="num">Restarts</th><th>Last trade</th></tr></thead><tbody>${T.map(t=>{ const c=t.current; if(!c) return `<tr><td><b>${esc(t.name)}</b><small>${esc(t.email)}</small></td><td colspan="6"><small>${t.stopped?'Challenge band kar diya':'Koi challenge nahi'}</small></td></tr>`;
-      const rv=Object.keys(c.reviews||{}).length;
-      return `<tr><td><b>${esc(t.name)}</b><small>${esc(t.email)}</small></td><td>${esc(c.strategy)}${c.focus?`<small>🎯 ${esc(c.focus.rule)}</small>`:''}</td><td><div class="score-cell"><span class="scorebar ${c.counted>=75?'great':c.counted>=25?'':'ok'}" style="--v:${c.counted}%"><i></i></span><b>${c.counted}</b></div></td><td>${c.status==='completed'?'<span class="chal-tag completed">✅ Poora</span>':c.reviewDue?`<span class="chal-tag due">${c.reviewDue} ka review baaki</span>`:`Stage ${Math.min(4,Math.floor(Math.min(c.counted,99)/25)+1)} · ${rv}/4 reviews`}${rv?`<details class="chal-adm-rv"><summary>Reviews</summary>${Object.entries(c.reviews).map(([k,v])=>`<p><b>${k}:</b> ${Object.values(v.answers||{}).map(esc).join(' · ')}</p>`).join('')}</details>`:''}</td><td class="num ${c.outside>c.counted/2?'negative':''}">${c.outside}</td><td class="num">${t.restarts}</td><td><small>${c.lastTradeAt?esc(timeAgo(c.lastTradeAt)):'—'}</small></td></tr>`; }).join('')}</tbody></table></div>`
+    ${T.length?`<p class="card-sub">${act.length} traders challenge mein · ${T.filter(t=>t.completed).length} ne poora kiya · ${T.reduce((a,t)=>a+t.restarts,0)} restarts · review par feedback dene se trader ko notification jaata hai</p>
+    <div class="comp-board-wrap"><table class="comp-board chal-admin-table"><thead><tr><th>Trader</th><th>Strategy</th><th>Progress</th><th>Stage / reviews</th><th class="num">Bahar ke</th><th class="num">Limit se upar</th><th class="num">Restarts</th><th>Last trade</th></tr></thead><tbody>${T.map(t=>{ const c=t.current; if(!c) return `<tr><td><b>${esc(t.name)}</b><small>${esc(t.email)}</small></td><td colspan="7"><small>${t.stopped?'Challenge band kar diya':'Koi challenge nahi'}</small></td></tr>`;
+      const rv=Object.keys(c.reviews||{}).length, missed=Array.isArray(c.extras?.missed)?c.extras.missed:[];
+      return `<tr><td><b>${esc(t.name)}</b><small>${esc(t.email)}</small></td><td>${esc(c.strategy)}${Number(c.risk)>0?`<small>Risk ${chMoney(c.risk)} · max ${c.maxPerDay||'∞'}/din</small>`:''}${c.focus?`<small>🎯 ${esc(c.focus.rule)}</small>`:''}${missed.length?`<small>😶 ${missed.filter(m=>m.kind==='skipped').length} chhoote · ⚡ ${missed.filter(m=>m.kind==='impulse').length} impulse</small>`:''}</td><td><div class="score-cell"><span class="scorebar ${c.counted>=75?'great':c.counted>=25?'':'ok'}" style="--v:${c.counted}%"><i></i></span><b>${c.counted}</b></div></td><td>${c.status==='completed'?'<span class="chal-tag completed">✅ Poora</span>':c.reviewDue?`<span class="chal-tag due">${c.reviewDue} ka review baaki</span>`:`Stage ${Math.min(4,Math.floor(Math.min(c.counted,99)/25)+1)} · ${rv}/4 reviews`}${reviews(c)}</td><td class="num ${c.outside>c.counted/2?'negative':''}">${c.outside}</td><td class="num">${c.overCap||0}</td><td class="num">${t.restarts}</td><td><small>${c.lastTradeAt?esc(timeAgo(c.lastTradeAt)):'—'}</small></td></tr>`; }).join('')}</tbody></table></div>`
     :'<p class="card-sub">Abhi kisi trader ne challenge shuru nahi kiya.</p>'}
   </section>`;
 }
 function handleChalClick(action, btn, e){
   if(!action || !action.startsWith('chal-')) return false;
   const s=chState();
-  if(action==='chal-start'){ const strategy=$('#chal-start-strategy')?.value; if(!strategy) return true;
-    askConfirm({ title:`“${strategy}” par challenge shuru karein?`, body:'100 trades tak yahi strategy rahegi. Badalne par counter 0 se shuru hoga.', ok:'💯 Shuru karo', danger:false }).then(y=>{ if(!y) return;
-    api('/api/challenge','POST',{action:'start',strategy}).then(r=>{ s.active=r.active; STATE.logStratTouched=false; renderTabOnly(); }).catch(err=>alert(err.message)); }); return true; }
+  if(action==='chal-start'){ const strategy=$('#chal-start-strategy')?.value; if(!strategy) return true; const risk=Number($('#chal-start-risk')?.value)||0, maxPerDay=Number($('#chal-start-cap')?.value)||0;
+    askConfirm({ title:`“${strategy}” par challenge shuru karein?`, body:`100 trades tak yahi strategy rahegi. Badalne par counter 0 se shuru hoga.${risk?`<br>Risk limit: <b>${esc(chMoney(risk))}</b> per trade.`:''}${maxPerDay?`<br>Din mein max <b>${maxPerDay}</b> trades ginenge.`:''}`, ok:'💯 Shuru karo', danger:false }).then(y=>{ if(!y) return;
+    api('/api/challenge','POST',{action:'start',strategy,risk,maxPerDay}).then(r=>{ s.active=r.active; STATE.logStratTouched=false; renderTabOnly(); }).catch(err=>alert(err.message)); }); return true; }
   if(action==='chal-log'){ STATE.logStratTouched=false; STATE.logFormIsSetup=true; chPreselect(); STATE.activeTab='log'; render(); window.scrollTo({top:0}); return true; }
   if(action==='chal-pick-strategy'){ const sel=$('#log-strategy-select'); if(sel) sel.value=btn.dataset.value; setLogStrategy(btn.dataset.value); STATE.logStratTouched=false; updateLogChallengeNote(); return true; }
   if(action==='chal-open-review'){ $('#comp-toast')?.remove(); s.modal={ type:'review', stage:Number(btn.dataset.stage) }; if(STATE.activeTab!=='challenge'){ STATE.activeTab='challenge'; render(); } else renderTabOnly(); return true; }
+  if(action==='chal-open-checkin'){ $('#comp-toast')?.remove(); s.modal={ type:'checkin', n:Number(btn.dataset.n) }; if(STATE.activeTab!=='challenge'){ STATE.activeTab='challenge'; render(); } else renderTabOnly(); return true; }
+  if(action==='chal-hide-checkin'){ s.hideCheckin={ ...(s.hideCheckin||{}), [btn.dataset.n]:true }; renderTabOnly(); return true; }
+  if(action==='chal-save-checkin'){ const rule=($('#chal-c-rule')?.value||'').trim(); if(rule.length<3){ s.modal.error='Agle 10 trades ka ek rule likho.'; renderTabOnly(); return true; } chPost({ action:'checkin', n:s.modal.n, mistake:$('#chal-c-mistake')?.value, rule }, '✓ Check-in save ho gaya'); return true; }
   if(action==='chal-view-review'){ s.modal={ type:'review', stage:Number(btn.dataset.stage), view:true }; renderTabOnly(); return true; }
   if(action==='chal-view-report'){ s.modal={ type:'report', id:btn.dataset.id }; renderTabOnly(); return true; }
   if(action==='chal-open-restart'){ s.modal={ type:'restart' }; renderTabOnly(); return true; }
+  if(action==='chal-open-settings'){ s.modal={ type:'settings' }; renderTabOnly(); return true; }
+  if(action==='chal-save-settings'){ chPost({ action:'settings', risk:Number($('#chal-s-risk')?.value)||0, maxPerDay:Number($('#chal-s-cap')?.value)||0 }, '✓ Settings save ho gayi'); return true; }
+  if(action==='chal-missed'){ s.modal={ type:'missed', kind:btn.dataset.kind }; renderTabOnly(); setTimeout(()=>$('#chal-m-note')?.focus(),50); return true; }
+  if(action==='chal-save-missed'){ chPost({ action:'missed', kind:s.modal.kind, note:($('#chal-m-note')?.value||'').trim() }, '✓ Note ho gaya'); return true; }
+  if(action==='chal-cert'){ chOpenCert(Number(btn.dataset.stage), btn.dataset.id||null); return true; }
+  if(action==='chal-cert-share'){ chShareCert(); return true; }
   if(action==='chal-close' || (action==='chal-backdrop' && e.target===btn)){ s.modal=null; renderTabOnly(); return true; }
   if(action==='chal-backdrop') return true;
   if(action==='chal-submit-review'){ chSubmitReview(); return true; }
@@ -3375,9 +3556,17 @@ function handleChalClick(action, btn, e){
     m.busy=true; api('/api/challenge','POST',{action:'restart',strategy,reason}).then(()=>{ s.modal=null; STATE.logStratTouched=false; return loadChallenge(true); }).catch(err=>{ m.busy=false; m.error=err.message; renderTabOnly(); }); return true; }
   if(action==='chal-stop'){ const reason=prompt('Challenge band kyun kar rahe ho? (Sir ko dikhega)',''); if(reason===null) return true;
     api('/api/challenge','POST',{action:'stop',reason}).then(()=>loadChallenge(true)).catch(err=>alert(err.message)); return true; }
+  if(action==='chal-send-fb'){ const key=`${btn.dataset.id}:${btn.dataset.stage}`, ta=document.querySelector(`[data-chal-fb="${CSS.escape(key)}"]`), text=(ta?.value||'').trim();
+    btn.disabled=true; btn.textContent='Bhej rahe hain…';
+    api('/api/challenge/all','POST',{action:'feedback',challengeId:btn.dataset.id,stage:btn.dataset.stage,text}).then(r=>{ btn.textContent=text?(r.sent?`✓ Bheja (${r.sent} device)`:'✓ Save (notification off)'):'✓ Hata diya'; const t=s.admin?.traders.find(x=>x.current?.id===btn.dataset.id); if(t) t.current.feedback=r.feedback; }).catch(err=>{ alert(err.message); btn.textContent='Bhejo'; }).finally(()=>{ btn.disabled=false; }); return true; }
   if(action==='chal-admin-reload'){ loadChalAdmin(); return true; }
   return false;
 }
+document.addEventListener('change', e=>{
+  const el=e.target;
+  if(el.dataset.chalRule!==undefined){ const i=Number(el.dataset.chalRule), cur=STATE.chalRules||[]; STATE.chalRules=el.checked?[...new Set([...cur,i])]:cur.filter(x=>x!==i); const n=$('#chal-rule-count'); if(n) n.textContent=`${STATE.chalRules.length}/${document.querySelectorAll('[data-chal-rule]').length}`; }
+});
+document.addEventListener('input', e=>{ const id=e.target.id; if(id==='log-entry'||id==='log-sl'||id==='log-qty'){ const el=$('#chal-risk-line'); if(el) el.innerHTML=chLogRiskLine(); } });
 
 /* ================= ⏰ AUTO REMINDERS =================
    Admin sets morning / evening / night messages; a small Cloudflare Worker calls
@@ -3401,7 +3590,7 @@ async function tick(env) {
 function remState(){ return STATE.rem || (STATE.rem={ loaded:false, mine:null, admin:null, draft:null, busy:false, msg:'' }); }
 async function loadReminders(){
   const s=remState();
-  try { const r=await api('/api/reminders'); s.mine={ enabled:r.enabled, times:r.times||[], myOff:r.myOff }; if(isAdmin()){ s.admin=r; s.draft=s.draft||{ enabled:r.enabled, slots:structuredClone(r.slots) }; } s.loaded=true; }
+  try { const r=await api('/api/reminders'); s.mine={ enabled:r.enabled, times:r.times||[], myOff:r.myOff }; if(isAdmin()){ s.admin=r; s.draft=s.draft||{ enabled:r.enabled, slots:structuredClone(r.slots), nudge:{ ...(r.nudge||{on:true,time:'19:00'}) } }; } s.loaded=true; }
   catch(e){ s.loaded=true; s.error=e.message; }
   const st=$('#rem-strip'); if(st) st.outerHTML=renderRemStrip();
   const ad=$('#admin-reminders'); if(ad) ad.outerHTML=renderAdminReminders();
@@ -3443,6 +3632,11 @@ function renderAdminReminders(){
       <label class="adm-switch big ${d.enabled?'on':''}"><input type="checkbox" data-rf="enabled" ${d.enabled?'checked':''}><span class="adm-switch-ui" aria-hidden="true"></span><span>${d.enabled?'On':'Off'}</span></label></div>
     <p class="rem-status ${status[0]}">${status[1]}${a.lastRun?`<br><small>Pichhla reminder: <b>${esc(a.lastRun.title)}</b> · ${esc(timeAgo(a.lastRun.at))} · ${a.lastRun.sent} device${a.lastRun.sent===1?'':'s'}</small>`:''}</p>
     <div class="rem-slots">${d.slots.map(slot).join('')}</div>
+    <div class="rem-slot rem-nudge ${d.nudge?.on===false?'is-off':''}"><div class="rem-slot-top">
+      <label class="adm-switch ${d.nudge?.on!==false?'on':''}"><input type="checkbox" data-rf="nudge-on" ${d.nudge?.on!==false?'checked':''}><span class="adm-switch-ui" aria-hidden="true"></span><span class="sr-only">Challenge nudge on</span></label>
+      <label class="rem-time"><span class="sr-only">Time</span><input type="time" data-rf="nudge-time" value="${esc(d.nudge?.time||'19:00')}"></label>
+      <b>💯 100 Trades Challenge nudge</b><span class="rem-sent">${a.lastNudge?.date===a.today?`✓ Aaj ${a.lastNudge.users} traders check kiye`:''}</span></div>
+      <p class="card-sub">Roz is time par, sirf un traders ko personal notification jinka challenge review baaki hai, ya jinka 3 din se koi challenge trade nahi aaya. Naam ke saath — jaise “Asha, 25 trades ka review baaki hai”.</p></div>
     <div class="rem-foot">${d.slots.length<6?'<button type="button" class="btn-secondary btn-small" data-action="rem-add">＋ Reminder add karo</button>':'<span></span>'}<span class="rem-msg" role="status">${esc(s.msg||'')}</span><button type="button" class="btn-primary" data-action="rem-save" ${s.busy?'disabled':''}>${s.busy?'Save ho raha hai…':'💾 Save'}</button></div>
     <details class="rem-setup" ${a.cronSecretSet&&fresh?'':'open'}><summary>🔧 Ek baar ka setup — reminders apne aap bhejne ke liye</summary>
       <ol>
@@ -3458,7 +3652,7 @@ function renderAdminReminders(){
 function remRerender(){ const ad=$('#admin-reminders'); if(ad) ad.outerHTML=renderAdminReminders(); }
 async function remSave(){
   const s=remState(); if(s.busy||!s.draft) return; s.busy=true; s.msg=''; remRerender();
-  try{ const r=await api('/api/reminders','PUT',s.draft); s.draft={ enabled:r.enabled, slots:r.slots }; s.msg='✓ Save ho gaya'; s.busy=false; await loadReminders(); }
+  try{ const r=await api('/api/reminders','PUT',s.draft); s.draft={ enabled:r.enabled, slots:r.slots, nudge:r.nudge }; s.msg='✓ Save ho gaya'; s.busy=false; await loadReminders(); }
   catch(e){ s.busy=false; s.msg='⚠ '+(e.message||'Save nahi hua'); remRerender(); }
 }
 function handleRemClick(action, btn){
@@ -3474,8 +3668,10 @@ function handleRemClick(action, btn){
   if(action==='rem-copy'){ const txt=btn.dataset.text; (navigator.clipboard?.writeText(txt)||Promise.reject()).then(()=>{ const o=btn.textContent; btn.textContent='✓ Copied'; setTimeout(()=>{ if(btn.isConnected) btn.textContent=o; },1500); }).catch(()=>prompt('Copy karo:',txt)); return true; }
   return false;
 }
-document.addEventListener('input', e=>{ const el=e.target, d=STATE.rem?.draft; if(!d||!el.dataset.rf||el.dataset.rf==='enabled'||el.dataset.rf==='on') return; d.slots[Number(el.dataset.i)][el.dataset.rf]=el.value; STATE.rem.msg=''; });
+document.addEventListener('input', e=>{ const el=e.target, d=STATE.rem?.draft; if(!d||!el.dataset.rf||el.dataset.rf==='enabled'||el.dataset.rf==='on'||el.dataset.rf.startsWith('nudge')) return; d.slots[Number(el.dataset.i)][el.dataset.rf]=el.value; STATE.rem.msg=''; });
 document.addEventListener('change', e=>{ const el=e.target, d=STATE.rem?.draft; if(!d||!el.dataset.rf) return;
+  if(el.dataset.rf==='nudge-on'){ d.nudge={ ...(d.nudge||{}), on:el.checked }; remRerender(); return; }
+  if(el.dataset.rf==='nudge-time'){ d.nudge={ ...(d.nudge||{}), time:el.value }; return; }
   if(el.dataset.rf==='enabled'){ d.enabled=el.checked; remRerender(); }
   else if(el.dataset.rf==='on'){ d.slots[Number(el.dataset.i)].on=el.checked; remRerender(); }
   else d.slots[Number(el.dataset.i)][el.dataset.rf]=el.value; });
@@ -4381,8 +4577,10 @@ document.addEventListener('submit', async (e) => {
       notes: ($('#log-notes')?.value || '').trim(), exitReason: $('#log-exit-reason')?.value.trim() || '', image: currentLogImages()[0] || null, beforeImage: currentLogImages()[0] || null, afterImage: currentLogImages()[1] || null, images: currentLogImages(),
       plannedEntry, plannedSL, plannedTP, plannedRR, mistake: $('#log-mistake').value, quality: Number($('#log-quality').value), followedPlan: STATE.logFormIsSetup && $('#log-mistake').value==='none' && (!comp || compRules.length===comp.rules.length),
       date: new Date().toISOString(), tradeDateTime: $('#log-trade-datetime')?.value || new Date().toISOString(), pnl: p.pnl, rr: p.rr, xpEarned: p.xp,
-      ...(comp ? { competitionId: comp.id, compRules } : {})
+      ...(comp ? { competitionId: comp.id, compRules } : {}),
+      ...chTradeFields(strategyName)
     };
+    if (newTrade.chalRulesTotal && newTrade.chalRules.length < newTrade.chalRulesTotal) newTrade.followedPlan = false;   // a rule not ticked = rule not followed
     const chBefore = chState().active ? chProgress(chState().active).logged : 0;
     STATE.trades.unshift(newTrade);
     const saved = await saveUserData('Trade', ['trades']);
@@ -4392,7 +4590,7 @@ document.addEventListener('submit', async (e) => {
     STATE.activeTab = 'history';
     render();
     compAfterSave(newTrade, STATE.lastSave?.competition);
-    STATE.logStratTouched = false; chAfterSave(chBefore);
+    STATE.logStratTouched = false; STATE.chalRules = []; chAfterSave(chBefore);
   }
   else if (e.target.id==='notes-form') {
     e.preventDefault();

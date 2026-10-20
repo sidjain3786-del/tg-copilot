@@ -3,8 +3,10 @@
 // every few minutes; the tick sends whatever is due in Indian time, once per day per slot.
 import { parseColumn } from './auth.js';
 
+export const DEFAULT_NUDGE = { on: true, time: '19:00' };
+export const cleanNudge = n => ({ on: n?.on !== false, time: /^([01]\d|2[0-3]):[0-5]\d$/.test(String(n?.time || '')) ? n.time : DEFAULT_NUDGE.time });
 export const DEFAULT_REMINDERS = {
-  enabled: false,
+  enabled: false, nudge: { ...DEFAULT_NUDGE },
   slots: [
     { id: 'morning', on: true, time: '08:45', days: [1, 2, 3, 4, 5], target: 'all', tab: 'copilot', title: '☀️ Good morning, traders!',
       messages: 'Aaj ka plan likho, setup ka wait karo. Have a profitable day, {name}!\nMarket khulne se pehle: risk fix karo, rules yaad karo — phir trade.\nPlan the trade, trade the plan. All the best, {name}!' },
@@ -38,7 +40,7 @@ export async function putSetting(env, key, value) {
 }
 export async function getReminders(env) {
   const r = await getSetting(env, 'reminders', null);
-  return r ? { enabled: !!r.enabled, slots: cleanSlots(r.slots) } : structuredClone(DEFAULT_REMINDERS);
+  return r ? { enabled: !!r.enabled, slots: cleanSlots(r.slots), nudge: cleanNudge(r.nudge) } : structuredClone(DEFAULT_REMINDERS);
 }
 // Indian time pieces for "now"
 export function istNow(now = new Date()) {
@@ -46,7 +48,7 @@ export function istNow(now = new Date()) {
   const date = x.toISOString().slice(0, 10);
   return { date, minutes: x.getUTCHours() * 60 + x.getUTCMinutes(), weekday: x.getUTCDay(), dayStartUtc: new Date(`${date}T00:00:00+05:30`).toISOString(), dayNumber: Math.floor(x.getTime() / 86400000) };
 }
-const mins = t => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+export const mins = t => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
 export const WINDOW_MIN = 90;   // a slot missed by the cron is still sent up to 90 minutes late, never later
 export function dueSlot(rem, state, now = new Date()) {
   if (!rem.enabled) return null;

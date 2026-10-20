@@ -1,5 +1,6 @@
-import { getUserFromRequest, json, ensureSchema, isAdminUser, parseColumn } from '../../_lib/auth.js';
-import { progress, rowToChallenge, splitTrades } from '../../_lib/challenge.js';
+import { getUserFromRequest, json, readJson, ensureSchema, isAdminUser, parseColumn } from '../../_lib/auth.js';
+import { progress, rowToChallenge, splitTrades, STAGES, parse } from '../../_lib/challenge.js';
+import { sendPersonal } from '../../_lib/notify.js';
 
 // GET /api/challenge/all (admin) -> every trader's current challenge with progress, plus restarts
 export async function onRequestGet({ request, env }) {
@@ -22,4 +23,26 @@ export async function onRequestGet({ request, env }) {
     }
     return json({ traders: [...by.values()] });
   } catch (e) { console.error('challenge all', e); return json({ error: 'Load nahi hua.' }, { status: 500 }); }
+}
+
+// POST /api/challenge/all (admin) { action: 'feedback', challengeId, stage, text } -> Sir's comment on a review; the trader gets a notification
+export async function onRequestPost({ request, env }) {
+  try {
+    const me = await getUserFromRequest(request, env);
+    if (!me) return json({ error: 'Not authenticated' }, { status: 401 });
+    if (!isAdminUser(me, env)) return json({ error: 'Sirf admin.' }, { status: 403 });
+    await ensureSchema(env);
+    const b = await readJson(request) || {};
+    if (b.action !== 'feedback') return json({ error: 'Unknown action' }, { status: 400 });
+    const row = await env.DB.prepare('SELECT id, user_id, feedback, reviews FROM trade_challenges WHERE id = ?').bind(String(b.challengeId || '')).first();
+    if (!row) return json({ error: 'Challenge nahi mila.' }, { status: 404 });
+    const key = String(b.stage), text = String(b.text || '').trim().slice(0, 600);
+    if (!(STAGES.map(String).includes(key) || /^c\d0$/.test(key))) return json({ error: 'Galat stage.' }, { status: 400 });
+    const fb = parse(row.feedback, {});
+    if (!text) delete fb[key]; else fb[key] = { text, at: new Date().toISOString(), by: me.name || 'Sir' };
+    await env.DB.prepare('UPDATE trade_challenges SET feedback = ? WHERE id = ?').bind(JSON.stringify(fb), row.id).run();
+    let sent = 0;
+    if (text) sent = await sendPersonal(env, row.user_id, { title: '💬 Sir ne aapke review par feedback diya', body: text, url: '/#challenge', tag: 'challenge-feedback' });
+    return json({ ok: true, feedback: fb, sent });
+  } catch (e) { console.error('challenge feedback', e); return json({ error: 'Save nahi hua.' }, { status: 500 }); }
 }

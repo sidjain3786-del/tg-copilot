@@ -87,8 +87,8 @@ CREATE INDEX IF NOT EXISTS idx_comp_entries ON competition_entries (competition_
 CREATE TABLE IF NOT EXISTS competition_claps (entry_id TEXT NOT NULL, user_id TEXT NOT NULL, PRIMARY KEY (entry_id, user_id));
 
 -- 💯 100 Trades Challenge: one strategy, 100 journaled trades, a review every 25 trades.
-CREATE TABLE IF NOT EXISTS trade_challenges (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, strategy TEXT NOT NULL, started_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', reviews TEXT NOT NULL DEFAULT '{}', focus TEXT NOT NULL DEFAULT 'null', ended_at TEXT, end_reason TEXT NOT NULL DEFAULT '', attempt INTEGER NOT NULL DEFAULT 1);
+CREATE TABLE IF NOT EXISTS trade_challenges (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, strategy TEXT NOT NULL, started_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', reviews TEXT NOT NULL DEFAULT '{}', focus TEXT NOT NULL DEFAULT 'null', ended_at TEXT, end_reason TEXT NOT NULL DEFAULT '', attempt INTEGER NOT NULL DEFAULT 1, risk REAL NOT NULL DEFAULT 0, max_per_day INTEGER NOT NULL DEFAULT 0, feedback TEXT NOT NULL DEFAULT '{}', extras TEXT NOT NULL DEFAULT '{}');
 CREATE INDEX IF NOT EXISTS idx_challenges_user ON trade_challenges (user_id, status);
 
 -- ⏰ Auto reminders: a trader can turn daily reminders off.
-CREATE TABLE IF NOT EXISTS user_prefs (user_id TEXT PRIMARY KEY, reminders_off INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS user_prefs (user_id TEXT PRIMARY KEY, reminders_off INTEGER NOT NULL DEFAULT 0, pending TEXT);

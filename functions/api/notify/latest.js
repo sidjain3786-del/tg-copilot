@@ -1,11 +1,14 @@
 import { getUserFromRequest, json, ensureSchema, parseColumn } from '../../_lib/auth.js';
 import { getReminders, cleanSlots, messageFor, istNow, tradesOn } from '../../_lib/reminders.js';
+import { takePersonal } from '../../_lib/notify.js';
 // GET /api/notify/latest -> what the last push notification was about, for the service worker.
 const TAB_URL = { log: '/#log', notes: '/#notes', history: '/#history', blog: '/#blog', report: '/#copilot', analysis: '/#analysis', '': '/#copilot' };
 export async function onRequestGet({ request, env }) {
   const user = await getUserFromRequest(request, env);
   if (!user) return json({ title: 'Trader Co-Pilot', body: 'Naya update aaya hai — dekhne ke liye tap karo.', url: '/' });
   await ensureSchema(env);
+  const mine = await takePersonal(env, user.id).catch(() => null);   // Sir's feedback / challenge nudge for this trader
+  if (mine) return json(mine);
   let last = null; try { last = JSON.parse((await env.DB.prepare(`SELECT value FROM app_settings WHERE key = 'last_push'`).first())?.value || 'null'); } catch {}
   if (last?.kind === 'reminder') {   // ⏰ auto reminder: personal text for this trader
     const slot = last.preview ? cleanSlots([last.preview])[0] : (await getReminders(env)).slots.find(s => s.id === last.slot);

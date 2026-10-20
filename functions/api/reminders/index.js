@@ -1,7 +1,7 @@
 import { getUserFromRequest, json, readJson, ensureSchema, isAdminUser } from '../../_lib/auth.js';
 import { getVapidKeys, sendTickle } from '../../_lib/push.js';
 import { setLastPush } from '../../_lib/settings.js';
-import { getReminders, getSetting, putSetting, cleanSlots, istNow, recipients } from '../../_lib/reminders.js';
+import { getReminders, getSetting, putSetting, cleanSlots, cleanNudge, istNow, recipients } from '../../_lib/reminders.js';
 
 // GET  /api/reminders -> traders: times + whether they turned reminders off; admin: full settings + automation status
 // PUT  /api/reminders (admin) { enabled, slots }
@@ -18,7 +18,7 @@ export async function onRequestGet({ request, env }) {
     const state = await getSetting(env, 'reminders_state', {});
     const off = (await env.DB.prepare('SELECT COUNT(*) AS n FROM user_prefs WHERE reminders_off = 1').first())?.n || 0;
     const devices = (await env.DB.prepare('SELECT COUNT(*) AS n FROM push_subscriptions').first())?.n || 0;
-    return json({ ...out, slots: rem.slots, cronSecretSet: !!env.CRON_SECRET, lastTick: state.lastTick || null, lastRun: state.lastRun || null, sentToday: state.sent || {}, today: istNow().date, tradersOff: off, devices });
+    return json({ ...out, slots: rem.slots, nudge: rem.nudge, lastNudge: state.lastNudge || null, cronSecretSet: !!env.CRON_SECRET, lastTick: state.lastTick || null, lastRun: state.lastRun || null, sentToday: state.sent || {}, today: istNow().date, tradersOff: off, devices });
   } catch (e) { console.error('reminders get', e); return json({ error: 'Load nahi hua.' }, { status: 500 }); }
 }
 export async function onRequestPut({ request, env }) {
@@ -30,8 +30,9 @@ export async function onRequestPut({ request, env }) {
     const b = await readJson(request) || {};
     const slots = cleanSlots(b.slots);
     if (b.enabled && !slots.length) return json({ error: 'Kam se kam ek reminder ka message likho.' }, { status: 400 });
-    await putSetting(env, 'reminders', { enabled: !!b.enabled, slots });
-    return json({ ok: true, enabled: !!b.enabled, slots });
+    const nudge = cleanNudge(b.nudge);
+    await putSetting(env, 'reminders', { enabled: !!b.enabled, slots, nudge });
+    return json({ ok: true, enabled: !!b.enabled, slots, nudge });
   } catch (e) { console.error('reminders put', e); return json({ error: 'Save nahi hua.' }, { status: 500 }); }
 }
 export async function onRequestPost({ request, env }) {

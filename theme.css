@@ -1198,3 +1198,41 @@ button.journal-chip.chip-comp { border: 1px solid #F6D58A; background: var(--mar
 @media (min-width: 701px) { .tc-undo { bottom: 1.5rem; } }
 .tc-undo { width: min(380px, calc(100vw - 2rem)); box-sizing: border-box; justify-content: space-between; }
 .tc-undo button { white-space: nowrap; }
+
+/* ----- 💯 Challenge v2 ----- */
+.chal-note-body { flex: 1; min-width: 0; }
+.chal-risk { display: block; margin-top: .35rem; font-size: .8rem; font-weight: 600; }
+.chal-risk.ok { color: #08734F; } .chal-risk.bad { color: #B42318; } .chal-risk.wait { color: #475467; font-weight: 500; }
+.chal-rule-checks { margin: .35rem 0 .2rem; }
+.chal-note .adm-field-label { display: block; margin-top: .55rem; } .chal-note .adm-field-label b { display: inline; color: var(--ink-2); }
+.chal-sub { display: block; margin-top: .4rem; color: var(--muted); font-size: .76rem; }
+.chal-streak { margin-left: auto; align-self: center; font-weight: 800; color: #FFD27A; font-size: .95rem; } .chal-streak small { color: #9FB0C8; font-weight: 600; margin-left: .2rem; }
+.chal-limits { font-size: .8rem !important; margin-top: .5rem !important; } .chal-limits .comp-ghost { padding: 0 .3rem; font-size: .78rem; }
+.chal-cell.risk { background: #B48CFF; } .chal-legend i.risk { background: #8A5CF6; }
+.chal-due.checkin { background: #EEF3FA; border-color: #C9D6E8; } .chal-due.checkin p { color: #344054; }
+.chal-due-actions { display: flex; gap: .4rem; align-items: center; }
+.comp-ghost.dark { color: var(--ink-3); }
+.chal-step-fb { margin: .35rem 0 0 !important; padding: .35rem .5rem; border-radius: 6px; background: #E6F6EF; color: #1F4D3A !important; font-size: .74rem !important; }
+.chal-step-links { display: flex; flex-wrap: wrap; gap: .3rem .7rem; margin-top: .3rem; }
+.chal-curve { width: 100%; height: auto; display: block; margin-top: .5rem; }
+.chal-curve path { fill: none; stroke-width: 2.5; stroke-linejoin: round; } .chal-curve path.up { stroke: #0B9A6A; } .chal-curve path.down { stroke: #E0413F; }
+.chal-curve circle.up { fill: #0B9A6A; } .chal-curve circle.down { fill: #E0413F; }
+.chal-curve line.stage { stroke: #C9D6E8; stroke-dasharray: 4 4; } .chal-curve line.zero { stroke: #98A2B3; } .chal-curve text.lbl { font-size: 11px; fill: #667085; }
+.chal-curve-cap { margin: .3rem 0 0; font-size: .82rem; color: var(--muted); } .chal-curve-cap .positive { color: #08734F; } .chal-curve-cap .negative { color: #B42318; }
+.chal-missed-btns { display: flex; flex-wrap: wrap; gap: .5rem; margin: .6rem 0; } .chal-missed-btns b { margin-left: .3rem; background: var(--ink-tint); padding: 0 .4rem; border-radius: 999px; }
+.chal-missed-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .3rem; font-size: .8rem; color: #344054; } .chal-missed-list small { color: var(--muted); margin: 0 .3rem; }
+.chal-verdict { padding: .8rem 1rem; border-radius: var(--r-md); margin-bottom: .9rem; }
+.chal-verdict b { font-size: 1rem; } .chal-verdict p { margin: .25rem 0 0; font-size: .86rem; line-height: 1.5; }
+.chal-verdict.good { background: #E6F6EF; color: #08734F; } .chal-verdict.warn { background: #FFF4E5; color: #8A5A00; } .chal-verdict.bad { background: #FDECEC; color: #B42318; } .chal-verdict p { color: #344054; }
+.chal-fb, .chal-fb-new { padding: .7rem .9rem; border-radius: var(--r-md); background: #E6F6EF; border: 1px solid #9FDDC0; margin: .6rem 0; }
+.chal-fb span { font-size: .72rem; font-weight: 700; color: #08734F; text-transform: uppercase; letter-spacing: .04em; } .chal-fb p, .chal-fb-new p { margin: .25rem 0 0; color: #1F4D3A; font-size: .88rem; line-height: 1.5; }
+.chal-fb-new { margin: 0 0 1rem; } .chal-fb-new b { color: #08734F; }
+.chal-start-row { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; }
+.chal-start input, .chal-start-row input { width: 100%; box-sizing: border-box; border: 1px solid var(--line); border-radius: var(--r-sm); padding: .6rem .75rem; font: inherit; background: #fff; }
+.chal-start-row select { width: 100%; box-sizing: border-box; border: 1px solid var(--line); border-radius: var(--r-sm); padding: .6rem .75rem; font: inherit; background: #fff; }
+.chal-cert-wrap { display: grid; place-items: center; margin: .3rem 0 .8rem; } .chal-cert-img { width: min(360px, 100%); border-radius: 12px; box-shadow: var(--shadow-2); }
+.chal-adm-item { border-top: 1px solid var(--line); padding: .4rem 0; } .chal-adm-fb { display: flex; gap: .4rem; align-items: flex-start; }
+.chal-adm-fb textarea { flex: 1; min-width: 180px; border: 1px solid var(--line); border-radius: 6px; padding: .35rem .5rem; font: inherit; font-size: .78rem; }
+.rem-nudge { background: #EEF3FA; } .rem-nudge b { font-size: .9rem; } .rem-nudge .card-sub { margin: 0; font-size: .78rem; }
+@media (max-width: 560px) { .chal-start-row { grid-template-columns: 1fr; } .chal-streak { margin-left: 0; flex-basis: 100%; } .chal-count { flex-wrap: wrap; } }
+.chal-stats strong { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.2; }
