@@ -349,3 +349,19 @@ Morning / evening / night notifications go to traders' phones automatically.
 - `functions/api/challenge/index.js`
 - `functions/api/competitions/index.js`
 - `functions/api/competitions/[id].js`
+
+## Update 36 — Challenge strategies Log Trade mein sabko dikhengi (App version 36)
+- Every active 💯 challenge strategy that admin adds now shows in **Log Trade → 💯 100 Trades Challenge** for every trader and for the admin. Before this, it showed only to a trader whose challenge was already running on it.
+- A trader whose challenge is running sees their strategy marked **(mera challenge)**, and it is pre-selected.
+- If a trader picks a challenge strategy without starting a challenge, the trade saves in the normal journal and a "Challenge shuru karo →" link is shown.
+- The dropdown is no longer disabled for a trader who has no strategy of their own.
+- Changed: `app.js`, `sw.js`.
+
+## Update 37 — Purane traders ko bhi Sir ki nayi challenge strategy dikhegi (App version 37)
+- **Problem:** traders who had started a challenge before this update never saw the start screen again, so they never saw Sir's new strategy. New IDs did see it.
+- **Fix 1:** on the Challenge tab, a trader with a running challenge sees a banner: "📢 Sir ki nayi challenge strategy: …".
+  - The banner shows the strategy's rules.
+  - It has a **"💯 … par shift karo"** button that opens restart with Sir's strategy and the reason already filled in. The old attempt stays in history.
+  - It has an "Abhi nahi" button that hides the banner.
+- **Fix 2:** adding a new challenge strategy in Admin → 💯 has a ticked-by-default option: **"📢 Sab traders ko announcement + notification bhejo"**.
+- Changed: `app.js`, `theme.css`, `sw.js`.

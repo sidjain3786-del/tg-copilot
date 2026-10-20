@@ -1,4 +1,4 @@
-const APP_VERSION = '35';   // shown in Admin → System check; bump on every release
+const APP_VERSION = '37';   // shown in Admin → System check; bump on every release
 /* ============================================================
    Trader Co-Pilot — vanilla JS (no framework)
    Talks to /api/* (Cloudflare Pages Functions + D1) for
@@ -1071,7 +1071,7 @@ function addLogImages(images){
 }
 function renderLogTab(){
   chPreselect();
-  const strategyOptions = logStrategyOptionsHtml(), canPickStrategy = allStrategies().length || liveComps().length;
+  const strategyOptions = logStrategyOptionsHtml(), canPickStrategy = logCanPickStrategy();
   return `
   <div class="card log-trade-card">
     <div class="log-head">
@@ -1395,7 +1395,7 @@ function editStrategyOptions(t){
   const cur=t.competitionId && compById(t.competitionId) ? t.competitionId : '';
   const comps=[...liveComps()]; if(cur && !comps.some(c=>c.id===cur)) comps.push(compById(cur));
   const chs=featureVisible('challenge')?chState().active:null, adm=chs?chAdminStrategy(chs):null;
-  const names=[...new Set([...(adm?[adm.name]:[]), ...STATE.customStrategies.map(x=>normalizeCustomStrategy(x).name).filter(Boolean), NO_SETUP_STRATEGY, ...(cur?[]:[t.strategy])].filter(Boolean))];
+  const names=[...new Set([...(adm?[adm.name]:[]), ...logChalStrategies().map(x=>x.name), ...STATE.customStrategies.map(x=>normalizeCustomStrategy(x).name).filter(Boolean), NO_SETUP_STRATEGY, ...(cur?[]:[t.strategy])].filter(Boolean))];
   return comps.map(c=>`<option value="comp:${esc(c.id)}" ${cur===c.id?'selected':''}>🏆 ${esc(c.strategy)} (Competition)</option>`).join('') + names.map(n=>`<option value="${esc(n)}" ${!cur&&n===t.strategy?'selected':''}>${esc(n)}</option>`).join('');
 }
 function renderEditTradeModal(id){
@@ -2731,14 +2731,17 @@ function logStrategyOptionsHtml(){
   const comps=liveComps(), ch=featureVisible('challenge')?chState().active:null, adm=ch?chAdminStrategy(ch):null;
   const chOwn=ch&&!adm ? allStrategies().find(p=>chNorm(p.name)===chNorm(ch.strategy)) : null;
   const own=allStrategies().filter(p=>p!==chOwn);
+  // every active 💯 challenge strategy Sir added (plus the one the trader's challenge runs on, even if switched off)
+  const chalList=logChalStrategies(), firstChal=adm||chalList[0];
   if(STATE.logCompId && !comps.some(c=>c.id===STATE.logCompId)) STATE.logCompId=null;
-  if(STATE.logChalId && STATE.logChalId!==adm?.id) STATE.logChalId=null;
-  if(!own.length && !chOwn && !adm && comps.length && !STATE.logCompId) STATE.logCompId=comps[0].id;
-  if(!own.length && !chOwn && adm && !STATE.logCompId) STATE.logChalId=adm.id;
+  if(STATE.logChalId && !chalList.some(x=>x.id===STATE.logChalId)) STATE.logChalId=null;
+  if(!own.length && !chOwn && !firstChal && comps.length && !STATE.logCompId) STATE.logCompId=comps[0].id;
+  if(!own.length && !chOwn && firstChal && !STATE.logCompId && !STATE.logChalId) STATE.logChalId=firstChal.id;
   const free=!STATE.logCompId&&!STATE.logChalId;
   const ownOpts=own.map(p=>`<option value="${esc(p.id)}" ${free&&STATE.selectedPlaybookId===p.id?'selected':''}>${esc(p.name)}</option>`).join('');
   // three separate groups: competition (Sir's competition strategy) · 100 Trades Challenge · my own
-  const chalOpt=adm?`<option value="chal:${esc(adm.id)}" ${STATE.logChalId===adm.id?'selected':''}>💯 ${esc(adm.name)}</option>`:chOwn?`<option value="${esc(chOwn.id)}" ${free&&STATE.selectedPlaybookId===chOwn.id?'selected':''}>💯 ${esc(chOwn.name)}</option>`:'';
+  const chalOpt=chalList.map(x=>`<option value="chal:${esc(x.id)}" ${STATE.logChalId===x.id?'selected':''}>💯 ${esc(x.name)}${adm&&adm.id===x.id?' (mera challenge)':''}</option>`).join('')
+    +(chOwn?`<option value="${esc(chOwn.id)}" ${free&&STATE.selectedPlaybookId===chOwn.id?'selected':''}>💯 ${esc(chOwn.name)} (mera challenge)</option>`:'');
   if(!comps.length && !chalOpt) return own.length ? ownOpts : '<option>No strategy yet</option>';
   return `${comps.length?`<optgroup label="🏆 Competition — Sir ki strategy">${comps.map(c=>`<option value="comp:${esc(c.id)}" ${STATE.logCompId===c.id?'selected':''}>🏆 ${esc(c.strategy)}</option>`).join('')}</optgroup>`:''}${chalOpt?`<optgroup label="💯 100 Trades Challenge">${chalOpt}</optgroup>`:''}${own.length?`<optgroup label="Meri strategies">${ownOpts}</optgroup>`:''}`;
 }
@@ -2758,7 +2761,7 @@ function renderLogCompPanel(){
 }
 function refreshLogStrategySelect(){
   const sel=$('#log-strategy-select'), panel=$('#log-comp-panel'); if(!panel) return;
-  if(sel){ sel.innerHTML=logStrategyOptionsHtml(); sel.disabled=!(allStrategies().length||liveComps().length); }
+  if(sel){ sel.innerHTML=logStrategyOptionsHtml(); sel.disabled=!logCanPickStrategy(); }
   panel.innerHTML=renderLogCompPanel(); panel.dataset.live=liveComps().length?'1':'';
 }
 function setLogStrategy(value){
@@ -3128,7 +3131,7 @@ async function loadChallenge(force=false){
   finally { s.loading=false; }
   if(STATE.activeTab==='challenge') renderTabOnly();
   else if(STATE.activeTab==='copilot'){ const el=$('#chal-dash'); if(el) el.outerHTML=renderChalDashCard(); }
-  else if(STATE.activeTab==='log') updateLogChallengeNote(true);
+  else if(STATE.activeTab==='log'){ refreshLogStrategySelect(); updateLogChallengeNote(true); }
 }
 /* same counting rules as functions/_lib/challenge.js */
 const chNorm=s=>String(s||'').trim().toLowerCase().replace(/\s+/g,' ');
@@ -3209,7 +3212,13 @@ function chPreselect(){
   if(chIsV2(ch)) return;
   const comp=liveComps().find(c=>chNorm(c.strategy)===chNorm(ch.strategy)); if(comp){ STATE.logCompId=comp.id; STATE.logChalId=null; }
 }
+function logChalStrategies(){
+  if(!featureVisible('challenge')) return [];
+  const ch=chState().active, adm=ch?chAdminStrategy(ch):null, L=(chCfg().strategies||[]).filter(x=>x.active);
+  return adm && !L.some(x=>x.id===adm.id) ? [adm, ...L] : adm ? [adm, ...L.filter(x=>x.id!==adm.id)] : L;
+}
 function logChalStrategy(){ return STATE.logChalId ? (chCfg().strategies||[]).find(x=>x.id===STATE.logChalId)||null : null; }
+const logCanPickStrategy=()=>!!(allStrategies().length||liveComps().length||logChalStrategies().length);
 function logSelectedStrategyName(){
   if(!STATE.logFormIsSetup) return NO_SETUP_STRATEGY;
   if(STATE.logCompId){ const c=liveComps().find(x=>x.id===STATE.logCompId); if(c) return c.strategy; }
@@ -3223,7 +3232,8 @@ function chLogRiskLine(){
   return r<=lim*1.25 ? `<span class="chal-risk ok">✓ Is trade ka risk ${chMoney(r)} — limit ${chMoney(lim)} ke andar</span>` : `<span class="chal-risk bad">⚠️ Is trade ka risk ${chMoney(r)} hai — aapki limit ${chMoney(lim)}. Quantity kam karo, warna “risk toota” ginega.</span>`;
 }
 function renderLogChallengeNote(){
-  const ch=featureVisible('challenge')?chState().active:null; if(!ch) return '';
+  const ch=featureVisible('challenge')?chState().active:null, pickedChal=logChalStrategy();
+  if(!ch) return pickedChal?`<div class="chal-note off" role="status"><b>💯 ${esc(pickedChal.name)} — 100 Trades Challenge ki strategy.</b> Trade normal journal mein save hoga. Isko challenge mein ginwana hai to pehle challenge shuru karo. <button type="button" class="pb-link" data-action="set-tab" data-tab="challenge">Challenge shuru karo →</button>${chStratInfo(pickedChal)}</div>`:'';
   const p=chProgress(ch), on=chNorm(logSelectedStrategyName())===chNorm(ch.strategy);
   if(!on){
     const adm=chAdminStrategy(ch), own=allStrategies().find(x=>chNorm(x.name)===chNorm(ch.strategy)), comp=chIsV2(ch)?null:liveComps().find(c=>chNorm(c.strategy)===chNorm(ch.strategy));
@@ -3353,6 +3363,16 @@ function chPendingCheckin(ch, p){
   const done=ch.extras?.checkins||{}, hidden=chState().hideCheckin||{};
   return CH_CHECKINS.filter(n=>p.logged>=n && !done[n] && !hidden[n]).pop()||null;
 }
+/* traders already in a challenge (started before Sir added his strategies) never see the start screen — tell them here */
+function chNewHidden(){ try{ return JSON.parse(localStorage.getItem('tc_chal_new_hidden')||'[]'); }catch(_){ return []; } }
+function renderChalNewStrategies(ch){
+  const cur=chAdminStrategy(ch), hid=chNewHidden();
+  const list=(chCfg().strategies||[]).filter(x=>x.active && x.id!==cur?.id && !hid.includes(x.id)); if(!list.length) return '';
+  return `<section class="chal-newstrat" role="status"><div class="chal-newstrat-text"><b>📢 Sir ki ${list.length>1?'nayi challenge strategies':'nayi challenge strategy'}: ${list.map(x=>`“${esc(x.name)}”`).join(', ')}</b>
+    <p>Aapka challenge abhi <b>${esc(ch.strategy)}</b> par chal raha hai (${chProgress(ch).counted}/100). Sir ki strategy par challenge karna hai to shift karo — counter 0 se shuru hoga, purana attempt history mein rahega.</p>
+    ${list.map(chStratInfo).join('')}</div>
+    <div class="chal-newstrat-actions">${list.map(x=>`<button type="button" class="btn-primary btn-small" data-action="chal-switch-strat" data-id="${esc(x.id)}">💯 ${esc(x.name)} par shift karo</button>`).join('')}<button type="button" class="comp-ghost dark" data-action="chal-newstrat-hide" data-ids="${esc(list.map(x=>x.id).join(','))}">Abhi nahi</button></div></section>`;
+}
 function renderChalActive(ch){
   const p=chProgress(ch), rv=ch.reviews||{}, idx=CH_STAGES.indexOf(p.stage), fb=ch.feedback||{};
   const segs=CH_STAGES.map(x=>p.inside.slice(x.from-1,Math.min(x.n,p.counted)));
@@ -3365,7 +3385,7 @@ function renderChalActive(ch){
     stat('Top galti',st.topMistake?esc(mistakeLabel(st.topMistake.id)):'Koi nahi',st.topMistake?`${st.topMistake.count} baar`:''),
     ...(st.topBrokenRule?[stat('Sabse zyada toota rule',esc(st.topBrokenRule.text),`${st.topBrokenRule.count} baar`)]:[])].join(''):'<p class="pb-empty">Is stage mein abhi koi trade nahi.</p>';
   if(unseen) setTimeout(()=>chMarkFeedbackSeen(ch),1500);
-  return `${unseen?`<section class="chal-fb-new" role="status"><b>💬 Sir ne aapke review par feedback diya hai</b><p>${Object.values(fb).sort((a,b)=>a.at<b.at?1:-1).slice(0,1).map(f=>esc(f.text)).join('')}</p></section>`:''}
+  return `${renderChalNewStrategies(ch)}${unseen?`<section class="chal-fb-new" role="status"><b>💬 Sir ne aapke review par feedback diya hai</b><p>${Object.values(fb).sort((a,b)=>a.at<b.at?1:-1).slice(0,1).map(f=>esc(f.text)).join('')}</p></section>`:''}
   <section class="chal-hero active">
     <div class="chal-hero-text">
       <span class="chal-kicker">100 Trades Challenge${ch.attempt>1?` · attempt ${ch.attempt}`:''}</span>
@@ -3652,6 +3672,7 @@ function renderAdminChalSection(){
       <label class="adm-field"><span>Short description <small>(optional)</small></span><textarea id="ccf-desc" rows="2" maxlength="1000">${esc(f.description||'')}</textarea></label>
       <div class="chal-start-row"><label class="adm-field"><span>Entry</span><textarea id="ccf-entry" rows="3" maxlength="1000">${esc(f.entryCriteria||'')}</textarea></label><label class="adm-field"><span>Exit / SL</span><textarea id="ccf-exit" rows="3" maxlength="1000">${esc(f.exitCriteria||'')}</textarea></label></div>
       <label class="adm-field"><span>Rules <small>(har line par ek — trader har trade par tick karega)</small></span><textarea id="ccf-rules" rows="5" maxlength="2400" placeholder="Pehle 15 min ka range mark kiya&#10;Candle close ke baad hi entry&#10;SL range ke doosri taraf">${esc(f.rules||'')}</textarea></label>
+      ${f.id?'':`<label class="adm-notify"><input type="checkbox" id="ccf-announce" ${f.announce===false?'':'checked'}><span>📢 Sab traders ko announcement + notification bhejo <small>(purane traders ko bhi pata chalega)</small></span></label>`}
       <div class="sm-form-actions"><button type="button" class="btn-secondary" data-action="chal-cfg-cancel">Cancel</button><button type="button" class="btn-primary" data-action="chal-cfg-save" ${f.busy?'disabled':''}>💾 Save</button></div></div>`:'';
   return `<section class="card adm-sec-head"><div><h2 class="section-title">💯 100 Trades Challenge — admin</h2><p class="card-sub">Challenge ki strategies yahan alag se banti hain — <b>competition ki strategy yahan nahi aati</b>, aur competition ke trades challenge mein nahi ginte.</p></div></section>
     <section class="card chal-cfg" id="chal-cfg"><div class="adm-quote-head"><h3 class="section-title">📜 Challenge ki strategies</h3>${f?'':'<button type="button" class="btn-primary btn-small" data-action="chal-cfg-new">＋ Strategy add karo</button>'}</div>
@@ -3699,6 +3720,8 @@ function handleChalClick(action, btn, e){
   if(action==='chal-view-review'){ s.modal={ type:'review', stage:Number(btn.dataset.stage), view:true }; renderTabOnly(); return true; }
   if(action==='chal-view-report'){ s.modal={ type:'report', id:btn.dataset.id }; renderTabOnly(); return true; }
   if(action==='chal-open-restart'){ s.modal={ type:'restart' }; renderTabOnly(); return true; }
+  if(action==='chal-switch-strat'){ const x=chCfg().strategies.find(y=>y.id===btn.dataset.id); if(!x) return true; s.modal={ type:'restart', strategyName:x.name, reason:`Sir ki challenge strategy “${x.name}” par shift kar raha hoon` }; renderTabOnly(); return true; }
+  if(action==='chal-newstrat-hide'){ try{ localStorage.setItem('tc_chal_new_hidden', JSON.stringify([...new Set([...chNewHidden(), ...String(btn.dataset.ids||'').split(',').filter(Boolean)])].slice(-50))); }catch(_){} renderTabOnly(); return true; }
   if(action==='chal-open-settings'){ s.modal={ type:'settings' }; renderTabOnly(); return true; }
   if(action==='chal-save-settings'){ chPost({ action:'settings', risk:Number($('#chal-s-risk')?.value)||0, maxPerDay:Number($('#chal-s-cap')?.value)||0 }, '✓ Settings save ho gayi'); return true; }
   if(action==='chal-missed'){ s.modal={ type:'missed', kind:btn.dataset.kind }; renderTabOnly(); setTimeout(()=>$('#chal-m-note')?.focus(),50); return true; }
@@ -3721,6 +3744,7 @@ function handleChalClick(action, btn, e){
   if(action==='chal-cfg-edit'){ const x=chCfg().strategies.find(y=>y.id===btn.dataset.id); if(!x) return true; s.cfgForm={ ...x, rules:(x.rules||[]).join('\n'), locked:chStratUsers(x.id)>0 }; renderTabOnly(); $('#chal-cfg-form')?.scrollIntoView({block:'center'}); return true; }
   if(action==='chal-cfg-cancel'){ s.cfgForm=null; renderTabOnly(); return true; }
   if(action==='chal-cfg-save'){ const f=s.cfgForm; if(!f||f.busy) return true;
+    if(!f.id) f.announce=!!$('#ccf-announce')?.checked;
     Object.assign(f,{ name:f.locked?f.name:($('#ccf-name')?.value||'').trim(), description:$('#ccf-desc')?.value||'', entryCriteria:$('#ccf-entry')?.value||'', exitCriteria:$('#ccf-exit')?.value||'', rules:$('#ccf-rules')?.value||'' }); f.error='';
     if(f.name.length<2){ f.error='Strategy ka naam likho.'; renderTabOnly(); return true; }
     const L=chCfg().strategies||[];
@@ -3728,7 +3752,8 @@ function handleChalClick(action, btn, e){
     if((compState().list||[]).some(c=>c.state!=='ended' && chNorm(c.strategy)===chNorm(f.name))){ f.error=`“${f.name}” competition ki strategy ka naam hai — challenge ke liye alag naam rakho (jaise “${f.name} — 100 Trades”).`; renderTabOnly(); return true; }
     const row={ id:f.id||undefined, name:f.name, description:f.description, entryCriteria:f.entryCriteria, exitCriteria:f.exitCriteria, rules:f.rules.split('\n').map(x=>x.trim()).filter(Boolean), active:f.id?(L.find(x=>x.id===f.id)?.active!==false):true, createdAt:f.createdAt };
     f.busy=true; renderTabOnly();
-    chSaveCfg({ ...chCfg(), strategies:f.id?L.map(x=>x.id===f.id?row:x):[...L,row] }, ()=>{ s.cfgForm=null; }); return true; }
+    chSaveCfg({ ...chCfg(), strategies:f.id?L.map(x=>x.id===f.id?row:x):[...L,row] }, ()=>{ s.cfgForm=null;
+      if(!f.id && f.announce) compAnnounce(`💯 Nayi challenge strategy: ${row.name}`, `Sir ne 100 Trades Challenge ke liye nayi strategy di hai: ${row.name}. Challenge tab mein rules dekho aur shuru karo (jinka challenge chal raha hai, woh wahin se shift kar sakte hain).`, 7); }); return true; }
   if(action==='chal-cfg-toggle'){ const L=chCfg().strategies; chSaveCfg({ ...chCfg(), strategies:L.map(x=>x.id===btn.dataset.id?{...x,active:!x.active}:x) }); return true; }
   if(action==='chal-cfg-del'){ const x=chCfg().strategies.find(y=>y.id===btn.dataset.id); if(!x) return true;
     askConfirm({ title:`“${x.name}” delete karein?`, body:'Yeh strategy challenge ki list se hat jayegi. Jo challenge pehle khatam ho chuke, unka data rahega.', ok:'🗑️ Delete', danger:true }).then(y=>{ if(y) chSaveCfg({ ...chCfg(), strategies:chCfg().strategies.filter(z=>z.id!==x.id) }); }); return true; }

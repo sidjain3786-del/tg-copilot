@@ -1304,3 +1304,11 @@ button.journal-chip.chip-comp { border: 1px solid #F6D58A; background: var(--mar
   .chal-cfg-actions { justify-content: flex-start; }
   .adm-secnav { border-radius: var(--r-md); }
 }
+/* Update 37: new challenge strategy notice for traders already in a challenge */
+.chal-newstrat { display: flex; gap: 1rem; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; background: var(--marigold-tint); border: 1px solid var(--marigold); border-radius: var(--r-md); padding: 1rem 1.1rem; margin-bottom: 1rem; }
+.chal-newstrat-text { flex: 1 1 320px; min-width: 0; }
+.chal-newstrat-text b { color: var(--ink); }
+.chal-newstrat-text p { margin: .3rem 0 .4rem; font-size: .86rem; color: var(--text); }
+.chal-newstrat-actions { display: flex; flex-direction: column; gap: .4rem; align-items: stretch; }
+.chal-newstrat .comp-ghost.dark { color: var(--muted); border-color: var(--line); background: transparent; }
+@media (max-width: 600px) { .chal-newstrat-actions { width: 100%; } }
