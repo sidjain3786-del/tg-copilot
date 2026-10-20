@@ -1312,3 +1312,66 @@ button.journal-chip.chip-comp { border: 1px solid #F6D58A; background: var(--mar
 .chal-newstrat-actions { display: flex; flex-direction: column; gap: .4rem; align-items: stretch; }
 .chal-newstrat .comp-ghost.dark { color: var(--muted); border-color: var(--line); background: transparent; }
 @media (max-width: 600px) { .chal-newstrat-actions { width: 100%; } }
+
+/* ===== Update 38: 💬 trader-wise messages ===== */
+.msg-card { background: #fff; border: 1px solid var(--marigold); border-left: 5px solid var(--marigold); border-radius: var(--r-md); padding: 1rem 1.1rem; margin-bottom: 1rem; box-shadow: var(--shadow-1); }
+.msg-card-head { display: flex; align-items: center; gap: .7rem; margin-bottom: .4rem; }
+.msg-card-head h3 { margin: 0; font-family: var(--font-display); font-size: 1.05rem; color: var(--ink); }
+.msg-card-head small { color: var(--muted); font-size: .74rem; }
+.msg-card-head .comp-ghost { margin-left: auto; }
+.msg-card-ico { width: 2.3rem; height: 2.3rem; border-radius: 50%; display: grid; place-items: center; background: var(--marigold-tint); font-size: 1.15rem; flex-shrink: 0; }
+.msg-count { display: inline-grid; place-items: center; min-width: 1.3rem; height: 1.3rem; padding: 0 .35rem; border-radius: 999px; background: var(--marigold); color: var(--ink); font-size: .72rem; vertical-align: middle; }
+.msg-item { display: flex; justify-content: space-between; gap: .8rem; align-items: flex-start; padding: .7rem 0; border-top: 1px solid var(--line); }
+.msg-item-text { min-width: 0; }
+.msg-item-text b { color: var(--ink); }
+.msg-item-text p { margin: .25rem 0; font-size: .88rem; color: var(--text); white-space: pre-line; }
+.msg-item-text small { color: var(--muted); font-size: .72rem; }
+.msg-item-actions { display: flex; gap: .4rem; flex-wrap: wrap; justify-content: flex-end; flex-shrink: 0; }
+.msg-more { margin: .3rem 0 0; font-size: .78rem; color: var(--muted); }
+.msg-old-wrap { margin-bottom: 1rem; }
+.msg-old { background: #fff; border: 1px solid var(--line); border-radius: var(--r-sm); padding: .5rem .8rem; font-size: .85rem; }
+.msg-old summary { cursor: pointer; color: var(--muted); font-weight: 600; }
+.dm-card .card-sub { margin: .2rem 0 0; }
+.dm-result { position: static; margin: .8rem 0; }
+.dm-grid { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.1fr); gap: 1.2rem; margin-top: 1rem; }
+.dm-pick input[type=search] { width: 100%; box-sizing: border-box; }
+.dm-filters { margin: .6rem 0; }
+.dm-pick-bar { display: flex; justify-content: space-between; gap: .5rem; flex-wrap: wrap; font-size: .78rem; color: var(--muted); margin-bottom: .4rem; }
+.dm-list { max-height: 360px; overflow-y: auto; border: 1px solid var(--line); border-radius: var(--r-sm); }
+.dm-row { display: flex; align-items: center; gap: .6rem; padding: .55rem .7rem; border-top: 1px solid var(--line); cursor: pointer; }
+.dm-row:first-child { border-top: 0; }
+.dm-row:hover { background: var(--ink-tint); }
+.dm-row.on { background: var(--marigold-tint); }
+.dm-who { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.dm-who b { font-size: .88rem; color: var(--ink); }
+.dm-who small { font-size: .72rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dm-push { font-size: .9rem; opacity: .5; }
+.dm-push.on { opacity: 1; }
+.dm-compose { display: flex; flex-direction: column; gap: .2rem; }
+.dm-to { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; font-size: .82rem; min-height: 2rem; margin-bottom: .4rem; }
+.dm-to-empty { color: var(--muted); }
+.dm-chip { display: inline-flex; align-items: center; gap: .25rem; background: var(--ink); color: #fff; border-radius: 999px; padding: .2rem .3rem .2rem .65rem; font-size: .76rem; }
+.dm-chip.more { padding-right: .65rem; background: var(--ink-3); }
+.dm-chip button { border: 0; background: rgba(255,255,255,.18); color: #fff; width: 1.15rem; height: 1.15rem; border-radius: 50%; cursor: pointer; line-height: 1; padding: 0; }
+.dm-templates { display: flex; gap: .35rem; flex-wrap: wrap; margin-bottom: .5rem; }
+.dm-tpl { border: 1px dashed var(--ink-3); background: transparent; color: var(--ink); border-radius: 999px; padding: .3rem .7rem; font: inherit; font-size: .76rem; cursor: pointer; }
+.dm-tpl:hover { background: var(--ink-tint); border-style: solid; }
+.dm-compose .adm-field small { color: var(--muted); font-size: .74rem; }
+.dm-preview { border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--ink-tint); padding: .6rem .75rem; margin: .3rem 0 .5rem; font-size: .85rem; }
+.dm-preview span { display: block; font-size: .7rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: .2rem; }
+.dm-preview p { margin: .2rem 0 0; color: var(--text); white-space: pre-line; }
+.dm-send { align-self: flex-start; margin-top: .3rem; }
+.dm-send:disabled { opacity: .5; cursor: not-allowed; }
+.dm-history { margin-top: 1.2rem; border-top: 1px solid var(--line); padding-top: .8rem; }
+.dm-history summary { cursor: pointer; font-weight: 600; color: var(--ink); }
+.dm-hist-list { max-height: 320px; overflow-y: auto; margin-top: .5rem; }
+.dm-hist { display: flex; justify-content: space-between; gap: .8rem; padding: .5rem 0; border-top: 1px solid var(--line); font-size: .84rem; }
+.dm-hist p { margin: .1rem 0 0; color: var(--text); }
+.dm-hist small { color: var(--muted); }
+.dm-status { flex-shrink: 0; color: var(--muted); font-size: .76rem; text-align: right; }
+.dm-status.read { color: var(--profit); font-weight: 600; }
+@media (max-width: 760px) { .dm-grid { grid-template-columns: minmax(0,1fr); } .msg-item { flex-direction: column; } .msg-item-actions { justify-content: flex-start; } }
+.rem-setup li, .rem-setup code { overflow-wrap: anywhere; word-break: break-word; }
+.rem-setup ol { min-width: 0; grid-template-columns: minmax(0,1fr); }
+#dm-search, .dm-compose select, .chal-cfg select { width: 100%; box-sizing: border-box; border: 1px solid var(--line); border-radius: var(--r-sm); padding: .65rem .8rem; font: inherit; font-size: .88rem; color: var(--text); background: #fff; }
+#dm-search:focus, .dm-compose select:focus { outline: none; border-color: var(--ink-3); box-shadow: 0 0 0 3px rgba(45,82,135,.14); }

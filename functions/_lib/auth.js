@@ -72,6 +72,8 @@ export async function ensureSchema(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS competition_claps (entry_id TEXT NOT NULL, user_id TEXT NOT NULL, PRIMARY KEY (entry_id, user_id))`).run();
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS trade_challenges (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, strategy TEXT NOT NULL, started_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', reviews TEXT NOT NULL DEFAULT '{}', focus TEXT NOT NULL DEFAULT 'null', ended_at TEXT, end_reason TEXT NOT NULL DEFAULT '', attempt INTEGER NOT NULL DEFAULT 1, risk REAL NOT NULL DEFAULT 0, max_per_day INTEGER NOT NULL DEFAULT 0, feedback TEXT NOT NULL DEFAULT '{}', extras TEXT NOT NULL DEFAULT '{}')`).run();
   await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_challenges_user ON trade_challenges (user_id, status)`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS trader_messages (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', cta TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, sent_by TEXT, read_at TEXT, devices INTEGER NOT NULL DEFAULT 0)`).run();
+  await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_trader_messages_user ON trader_messages (user_id, created_at)`).run();
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS user_prefs (user_id TEXT PRIMARY KEY, reminders_off INTEGER NOT NULL DEFAULT 0, pending TEXT)`).run();
   await addMissingColumns(env, 'trade_challenges', { risk: 'REAL NOT NULL DEFAULT 0', max_per_day: 'INTEGER NOT NULL DEFAULT 0', feedback: `TEXT NOT NULL DEFAULT '{}'`, extras: `TEXT NOT NULL DEFAULT '{}'` });
   await addMissingColumns(env, 'user_prefs', { pending: 'TEXT' });

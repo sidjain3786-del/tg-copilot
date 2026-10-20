@@ -1,4 +1,4 @@
-const APP_VERSION = '37';   // shown in Admin → System check; bump on every release
+const APP_VERSION = '38';   // shown in Admin → System check; bump on every release
 /* ============================================================
    Trader Co-Pilot — vanilla JS (no framework)
    Talks to /api/* (Cloudflare Pages Functions + D1) for
@@ -319,6 +319,7 @@ function showApp(){
   if(STATE.user && !STATE.comp?.loaded) setTimeout(()=>loadCompetitions(), 1200);
   if(STATE.user && !STATE.chal?.loaded) setTimeout(()=>loadChallenge(), 900);
   if(STATE.user && !STATE.rem?.loaded) setTimeout(()=>loadReminders(), 1000);
+  if(STATE.user && !STATE.msg?.loaded) setTimeout(()=>loadMessages(), 700);
   applyFeatureClasses();
   if(!PUSH.checked) checkPush(); $('#loading-screen').style.display='none'; $('#auth-screen').style.display='none'; $('#app-screen').style.display='block'; render(); }
 
@@ -358,7 +359,7 @@ $('#auth-form').addEventListener('submit', async (e) => {
 
 $('#logout-btn').addEventListener('click', async () => {
   try { await api('/api/logout', 'POST'); } catch (e) { console.warn('Logout request failed', e); }
-  IMAGE_URL_CACHE.clear(); IMAGE_STORE_AVAILABLE = true; STATE.blog = null; STATE.admin = null; STATE.quotes = null; STATE.ann = null; STATE.comp = null; STATE.chal = null; STATE.rem = null; STATE.logStratTouched = false; STATE.logCompId = null; STATE.logChalId = null; STATE.logCompRules = []; STATE.features = {}; $('#comp-toast')?.remove(); $('#privacy-notice')?.remove();
+  IMAGE_URL_CACHE.clear(); IMAGE_STORE_AVAILABLE = true; STATE.blog = null; STATE.admin = null; STATE.quotes = null; STATE.ann = null; STATE.comp = null; STATE.chal = null; STATE.rem = null; STATE.msg = null; STATE.dm = null; STATE.logStratTouched = false; STATE.logCompId = null; STATE.logChalId = null; STATE.logCompRules = []; STATE.features = {}; $('#comp-toast')?.remove(); $('#privacy-notice')?.remove();
   STATE.user = null; STATE.trades = []; STATE.notes = []; STATE.customStrategies = []; STATE.sessionNotes = {};
   setAuthMode('login');
   showAuth();
@@ -941,6 +942,7 @@ function renderCopilotTab(){
     </div>
     <div class="hero-actions"><button class="btn-cta" data-action="set-tab" data-tab="log">＋ Log New Trade</button><button type="button" class="btn-hero-ghost" data-action="open-weekly-report">📄 Weekly report</button></div>
   </section>
+  ${renderMsgDashCard()}
   ${renderCompDashBanner()}
   ${renderChalDashCard()}
   ${renderDashMessages()}
@@ -2172,7 +2174,7 @@ function renderAdminTab(){
   const sec=adminSec();
   if(sec==='competition') return renderAdminSecNav()+renderAdminCompSection();
   if(sec==='challenge') return renderAdminSecNav()+renderAdminChalSection();
-  if(sec==='notify') return `${renderAdminSecNav()}${renderAdminBroadcast()}${renderAdminReminders()}`;
+  if(sec==='notify') return `${renderAdminSecNav()}${renderAdminDirectMsg()}${renderAdminBroadcast()}${renderAdminReminders()}`;
   if(sec==='system') return `${renderAdminSecNav()}${renderAdminFeaturesPanel()}${renderAdminHealthPanel()}`;
   if(!a.loaded){ setTimeout(()=>loadAdminUsers(),0); return `${renderAdminSecNav()}<section class="card adm-head"><h2 class="section-title">🛠️ Admin</h2><p class="card-sub">${a.error?esc(a.error):'Traders ka data load ho raha hai…'}</p>${a.error?'<button class="btn-secondary btn-small" data-action="admin-reload">Dobara try karo</button>':''}</section>`; }
   const U=a.users.filter(u=>!u.isAdmin), all=a.users;
@@ -2216,7 +2218,7 @@ function renderAdminTab(){
       ${empties?`<div class="adm-cleanup"><span>🧹 <b>${empties}</b> khaali account${empties===1?'':'s'} (0 trades, 0 notes) — test / temporary ho sakte hain.</span><button type="button" class="btn-secondary btn-small" data-action="admin-select-empty">Sab select karo</button></div>`:''}
       ${list.length?`<div class="adm-table-wrap"><table class="adm-table"><thead><tr><th class="adm-check">${selectable.length?`<input type="checkbox" data-action="admin-select-all" ${allSel?'checked':''} aria-label="Select all">`:''}</th><th>Trader</th><th>Status</th><th class="num">Trades</th><th class="num">Net P&amp;L</th><th class="num">Win</th><th class="num">Rules</th><th>Top mistake</th><th class="num">Notes</th></tr></thead><tbody>${list.map(row).join('')}</tbody></table></div>`:`<p class="pb-empty">Is filter mein koi trader nahi.</p>`}
     </section>
-    ${sel.size?`<div class="adm-bulkbar" role="region" aria-label="Selected traders"><span><b>${sel.size}</b> selected</span><button type="button" class="btn-secondary btn-small" data-action="admin-clear-selection">Hatao</button><button type="button" class="btn-danger" data-action="admin-delete-selected">🗑️ Delete ${sel.size}</button></div>`:''}
+    ${sel.size?`<div class="adm-bulkbar" role="region" aria-label="Selected traders"><span><b>${sel.size}</b> selected</span><button type="button" class="btn-secondary btn-small" data-action="admin-clear-selection">Hatao</button><button type="button" class="btn-primary btn-small" data-action="admin-dm-selected">💬 Message bhejo</button><button type="button" class="btn-danger" data-action="admin-delete-selected">🗑️ Delete ${sel.size}</button></div>`:''}
     ${renderAdminConfirm()}`;
 }
 function renderAdminConfirm(){
@@ -2271,6 +2273,138 @@ function miniCurve(trades){
   const xy=pts.map((v,i)=>`${(p+i*(w-2*p)/(pts.length-1)).toFixed(1)},${(h-p-(v-mn)/rg*(h-2*p)).toFixed(1)}`).join(' '), zy=(h-p-(0-mn)/rg*(h-2*p)).toFixed(1);
   return `<svg class="adm-curve" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="Equity curve"><line x1="${p}" y1="${zy}" x2="${w-p}" y2="${zy}" stroke="#B8C4D4" stroke-dasharray="4 4"/><polyline points="${xy}" fill="none" stroke="${run>=0?'#0B9A6A':'#E0413F'}" stroke-width="2.5" vector-effect="non-scaling-stroke"/></svg>`;
 }
+/* ================= 💬 TRADER-WISE MESSAGES (Sir -> one trader) =================
+   Admin picks traders and sends a message. It lands in the trader's inbox (dashboard card)
+   and, if notifications are on, on their phone too. */
+const DM_CTA = { '':'Koi button nahi', log:'📝 Journal karo', notes:'🧠 Notes kholo', history:'📜 History dekho', challenge:'💯 Challenge kholo', competition:'🏆 Competition kholo', analysis:'📊 Analysis dekho' };
+const DM_TAB = { log:'log', notes:'notes', history:'history', challenge:'challenge', competition:'competition', analysis:'analysis' };
+const DM_TEMPLATES = [
+  ['📝 Journal miss', { title:'{name}, journal miss ho raha hai', body:'Kuch din se aapka journal khaali hai. Aaj ke trades sirf 30 second mein likh do — entry, emotion aur mistake. Isi se pattern dikhega.', cta:'log' }],
+  ['🛡️ Rules toot rahe', { title:'{name}, rules par dhyan do', body:'Pichhle trades mein rules kaafi baar toote hain. Agle 5 trades sirf apne setup par lo — SL pehle se fix karke.', cta:'history' }],
+  ['👏 Shabash', { title:'Shabash {name}! 👏', body:'Aapka discipline badhiya chal raha hai. Isi tarah process follow karte raho — results apne aap aayenge.', cta:'' }],
+  ['💯 Challenge review', { title:'{name}, challenge review baaki hai', body:'Aapke 100 Trades Challenge ka review pending hai. 5 minute nikaalo — review ke bina aage ke trades nahi ginenge.', cta:'challenge' }],
+  ['📞 Baat karni hai', { title:'{name}, ek baar baat karte hain', body:'Aapke journal mein kuch cheezein dekhi hain. Aaj group mein mujhe message karo — milkar plan banate hain.', cta:'' }]
+];
+function msgState(){ return STATE.msg || (STATE.msg={ loaded:false, loading:false, list:[], showOld:false }); }
+async function loadMessages(force=false){
+  const s=msgState(); if(s.loading || (s.loaded && !force)) return;
+  s.loading=true;
+  try { s.list=(await api('/api/messages')).messages||[]; s.loaded=true; s.at=Date.now(); } catch(e){ /* inbox is optional */ }
+  finally { s.loading=false; }
+  if(STATE.activeTab==='copilot'){ const el=$('#msg-dash'); if(el) el.outerHTML=renderMsgDashCard(); }
+}
+document.addEventListener('visibilitychange', ()=>{ const s=STATE.msg; if(document.visibilityState==='visible' && STATE.user && s?.loaded && Date.now()-(s.at||0)>60000) loadMessages(true); });
+function renderMsgDashCard(){
+  const s=msgState(), unread=s.list.filter(m=>!m.readAt), old=s.list.filter(m=>m.readAt);
+  if(!unread.length && !old.length) return '<div id="msg-dash" hidden></div>';
+  const item=(m,isNew)=>`<div class="msg-item ${isNew?'new':''}"><div class="msg-item-text"><b>${esc(m.title)}</b>${m.body?`<p>${esc(m.body)}</p>`:''}<small>${esc(timeAgo(m.createdAt))}</small></div>
+    <div class="msg-item-actions">${DM_TAB[m.cta]?`<button type="button" class="btn-primary btn-small" data-action="msg-go" data-id="${esc(m.id)}" data-tab="${DM_TAB[m.cta]}">${esc(DM_CTA[m.cta])} →</button>`:''}${isNew?`<button type="button" class="btn-secondary btn-small" data-action="msg-read" data-id="${esc(m.id)}">✓ Padh liya</button>`:''}</div></div>`;
+  if(!unread.length) return `<div id="msg-dash" class="msg-old-wrap"><details class="msg-old" ${s.showOld?'open':''}><summary data-action="msg-toggle-old">💬 Sir ke messages (${old.length})</summary>${old.slice(0,10).map(m=>item(m,false)).join('')}</details></div>`;
+  return `<section id="msg-dash" class="msg-card" role="status"><div class="msg-card-head"><span class="msg-card-ico" aria-hidden="true">💬</span><div><h3>Sir ka message${unread.length>1?` <span class="msg-count">${unread.length}</span>`:''}</h3><small>Sirf aapke liye</small></div>${unread.length>1?'<button type="button" class="comp-ghost dark" data-action="msg-read-all">Sab padh liye</button>':''}</div>
+    ${unread.slice(0,3).map(m=>item(m,true)).join('')}${unread.length>3?`<p class="msg-more">+${unread.length-3} aur</p>`:''}</section>`;
+}
+function msgMarkRead(ids){
+  const s=msgState(), now=new Date().toISOString();
+  s.list.forEach(m=>{ if(ids==='all' ? !m.readAt : ids.includes(m.id)) m.readAt=now; });
+  api('/api/messages','POST',{ action:'read', ids }).catch(()=>{});
+}
+function handleMsgClick(action, btn){
+  if(!action || !action.startsWith('msg-')) return false;
+  if(action==='msg-read'){ msgMarkRead([btn.dataset.id]); const el=$('#msg-dash'); if(el) el.outerHTML=renderMsgDashCard(); return true; }
+  if(action==='msg-read-all'){ msgMarkRead('all'); const el=$('#msg-dash'); if(el) el.outerHTML=renderMsgDashCard(); return true; }
+  if(action==='msg-go'){ msgMarkRead([btn.dataset.id]); STATE.activeTab=btn.dataset.tab; render(); window.scrollTo({top:0}); return true; }
+  if(action==='msg-toggle-old'){ msgState().showOld=!msgState().showOld; return true; }
+  return true;
+}
+/* ---------- admin: pick traders and send ---------- */
+function dmState(){ return STATE.dm || (STATE.dm={ sel:new Set(), search:'', filter:'all', title:'', body:'', cta:'', busy:false, result:null, error:'', history:null }); }
+const DM_FILTERS=[['all','Sab'],['inactive','7+ din se gayab'],['nosave3','3+ din se journal nahi'],['lowrules','Rules < 60%'],['new','Naye (7 din)'],['notrades','0 trades'],['selected','Chune hue']];
+function dmTraders(){
+  const d=dmState(), q=d.search.trim().toLowerCase();
+  let L=(adminState().users||[]).filter(u=>!u.isAdmin);
+  if(q) L=L.filter(u=>`${u.name} ${u.email}`.toLowerCase().includes(q));
+  const f=d.filter;
+  if(f==='inactive') L=L.filter(u=>daysSince(lastActive(u))>7);
+  if(f==='nosave3') L=L.filter(u=>daysSince(u.lastSaveAt)>=3);
+  if(f==='lowrules') L=L.filter(u=>u.closed && u.ruleRate<60);
+  if(f==='new') L=L.filter(u=>daysSince(u.createdAt)<=7);
+  if(f==='notrades') L=L.filter(u=>!u.trades);
+  if(f==='selected') L=L.filter(u=>d.sel.has(u.id));
+  return L;
+}
+function dmListHtml(){
+  const d=dmState(), L=dmTraders();
+  if(!L.length) return '<p class="pb-empty">Is filter mein koi trader nahi.</p>';
+  return L.map(u=>`<label class="dm-row ${d.sel.has(u.id)?'on':''}"><input type="checkbox" data-action="dm-pick" data-id="${esc(u.id)}" ${d.sel.has(u.id)?'checked':''}><span class="adm-ava" aria-hidden="true">${initials(u)}</span><span class="dm-who"><b>${esc(u.name||'—')}</b><small>${esc(u.email)} · ${esc(timeAgo(lastActive(u)))}</small></span>${u.pushDevices?'<span class="dm-push on" title="Phone par notification on hai">🔔</span>':'<span class="dm-push" title="Notification on nahi — app kholne par message dikhega">🔕</span>'}</label>`).join('');
+}
+function dmSelectedNames(){ const d=dmState(), U=adminState().users||[]; return [...d.sel].map(id=>U.find(u=>u.id===id)).filter(Boolean); }
+function renderAdminDirectMsg(){
+  const a=adminState(), d=dmState();
+  if(!a.loaded){ setTimeout(()=>loadAdminUsers(),0); return `<section class="card" id="admin-dm"><p class="card-sub">Traders load ho rahe hain…</p></section>`; }
+  if(d.history===null){ d.history=[]; setTimeout(()=>dmLoadHistory(),0); }
+  const sel=dmSelectedNames(), first=(sel[0]?.name||'Trader').trim().split(/\s+/)[0], fill=t=>String(t||'').replace(/\{name\}/gi, first);
+  const vis=dmTraders(), allOn=vis.length && vis.every(u=>d.sel.has(u.id));
+  return `<section class="card dm-card" id="admin-dm">
+    <div class="adm-quote-head"><div><h3 class="section-title">💬 Trader ko message bhejo</h3><p class="card-sub">Ek ya kuch chune hue traders ko. Message unke dashboard par “💬 Sir ka message” mein aayega, aur notification on hai to phone par bhi.</p></div></div>
+    ${d.result?`<div class="adm-toast dm-result" role="status">${d.result}</div>`:''}
+    <div class="dm-grid">
+      <div class="dm-pick">
+        <input type="search" id="dm-search" value="${esc(d.search)}" placeholder="🔍 Trader ka naam ya email…" aria-label="Trader dhoondo">
+        <div class="blog-tag-row dm-filters">${DM_FILTERS.map(([v,l])=>`<button type="button" class="${d.filter===v?'active':''}" data-action="dm-filter" data-filter="${v}">${l}${v==='selected'&&d.sel.size?` (${d.sel.size})`:''}</button>`).join('')}</div>
+        <div class="dm-pick-bar"><span>${vis.length} dikh rahe · <b>${d.sel.size}</b> chune</span><span><button type="button" class="pb-link" data-action="dm-all">${allOn?'Dikh rahe hatao':'Dikh rahe sab chuno'}</button>${d.sel.size?' · <button type="button" class="pb-link" data-action="dm-clear">Sab hatao</button>':''}</span></div>
+        <div class="dm-list" id="dm-list">${dmListHtml()}</div>
+      </div>
+      <div class="dm-compose">
+        <div class="dm-to">${sel.length?`<b>Kisko:</b> ${sel.slice(0,6).map(u=>`<span class="dm-chip">${esc(u.name||u.email)}<button type="button" data-action="dm-unpick" data-id="${esc(u.id)}" aria-label="Hatao">×</button></span>`).join('')}${sel.length>6?` <span class="dm-chip more">+${sel.length-6}</span>`:''}`:'<span class="dm-to-empty">👈 Pehle trader chuno</span>'}</div>
+        <div class="dm-templates">${DM_TEMPLATES.map(([l],i)=>`<button type="button" class="dm-tpl" data-action="dm-template" data-i="${i}">${esc(l)}</button>`).join('')}</div>
+        <label class="adm-field"><span>Title</span><input id="dm-title" maxlength="80" value="${esc(d.title)}" placeholder="e.g. {name}, aaj journal kiya?"></label>
+        <label class="adm-field"><span>Message</span><textarea id="dm-body" rows="4" maxlength="500" placeholder="Seedhi, chhoti baat likho…">${esc(d.body)}</textarea><small><b>{name}</b> likhoge to har trader ka apna naam aayega.</small></label>
+        <label class="adm-field"><span>Button</span><select id="dm-cta">${Object.entries(DM_CTA).map(([k,l])=>`<option value="${k}" ${d.cta===k?'selected':''}>${l}</option>`).join('')}</select></label>
+        ${d.title?`<div class="dm-preview" aria-label="Preview"><span>Aise dikhega${sel.length?` (${esc(first)} ko)`:''}:</span><b>💬 ${esc(fill(d.title))}</b>${d.body?`<p>${esc(fill(d.body))}</p>`:''}</div>`:''}
+        ${d.error?`<p class="sm-error">${esc(d.error)}</p>`:''}
+        <button type="button" class="btn-cta dm-send" data-action="dm-send" ${d.busy||!d.sel.size?'disabled':''}>${d.busy?'Bhej rahe hain…':`📨 ${d.sel.size||''} trader${d.sel.size===1?'':'s'} ko bhejo`}</button>
+      </div>
+    </div>
+    ${renderDmHistory()}
+  </section>`;
+}
+async function dmLoadHistory(){ const d=dmState(); try{ d.history=(await api('/api/admin/messages')).messages||[]; }catch(e){ d.history=[]; } if(STATE.activeTab==='admin' && adminSec()==='notify') dmRefresh(); }
+function renderDmHistory(){
+  const H=dmState().history||[]; if(!H.length) return '';
+  return `<details class="dm-history" open><summary>📜 Bheje gaye messages (${H.length})</summary><div class="dm-hist-list">${H.slice(0,40).map(m=>`<div class="dm-hist"><div><b>${esc(m.name)}</b> <small>${esc(timeAgo(m.createdAt))}</small><p>${esc(m.title)}</p></div><span class="dm-status ${m.readAt?'read':''}">${m.readAt?`✓✓ Padh liya <small>${esc(timeAgo(m.readAt))}</small>`:'✓ Bheja'}${m.devices?' · 📱':''}</span></div>`).join('')}</div></details>`;
+}
+/* keep typed text when re-rendering */
+function dmKeep(){ const d=dmState(); const t=$('#dm-title'), b=$('#dm-body'), c=$('#dm-cta'); if(t) d.title=t.value; if(b) d.body=b.value; if(c) d.cta=c.value; }
+function dmRefresh(){ const el=$('#admin-dm'); if(el){ dmKeep(); const y=window.scrollY; el.outerHTML=renderAdminDirectMsg(); window.scrollTo({top:y}); } }
+function dmOpenFor(ids){ const d=dmState(); d.sel=new Set(ids); d.search=''; d.filter=ids.length?'selected':'all'; d.result=null; d.error=''; const a=adminState(); a.view='list'; STATE.adminSec='notify'; STATE.activeTab='admin'; render(); setTimeout(()=>$('#admin-dm')?.scrollIntoView({block:'start'}),50); }
+document.addEventListener('input', e=>{
+  if(e.target.id==='dm-search'){ const d=dmState(); d.search=e.target.value; clearTimeout(d.t); d.t=setTimeout(()=>{ const L=$('#dm-list'); if(L) L.innerHTML=dmListHtml(); },150); return; }
+  if(e.target.id==='dm-title' || e.target.id==='dm-body'){ const d=dmState(); dmKeep(); clearTimeout(d.pt); d.pt=setTimeout(()=>{ const id=e.target.id, pos=e.target.selectionStart; dmRefresh(); const el=$('#'+id); if(el){ el.focus(); try{ el.setSelectionRange(pos,pos); }catch(_){} } },500); }
+});
+function handleDmClick(action, btn){
+  if(!action || !action.startsWith('dm-')) return false;
+  const d=dmState();
+  if(action==='dm-pick'){ btn.checked?d.sel.add(btn.dataset.id):d.sel.delete(btn.dataset.id); d.result=null; dmRefresh(); return true; }
+  if(action==='dm-unpick'){ d.sel.delete(btn.dataset.id); dmRefresh(); return true; }
+  if(action==='dm-filter'){ d.filter=btn.dataset.filter; dmRefresh(); return true; }
+  if(action==='dm-all'){ const vis=dmTraders(), allOn=vis.length&&vis.every(u=>d.sel.has(u.id)); vis.forEach(u=>allOn?d.sel.delete(u.id):d.sel.add(u.id)); dmRefresh(); return true; }
+  if(action==='dm-clear'){ d.sel.clear(); if(d.filter==='selected') d.filter='all'; dmRefresh(); return true; }
+  if(action==='dm-template'){ const t=DM_TEMPLATES[Number(btn.dataset.i)]?.[1]; if(t){ d.title=t.title; d.body=t.body; d.cta=t.cta; const el=$('#admin-dm'); if(el){ const y=window.scrollY; el.outerHTML=renderAdminDirectMsg(); window.scrollTo({top:y}); } } return true; }
+  if(action==='dm-to'){ dmOpenFor([btn.dataset.id]); return true; }
+  if(action==='dm-send'){ dmKeep(); d.error=''; d.result=null;
+    if(!d.sel.size){ d.error='Pehle trader chuno.'; dmRefresh(); return true; }
+    if(d.title.trim().length<2){ d.error='Title likho.'; dmRefresh(); return true; }
+    const names=dmSelectedNames().map(u=>u.name||u.email);
+    askConfirm({ title:`${d.sel.size} trader${d.sel.size>1?'s':''} ko message bhejein?`, body:`<b>${esc(names.slice(0,8).join(', '))}${names.length>8?` +${names.length-8}`:''}</b><br>Sirf inhe dikhega — baaki traders ko nahi.`, ok:'📨 Bhejo', danger:false }).then(y=>{ if(!y) return;
+      d.busy=true; dmRefresh();
+      api('/api/admin/messages','POST',{ userIds:[...d.sel], title:d.title, body:d.body, cta:d.cta }).then(r=>{
+        d.busy=false; d.result=`✓ ${r.sent} trader${r.sent>1?'s':''} ko message bheja · ${r.withPush} ke phone par notification gaya${r.noPush.length?` · ${r.noPush.length} ne notification on nahi kiya (app kholte hi dikhega): ${esc(r.noPush.slice(0,5).join(', '))}${r.noPush.length>5?'…':''}`:''}`;
+        d.title=''; d.body=''; d.cta=''; d.sel.clear(); d.filter='all'; d.history=null; dmRefresh();
+      }).catch(err=>{ d.busy=false; d.error=err.message; dmRefresh(); }); });
+    return true; }
+  return true;
+}
+
 function renderAdminUser(){
   const a=adminState(), d=a.detail;
   const back=`<button type="button" class="btn-secondary btn-small" data-action="admin-back">‹ Sab traders</button>`;
@@ -2289,7 +2423,7 @@ function renderAdminUser(){
   const noteBody=n=>normalizeNoteBlocks(n).map(b=>b.type==='image'?(b.src?`<img src="${esc(imgUrl(b.src))}" alt="" loading="lazy" data-action="admin-view-image" data-src="${esc(b.src)}">`:''):`<div class="adm-note-text">${b.html?sanitizeNoteHtml(b.html):esc(b.text||'').replace(/\n/g,'<br>')}</div>`).join('');
   const notes=[...d.notes].sort((x,y)=>String(y.updatedAt||y.date||'').localeCompare(String(x.updatedAt||x.date||'')));
   return `<section class="card adm-user">
-    <div class="blog-post-top">${back}<div class="blog-admin-actions"><span class="adm-readonly">👁 Sirf dekhne ke liye</span>${canDelete({...u,isAdmin:a.users.find(x=>x.id===u.id)?.isAdmin})?`<button type="button" class="btn-danger btn-small" data-action="admin-delete-one" data-id="${esc(u.id)}">🗑️ Delete trader</button>`:''}</div></div>
+    <div class="blog-post-top">${back}<div class="blog-admin-actions"><span class="adm-readonly">👁 Sirf dekhne ke liye</span><button type="button" class="btn-primary btn-small" data-action="dm-to" data-id="${esc(u.id)}">💬 Message bhejo</button>${canDelete({...u,isAdmin:a.users.find(x=>x.id===u.id)?.isAdmin})?`<button type="button" class="btn-danger btn-small" data-action="admin-delete-one" data-id="${esc(u.id)}">🗑️ Delete trader</button>`:''}</div></div>
     <div class="adm-user-head"><div class="adm-avatar" aria-hidden="true">${esc((u.name||u.email||'?').trim()[0]?.toUpperCase()||'?')}</div><div><h2>${esc(u.name||'—')}</h2><p>${esc(u.email)} · joined ${esc(timeAgo(u.createdAt))} · last active ${esc(timeAgo([u.lastSeenAt,u.lastSaveAt].filter(Boolean).sort().pop()))} · ${u.visits} visits</p></div></div>
     <div class="pb-stats adm-stats">
       <div><span>Trades</span><strong>${s.closed}${s.open?`<small> +${s.open} open</small>`:''}</strong></div>
@@ -2326,6 +2460,7 @@ function exportAdminCsv(){
 }
 function handleAdminClick(action, btn){
   const a=adminState();
+  if(action==='admin-dm-selected'){ dmOpenFor([...a.selected]); return true; }
   if(action==='admin-sec'){ STATE.adminSec=btn.dataset.sec; renderTabOnly(); window.scrollTo({top:0}); return true; }
   if(action==='admin-goto'){ STATE.adminSec=btn.dataset.sec; a.view='list'; STATE.activeTab='admin'; render(); window.scrollTo({top:0}); return true; }
   if(action==='admin-comp-edit'){ const c=compById(btn.dataset.id); if(c) openCompForm(c); return true; }
@@ -2625,7 +2760,7 @@ const HEALTH_FILES = [
   ['/api/competitions/syscheck/declare','functions/api/competitions/[id]/declare.js','POST'], ['/api/competition-entries/syscheck','functions/api/competition-entries/[id].js','PUT'],
   ['/api/competition-entries/syscheck/clap','functions/api/competition-entries/[id]/clap.js','POST'], ['/api/comp-img/syscheck.png','functions/api/comp-img/[name].js'],
   ['/api/challenge','functions/api/challenge/index.js'], ['/api/challenge/all','functions/api/challenge/all.js'], ['/api/challenge/config','functions/api/challenge/config.js'],
-  ['/api/reminders','functions/api/reminders/index.js'], ['/api/cron/tick?check=1','functions/api/cron/tick.js']
+  ['/api/reminders','functions/api/reminders/index.js'], ['/api/messages','functions/api/messages.js'], ['/api/admin/messages','functions/api/admin/messages.js'], ['/api/cron/tick?check=1','functions/api/cron/tick.js']
 ];
 const HEALTH_STATIC = [['/theme.css','theme.css','text/css'],['/vendor/jspdf.umd.min.js','vendor/jspdf.umd.min.js','javascript'],['/vendor/jspdf.plugin.autotable.min.js','vendor/jspdf.plugin.autotable.min.js','javascript'],['/icon.svg','icon.svg','svg'],['/badge-96.png','badge-96.png','image/png'],['/manifest.webmanifest','manifest.webmanifest','']];
 async function runSystemCheck(){
@@ -3701,7 +3836,7 @@ function renderChalAdmin(){
     ${T.length?`<p class="card-sub">${act.length} traders challenge mein · ${T.filter(t=>t.completed).length} ne poora kiya · ${T.reduce((a,t)=>a+t.restarts,0)} restarts · review par feedback dene se trader ko notification jaata hai</p>
     <div class="comp-board-wrap"><table class="comp-board chal-admin-table"><thead><tr><th>Trader</th><th>Strategy</th><th>Progress</th><th>Stage / reviews</th><th class="num">Bahar ke</th><th class="num">Limit se upar</th><th class="num">Restarts</th><th>Last trade</th></tr></thead><tbody>${T.map(t=>{ const c=t.current; if(!c) return `<tr><td><b>${esc(t.name)}</b><small>${esc(t.email)}</small></td><td colspan="7"><small>${t.stopped?'Challenge band kar diya':'Koi challenge nahi'}</small></td></tr>`;
       const rv=Object.keys(c.reviews||{}).length, missed=Array.isArray(c.extras?.missed)?c.extras.missed:[];
-      return `<tr><td><b>${esc(t.name)}</b><small>${esc(t.email)}</small><button type="button" class="btn-secondary btn-small chal-adm-open" data-action="chal-open-trades" data-user="${esc(t.userId)}" data-id="${esc(c.id)}">📋 Saare trades</button></td><td>${esc(c.strategy)}${Number(c.risk)>0?`<small>Risk ${chMoney(c.risk)} · max ${c.maxPerDay||'∞'}/din</small>`:''}${c.focus?`<small>🎯 ${esc(c.focus.rule)}</small>`:''}${missed.length?`<small>😶 ${missed.filter(m=>m.kind==='skipped').length} chhoote · ⚡ ${missed.filter(m=>m.kind==='impulse').length} impulse</small>`:''}</td><td><div class="score-cell"><span class="scorebar ${c.counted>=75?'great':c.counted>=25?'':'ok'}" style="--v:${c.counted}%"><i></i></span><b>${c.counted}</b></div></td><td>${c.status==='completed'?'<span class="chal-tag completed">✅ Poora</span>':c.reviewDue?`<span class="chal-tag due">${c.reviewDue} ka review baaki</span>`:`Stage ${Math.min(4,Math.floor(Math.min(c.counted,99)/25)+1)} · ${rv}/4 reviews`}${reviews(c)}</td><td class="num ${c.outside>c.counted/2?'negative':''}">${c.outside}</td><td class="num">${c.overCap||0}</td><td class="num">${t.restarts}</td><td><small>${c.lastTradeAt?esc(timeAgo(c.lastTradeAt)):'—'}</small></td></tr>`; }).join('')}</tbody></table></div>`
+      return `<tr><td><b>${esc(t.name)}</b><small>${esc(t.email)}</small><button type="button" class="btn-secondary btn-small chal-adm-open" data-action="chal-open-trades" data-user="${esc(t.userId)}" data-id="${esc(c.id)}">📋 Saare trades</button><button type="button" class="btn-secondary btn-small chal-adm-open" data-action="dm-to" data-id="${esc(t.userId)}">💬 Message</button></td><td>${esc(c.strategy)}${Number(c.risk)>0?`<small>Risk ${chMoney(c.risk)} · max ${c.maxPerDay||'∞'}/din</small>`:''}${c.focus?`<small>🎯 ${esc(c.focus.rule)}</small>`:''}${missed.length?`<small>😶 ${missed.filter(m=>m.kind==='skipped').length} chhoote · ⚡ ${missed.filter(m=>m.kind==='impulse').length} impulse</small>`:''}</td><td><div class="score-cell"><span class="scorebar ${c.counted>=75?'great':c.counted>=25?'':'ok'}" style="--v:${c.counted}%"><i></i></span><b>${c.counted}</b></div></td><td>${c.status==='completed'?'<span class="chal-tag completed">✅ Poora</span>':c.reviewDue?`<span class="chal-tag due">${c.reviewDue} ka review baaki</span>`:`Stage ${Math.min(4,Math.floor(Math.min(c.counted,99)/25)+1)} · ${rv}/4 reviews`}${reviews(c)}</td><td class="num ${c.outside>c.counted/2?'negative':''}">${c.outside}</td><td class="num">${c.overCap||0}</td><td class="num">${t.restarts}</td><td><small>${c.lastTradeAt?esc(timeAgo(c.lastTradeAt)):'—'}</small></td></tr>`; }).join('')}</tbody></table></div>`
     :'<p class="card-sub">Abhi kisi trader ne challenge shuru nahi kiya.</p>'}
   </section>`;
 }
@@ -3997,6 +4132,8 @@ document.addEventListener('click', async (e) => {
   if (action==='set-tab') { if (STATE.activeTab==='blog' && btn.dataset.tab!=='blog' && STATE.blog?.view==='edit' && !leaveBlogEditor()) return; if (btn.dataset.tab==='blog' && STATE.activeTab==='blog' && STATE.blog) { STATE.blog.view='list'; STATE.blog.current=null; } STATE.activeTab = btn.dataset.tab; render(); }
   else if (handleBlogClick(action, btn, e)) { /* blog */ }
   else if (handleAdminClick(action, btn)) { /* admin */ }
+  else if (handleDmClick(action, btn)) { /* 💬 trader-wise message */ }
+  else if (handleMsgClick(action, btn)) { /* 💬 my messages */ }
   else if (handleQuoteClick(action, btn)) { /* quotes */ }
   else if (handleAnnClick(action, btn)) { /* announcements */ }
   else if (handleCompClick(action, btn, e)) { /* competition */ }

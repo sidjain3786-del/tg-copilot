@@ -365,3 +365,18 @@ Morning / evening / night notifications go to traders' phones automatically.
   - It has an "Abhi nahi" button that hides the banner.
 - **Fix 2:** adding a new challenge strategy in Admin → 💯 has a ticked-by-default option: **"📢 Sab traders ko announcement + notification bhejo"**.
 - Changed: `app.js`, `theme.css`, `sw.js`.
+
+## Update 38 — 💬 Trader-wise notification (App version 38)
+- **Admin → 🔔 Notifications → "💬 Trader ko message bhejo"**
+  - Pick one or more traders. You can search, use filters (7+ din se gayab · 3+ din se journal nahi · Rules < 60% · Naye · 0 trades) or "Dikh rahe sab chuno".
+  - Write a title and message. Ready templates are there, and `{name}` puts in each trader's own name. You can add a button (Journal / Challenge / History …) and see a preview before sending.
+  - 🔔 / 🔕 shows who has phone notifications on.
+- The message goes **only to the chosen traders**: it is pushed to their phone, and it appears as a "💬 Sir ka message" card on their dashboard. A trader without notifications still sees it when they open the app. "✓ Padh liya" moves it to old messages.
+- "📜 Bheje gaye messages" shows what was sent, to whom, and whether it was read (✓ Bheja / ✓✓ Padh liya).
+- Shortcuts:
+  - a "💬 Message bhejo" button on a trader's page
+  - in the Traders list, tick several traders and use "💬 Message bhejo"
+  - a "💬 Message" button in each row of the 100 Trades Challenge table
+- Also fixed: the reminder setup steps overflowed on phone.
+- **New files:** `functions/api/admin/messages.js`, `functions/api/messages.js`
+- **Changed:** `app.js`, `theme.css`, `sw.js`, `schema.sql`, `functions/_lib/auth.js` (new table `trader_messages`, made automatically), `functions/_lib/admin-delete.js`, `functions/api/admin/users/index.js`, `functions/api/admin/health.js`

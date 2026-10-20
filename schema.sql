@@ -92,3 +92,6 @@ CREATE INDEX IF NOT EXISTS idx_challenges_user ON trade_challenges (user_id, sta
 
 -- ⏰ Auto reminders: a trader can turn daily reminders off.
 CREATE TABLE IF NOT EXISTS user_prefs (user_id TEXT PRIMARY KEY, reminders_off INTEGER NOT NULL DEFAULT 0, pending TEXT);
+-- 💬 Sir's personal messages to one trader (also pushed as a notification)
+CREATE TABLE IF NOT EXISTS trader_messages (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', cta TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, sent_by TEXT, read_at TEXT, devices INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX IF NOT EXISTS idx_trader_messages_user ON trader_messages (user_id, created_at);

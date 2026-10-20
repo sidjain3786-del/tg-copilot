@@ -10,7 +10,8 @@ export async function onRequestGet({ request, env }) {
     await ensureSchema(env);
     const { results } = await env.DB.prepare(`
       SELECT u.id, u.email, u.name, u.created_at, d.trades, d.notes, d.updated_at,
-             a.last_seen_at, a.last_save_at, a.saves, a.visits
+             a.last_seen_at, a.last_save_at, a.saves, a.visits,
+             (SELECT COUNT(*) FROM push_subscriptions p WHERE p.user_id = u.id) AS push_devices
       FROM users u LEFT JOIN user_data d ON d.user_id = u.id LEFT JOIN user_activity a ON a.user_id = u.id
       ORDER BY COALESCE(a.last_seen_at, d.updated_at, u.created_at) DESC`).all();
     const now = Date.now();
@@ -19,7 +20,7 @@ export async function onRequestGet({ request, env }) {
       return {
         id: r.id, email: r.email, name: r.name, createdAt: r.created_at,
         lastSeenAt: r.last_seen_at || null, lastSaveAt: r.last_save_at || r.updated_at || null,
-        visits: r.visits || 0, saves: r.saves || 0, isAdmin: isAdminUser(r, env),
+        visits: r.visits || 0, saves: r.saves || 0, pushDevices: r.push_devices || 0, isAdmin: isAdminUser(r, env),
         ...journalStats(Array.isArray(trades) ? trades : [], notes, now)
       };
     });
