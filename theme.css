@@ -1185,3 +1185,16 @@ button.journal-chip.chip-comp { border: 1px solid #F6D58A; background: var(--mar
 .rem-secret { word-break: break-all; }
 .rem-code { margin: .5rem 0 0; padding: .7rem .8rem; background: #0E1A30; color: #E6EDF7; border-radius: 8px; font-size: .74rem; line-height: 1.5; overflow-x: auto; white-space: pre; }
 @media (max-width: 700px) { .rem-slot-row { grid-template-columns: 1fr; } .rem-sent { margin-left: 0; } .rem-strip { flex-wrap: wrap; } .adm-rem .adm-quote-head { flex-direction: column; } }
+
+/* ----- in-app confirm dialog + Undo toast ----- */
+.tc-confirm-overlay { position: fixed; inset: 0; z-index: 10050; display: grid; place-items: center; padding: 1rem; background: rgba(10,19,35,.5); animation: tc-fade .15s ease-out; }
+.tc-confirm { width: min(420px, 100%); background: #fff; border-radius: var(--r-lg); padding: 1.3rem 1.3rem 1.1rem; box-shadow: 0 24px 60px -20px rgba(10,19,35,.5); animation: tc-enter .2s var(--ease-out); }
+.tc-confirm h2 { margin: 0; font-family: var(--font-display); font-size: 1.2rem; color: var(--ink); }
+.tc-confirm p { margin: .5rem 0 0; font-size: .9rem; color: #344054; line-height: 1.5; }
+.tc-confirm-actions { display: flex; justify-content: flex-end; gap: .5rem; margin-top: 1.1rem; }
+.tc-confirm-actions button { min-height: 44px; padding-inline: 1.1rem; }
+.tc-undo { position: fixed; z-index: 10040; left: 50%; transform: translateX(-50%); bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px)); display: flex; align-items: center; gap: 1rem; padding: .7rem .8rem .7rem 1.1rem; border-radius: 12px; background: var(--ink); color: #fff; font-size: .9rem; box-shadow: var(--shadow-2); animation: tc-enter .25s var(--ease-out); max-width: calc(100vw - 2rem); }
+.tc-undo button { border: 0; background: var(--marigold); color: var(--ink); font: inherit; font-weight: 700; padding: .45rem .8rem; border-radius: 8px; cursor: pointer; min-height: 36px; }
+@media (min-width: 701px) { .tc-undo { bottom: 1.5rem; } }
+.tc-undo { width: min(380px, calc(100vw - 2rem)); box-sizing: border-box; justify-content: space-between; }
+.tc-undo button { white-space: nowrap; }

@@ -300,3 +300,10 @@ Morning / evening / night notifications go to traders' phones automatically.
 **How it runs:** Cloudflare Pages has no timer, so a tiny free Cloudflare Worker (`cron-worker/worker.js`, also shown in the Admin card with a Copy button) calls `/api/cron/tick` every 5 minutes with a secret key. The tick sends whatever is due once per day per reminder (up to 90 min late if the timer was missed, never later), 40 devices per call. One-time setup (steps also in the Admin card): add `CRON_SECRET` to the Pages project and redeploy; create the Worker, give it `SITE_URL` and the same `CRON_SECRET`; add the Cron Trigger `*/5 * * * *`. The Admin card and System check show "Automation chal raha hai" once it works.
 
 **Technical:** new table `user_prefs` (created automatically). New files `functions/_lib/reminders.js`, `functions/api/reminders/index.js`, `functions/api/cron/tick.js`. Changed: `app.js`, `theme.css`, `sw.js`, `schema.sql`, `functions/api/notify/latest.js`, `functions/_lib/auth.js`, `functions/_lib/admin-delete.js`, `functions/api/admin/health.js`. Tests: 11 timing checks, 18 API checks with a fake push service (48 devices, batches, opt-out, "not journaled" filter), 17 browser checks, the Worker code run against the server, and all earlier suites re-run.
+
+## Update 32 — Delete ke liye confirmation + Undo (App version 32)
+- **Trade, note, note ki image / text block, strategy** — delete se pehle ab app ka apna "Pakka delete karein?" box aata hai (Cancel / Esc / bahar tap = kuch delete nahi hota). Pehle note bina pooche delete ho jata tha, aur trade ke liye browser ka box tha jo kuch phone apps / in-app browsers mein dikhta hi nahi.
+- Delete ke baad 10 second tak **↩ Undo** — trade ya note wapas aa jata hai (competition / 100 Trades Challenge mein bhi).
+- Trade delete box batata hai agar trade competition ya 100 Trades Challenge mein gina ja raha hai.
+- Admin ke deletes (blog post, quote, announcement, competition, reminder) bhi isi box se.
+- Changed: `app.js`, `theme.css`, `sw.js`. Tests: 24 new checks (desktop + phone) + all earlier suites.

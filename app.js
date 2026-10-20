@@ -1,4 +1,4 @@
-const APP_VERSION = '31';   // shown in Admin → System check; bump on every release
+const APP_VERSION = '32';   // shown in Admin → System check; bump on every release
 /* ============================================================
    Trader Co-Pilot — vanilla JS (no framework)
    Talks to /api/* (Cloudflare Pages Functions + D1) for
@@ -2059,7 +2059,7 @@ async function saveBlogPost(status){
 }
 async function deleteBlogPost(){
   const b=blogState(), d=b.editing; if(!d?.id) return;
-  if(!confirm(`"${d.title||'Yeh post'}" hamesha ke liye delete karein?`)) return;
+  if(!await askConfirm({ title:'Blog post delete karein?', body:`<b>${esc(d.title||'Yeh post')}</b> hamesha ke liye hat jayegi.` })) return;
   try { await api(`/api/blog/${encodeURIComponent(d.id)}`,'DELETE'); b.posts=b.posts.filter(p=>p.id!==d.id); b.editing=null; b.current=null; b.dirty=false; b.view='list'; renderTabOnly(); }
   catch(e){ alert(e.message||'Delete nahi hua.'); }
 }
@@ -2457,10 +2457,10 @@ async function postQuote(){
 document.addEventListener('input', e=>{ const q=STATE.quotes; if(!q) return; if(e.target.id==='aq-text') q.draft=e.target.value; if(e.target.id==='aq-author') q.draftAuthor=e.target.value; });
 function handleQuoteClick(action, btn){
   if(action==='push-on'){ enablePush(); return true; }
-  if(action==='push-off'){ if(confirm('Quote of the Day notification is device par band karein?')) disablePush(); return true; }
+  if(action==='push-off'){ askConfirm({ title:'Notifications band karein?', body:'Is device par quote, announcements aur daily reminders nahi aayenge.', ok:'Band karo' }).then(y=>{ if(y) disablePush(); }); return true; }
   if(action==='quote-copy'){ const t=quoteState().today; if(t){ const txt=`“${t.text}”${t.author?' — '+t.author:''}`; (navigator.clipboard?.writeText(txt)||Promise.reject()).then(()=>{ btn.textContent='✓ Copied'; setTimeout(()=>{ if(btn.isConnected) btn.textContent='📋 Copy'; },1500); }).catch(()=>prompt('Copy karo:', txt)); markQuoteSeen(); } return true; }
   if(action==='admin-post-quote'){ postQuote(); return true; }
-  if(action==='admin-delete-quote'){ if(!confirm('Yeh quote delete karein?')) return true; const id=btn.dataset.id; api(`/api/quotes/${encodeURIComponent(id)}`,'DELETE').then(()=>{ const q=quoteState(); q.recent=q.recent.filter(x=>x.id!==id); q.today=q.recent[0]||null; rerenderQuoteCard(); }).catch(e=>alert(e.message)); return true; }
+  if(action==='admin-delete-quote'){ const id=btn.dataset.id; askConfirm({ title:'Yeh quote delete karein?' }).then(y=>{ if(y) api(`/api/quotes/${encodeURIComponent(id)}`,'DELETE').then(()=>{ const q=quoteState(); q.recent=q.recent.filter(x=>x.id!==id); q.today=q.recent[0]||null; rerenderQuoteCard(); }).catch(e=>alert(e.message)); }); return true; }
   return false;
 }
 
@@ -2599,7 +2599,7 @@ function handleAnnClick(action, btn){
   if(action==='ann-dismiss'){ dismissAnn(btn.dataset.id); rerenderAnnouncements(); return true; }
   if(action==='ann-template'){ const t=ANN_TEMPLATES[Number(btn.dataset.i)]?.[1]; if(t){ a.draft={...a.draft,...t}; rerenderAnnouncements(); $('#an-title')?.focus(); } return true; }
   if(action==='admin-post-ann'){ postAnnouncement(); return true; }
-  if(action==='admin-delete-ann'){ if(!confirm('Yeh announcement hata dein? Traders ko dikhna band ho jayega.')) return true; const id=btn.dataset.id; api(`/api/announcements/${encodeURIComponent(id)}`,'DELETE').then(()=>{ a.list=a.list.filter(x=>x.id!==id); a.all=a.all.filter(x=>x.id!==id); rerenderAnnouncements(); }).catch(e=>alert(e.message)); return true; }
+  if(action==='admin-delete-ann'){ const id=btn.dataset.id; askConfirm({ title:'Announcement hata dein?', body:'Traders ko dikhna band ho jayega.', ok:'Hatao' }).then(y=>{ if(y) api(`/api/announcements/${encodeURIComponent(id)}`,'DELETE').then(()=>{ a.list=a.list.filter(x=>x.id!==id); a.all=a.all.filter(x=>x.id!==id); rerenderAnnouncements(); }).catch(e=>alert(e.message)); }); return true; }
   return false;
 }
 document.addEventListener('input', e=>{ if(['an-title','an-body'].includes(e.target.id)) readAnnDraft(); });
@@ -2933,7 +2933,7 @@ async function saveCompAttach(){
 async function compUntag(tradeId){
   const t=STATE.trades.find(x=>String(x.id)===String(tradeId));
   if(!t){ alert('Yeh trade aapke journal mein nahi mila.'); return; }
-  if(!confirm(`${t.symbol||'Yeh trade'} ko competition se hata dein?\n\nTrade aapke journal mein rahega, bas competition mein nahi dikhega.`)) return;
+  if(!await askConfirm({ title:'Competition se hata dein?', body:`<b>${esc(t.symbol||'Yeh trade')}</b> aapke journal mein rahega, bas competition mein nahi dikhega.`, ok:'Hatao' })) return;
   const before={ competitionId:t.competitionId, compRules:t.compRules };
   t.competitionId=null; t.compRules=[];
   if(!(await saveUserData('Trade',['trades']))){ Object.assign(t,before); return; }
@@ -3034,7 +3034,7 @@ async function runCompDeclare(){
 }
 async function undoCompDeclare(period, week){
   const c=compState().detail?.competition; if(!c) return;
-  if(!confirm(period==='week'?'Is hafte ka winner wapas lein? Us hafte ki entries phir se khul jayengi.':'Final results wapas lekar competition ko phir se khol dein?')) return;
+  if(!await askConfirm({ title: period==='week'?'Is hafte ka winner wapas lein?':'Final results wapas lein?', body: period==='week'?'Us hafte ki entries phir se khul jayengi.':'Competition phir se khul jayega.', ok:'Haan, wapas lo', danger:false })) return;
   try { await api(`/api/competitions/${encodeURIComponent(c.id)}/declare`,'POST',{period, week, undo:true}); await loadCompetitions(true); } catch(e){ alert(e.message||'Nahi hua.'); }
 }
 function handleCompClick(action, btn, e){
@@ -3065,7 +3065,7 @@ function handleCompClick(action, btn, e){
   if(action==='comp-declare-backdrop') return true;
   if(action==='comp-declare-go'){ runCompDeclare(); return true; }
   if(action==='comp-undeclare'){ undoCompDeclare(btn.dataset.period, btn.dataset.week); return true; }
-  if(action==='comp-delete'){ const c=s.detail?.competition; if(c && confirm(`"${c.title}" aur uske saare trades competition se delete karein?\n\n(Traders ke apne journal ke trades safe rahenge.)`)) api(`/api/competitions/${encodeURIComponent(c.id)}`,'DELETE').then(()=>{ s.currentId=null; loadCompetitions(true); }).catch(err=>alert(err.message)); return true; }
+  if(action==='comp-delete'){ const c=s.detail?.competition; if(c) askConfirm({ title:'Competition delete karein?', body:`<b>${esc(c.title)}</b> aur uske saare competition trades hat jayenge. Traders ke apne journal ke trades safe rahenge.` }).then(y=>{ if(y) api(`/api/competitions/${encodeURIComponent(c.id)}`,'DELETE').then(()=>{ s.currentId=null; loadCompetitions(true); }).catch(err=>alert(err.message)); }); return true; }
   return false;
 }
 document.addEventListener('change', e=>{
@@ -3359,8 +3359,8 @@ function handleChalClick(action, btn, e){
   if(!action || !action.startsWith('chal-')) return false;
   const s=chState();
   if(action==='chal-start'){ const strategy=$('#chal-start-strategy')?.value; if(!strategy) return true;
-    if(!confirm(`“${strategy}” par 100 Trades Challenge shuru karein?\n\n100 trades tak yahi strategy rahegi. Badalne par counter 0 se shuru hoga.`)) return true;
-    api('/api/challenge','POST',{action:'start',strategy}).then(r=>{ s.active=r.active; STATE.logStratTouched=false; renderTabOnly(); }).catch(err=>alert(err.message)); return true; }
+    askConfirm({ title:`“${strategy}” par challenge shuru karein?`, body:'100 trades tak yahi strategy rahegi. Badalne par counter 0 se shuru hoga.', ok:'💯 Shuru karo', danger:false }).then(y=>{ if(!y) return;
+    api('/api/challenge','POST',{action:'start',strategy}).then(r=>{ s.active=r.active; STATE.logStratTouched=false; renderTabOnly(); }).catch(err=>alert(err.message)); }); return true; }
   if(action==='chal-log'){ STATE.logStratTouched=false; STATE.logFormIsSetup=true; chPreselect(); STATE.activeTab='log'; render(); window.scrollTo({top:0}); return true; }
   if(action==='chal-pick-strategy'){ const sel=$('#log-strategy-select'); if(sel) sel.value=btn.dataset.value; setLogStrategy(btn.dataset.value); STATE.logStratTouched=false; updateLogChallengeNote(); return true; }
   if(action==='chal-open-review'){ $('#comp-toast')?.remove(); s.modal={ type:'review', stage:Number(btn.dataset.stage) }; if(STATE.activeTab!=='challenge'){ STATE.activeTab='challenge'; render(); } else renderTabOnly(); return true; }
@@ -3467,7 +3467,7 @@ function handleRemClick(action, btn){
   if(action==='rem-mine'){ const off=btn.dataset.off==='1'; api('/api/reminders','POST',{action:'mine',off}).then(()=>{ s.mine.myOff=off; const st=$('#rem-strip'); if(st) st.outerHTML=renderRemStrip(); }).catch(e=>alert(e.message)); return true; }
   if(action==='rem-day'){ const k=Number(btn.dataset.day), x=d.slots[i]; x.days=x.days.includes(k)?x.days.filter(v=>v!==k):[...x.days,k].sort(); s.msg=''; remRerender(); return true; }
   if(action==='rem-add'){ d.slots.push({ id:'slot-'+Date.now().toString(36).slice(-6), on:true, time:'12:00', days:[1,2,3,4,5], target:'all', tab:'copilot', title:'📌 Reminder', messages:'' }); remRerender(); return true; }
-  if(action==='rem-del'){ if(confirm('Yeh reminder hata dein?')){ d.slots.splice(i,1); s.msg='Save dabana mat bhoolna'; remRerender(); } return true; }
+  if(action==='rem-del'){ askConfirm({ title:'Yeh reminder hata dein?', body:'Save dabane ke baad hi hatega.', ok:'Hatao' }).then(y=>{ if(y){ d.slots.splice(i,1); s.msg='Save dabana mat bhoolna'; remRerender(); } }); return true; }
   if(action==='rem-save'){ remSave(); return true; }
   if(action==='rem-test'){ const x=d.slots[i]; if(!x.messages.trim()){ alert('Pehle message likho.'); return true; } btn.disabled=true; btn.textContent='Bhej rahe hain…';
     api('/api/reminders','POST',{action:'test',slot:x.id,slots:d.slots}).then(r=>{ btn.textContent=`✓ ${r.sent} device par bheja`; }).catch(e=>{ alert(e.message); btn.textContent='📲 Mere phone par test'; }).finally(()=>{ btn.disabled=false; }); return true; }
@@ -3526,7 +3526,7 @@ async function saveStrategyFromManager(){
   const parts=['customStrategies'];
   if(old && !sameName(old.name,name)){
     const u=strategyUsage(old.name);
-    if((u.trades||u.exactNotes) && !confirm(`"${old.name}" ka naam "${name}" karne par ${u.trades} trades aur ${u.exactNotes} notes bhi naye naam par update honge. Continue?`)) return;
+    if((u.trades||u.exactNotes) && !await askConfirm({ title:'Strategy ka naam badlein?', body:`"${esc(old.name)}" → "${esc(name)}": ${u.trades} trades aur ${u.exactNotes} notes bhi naye naam par update honge.`, ok:'Haan, badlo', danger:false })) return;
     STATE.trades.forEach(t=>{ if(sameName(t.strategy,old.name)) t.strategy=name; });
     STATE.notes.forEach(n=>{ if(sameName(n.strategy,old.name)) n.strategy=name; });
     if(u.trades) parts.push('trades'); if(u.exactNotes) parts.push('notes');
@@ -3545,10 +3545,10 @@ async function saveStrategyFromManager(){
   renderStrategyManager(); renderTabOnly();
   saveUserData('Strategy', parts);
 }
-function deleteStrategyFromManager(id){
+async function deleteStrategyFromManager(id){
   const idx=STATE.customStrategies.findIndex(x=>normalizeCustomStrategy(x).id===id); if(idx<0) return;
   const st=normalizeCustomStrategy(STATE.customStrategies[idx]); const u=strategyUsage(st.name);
-  if(!confirm(`"${st.name}" delete karein?${u.trades?`\n\nIske ${u.trades} trades delete NAHI honge — woh History aur Playbook mein isi naam se dikhte rahenge.`:''}`)) return;
+  if(!await askConfirm({ title:`"${st.name}" strategy delete karein?`, body: u.trades ? `Iske <b>${u.trades} trades delete NAHI honge</b> — woh History aur Playbook mein isi naam se dikhte rahenge.` : '' })) return;
   STATE.customStrategies.splice(idx,1);
   if(STATE.selectedPlaybookId===st.id) STATE.selectedPlaybookId=allStrategies()[0]?.id||'';
   STATE.strategyManager={open:true, editingId:null};
@@ -3752,6 +3752,10 @@ document.addEventListener('click', async (e) => {
     const i = Number(btn.dataset.index);
     if (!note) return;
     note.blocks = normalizeNoteBlocks(note);
+    const blk = note.blocks[i]; if (!blk) return;
+    const hasContent = blk.type === 'image' || String(blk.text || blk.html || '').replace(/<[^>]*>/g,'').trim().length > 0;
+    if (hasContent && !await askConfirm({ title: blk.type === 'image' ? 'Yeh image note se hata dein?' : 'Yeh text block hata dein?', body: blk.type === 'image' ? 'Image aur uspar ki drawing note se hat jayegi.' : esc(String(blk.text || blk.html || '').replace(/<[^>]*>/g,' ').trim().slice(0, 120)) + '…', ok:'Hatao' })) return;
+    if (note.blocks[i] !== blk) return;
     note.blocks.splice(i,1);
     note.image = note.blocks.find(b=>b.type==='image')?.src || null;
     STATE.noteInsertIndex = Math.max(0, Math.min(i-1, note.blocks.length-1));
@@ -3829,10 +3833,21 @@ document.addEventListener('click', async (e) => {
     renderTabOnly();
   }
   else if (action==='delete-note') {
-    STATE.notes = STATE.notes.filter(n => n.id !== btn.dataset.id);
-    if (STATE.activeNoteId === btn.dataset.id) STATE.activeNoteId = STATE.notes[0]?.id || null;
+    const note = STATE.notes.find(n => n.id === btn.dataset.id); if (!note) return;
+    const imgs = normalizeNoteBlocks(note).filter(b => b.type==='image').length;
+    if (!await askConfirm({ title:'Yeh note delete karein?', body:`<b>${esc(note.title || note.symbol || 'Untitled Note')}</b><br>Note ka saara text${imgs?` aur ${imgs} image${imgs>1?'s':''}`:''} hat jayenge.` })) return;
+    const at = STATE.notes.indexOf(note); if (at < 0) return;
+    STATE.notes.splice(at, 1);
+    if (STATE.activeNoteId === note.id) STATE.activeNoteId = STATE.notes[0]?.id || null;
     renderTabOnly();
-    saveUserData('Note', ['notes']);
+    const saved = await saveUserData('Note', ['notes']);
+    if (!saved) { STATE.notes.splice(at, 0, note); STATE.activeNoteId = note.id; renderTabOnly(); return; }
+    undoToast('Note delete ho gaya', async () => {
+      if (STATE.notes.some(n => n.id === note.id)) return;
+      STATE.notes.splice(Math.min(at, STATE.notes.length), 0, note); STATE.activeNoteId = note.id;
+      if (STATE.activeTab === 'notes') renderTabOnly();
+      saveUserData('Note', ['notes']);
+    });
   }
 });
 
@@ -4247,20 +4262,51 @@ document.addEventListener('fullscreenchange', () => { if(!document.fullscreenEle
 window.addEventListener('resize', () => { if($('#image-modal')?.style.display==='flex') setupAnnotatorCanvas(); });
 function closeAnnotator(){ const modal=$('#image-modal'); if(document.fullscreenElement) document.exitFullscreen?.().catch(()=>{}); $('#image-modal .annotator-card')?.classList.remove('is-fullscreen'); updateFullscreenButton(); if(modal) modal.style.display='none'; const canvas=$('#annotator-canvas'); canvas?.getContext('2d')?.clearRect(0,0,canvas.width,canvas.height); }
 
+/* ---------- in-app "are you sure?" + Undo ----------
+   The browser's own confirm() box is skipped or blocked in some phone apps / in-app browsers,
+   so deletes ask with our own dialog, and every delete can be undone for a few seconds. */
+function askConfirm({ title, body='', ok='🗑️ Delete karo', danger=true }){
+  return new Promise(resolve=>{
+    $('#tc-confirm')?.remove();
+    const prevFocus=document.activeElement;
+    const el=document.createElement('div'); el.id='tc-confirm'; el.className='tc-confirm-overlay';
+    el.innerHTML=`<div class="tc-confirm" role="alertdialog" aria-modal="true" aria-labelledby="tc-confirm-title" ${body?'aria-describedby="tc-confirm-body"':''}><h2 id="tc-confirm-title">${esc(title)}</h2>${body?`<p id="tc-confirm-body">${body}</p>`:''}<div class="tc-confirm-actions"><button type="button" class="btn-secondary" data-c="no">Cancel</button><button type="button" class="${danger?'btn-danger':'btn-primary'}" data-c="yes">${esc(ok)}</button></div></div>`;
+    const done=v=>{ el.remove(); document.removeEventListener('keydown',key,true); try{ prevFocus?.focus?.(); }catch(_){} resolve(v); };
+    const key=e=>{ if(e.key==='Escape'){ e.preventDefault(); e.stopPropagation(); done(false); } };
+    el.addEventListener('click',e=>{ e.stopPropagation(); const c=e.target.closest('[data-c]'); if(c) done(c.dataset.c==='yes'); else if(e.target===el) done(false); });
+    document.addEventListener('keydown',key,true);
+    document.body.appendChild(el); el.querySelector('[data-c="no"]').focus();
+  });
+}
+function undoToast(text, onUndo, ms=10000){
+  $('#tc-undo')?.remove();
+  const el=document.createElement('div'); el.id='tc-undo'; el.className='tc-undo'; el.setAttribute('role','status');
+  el.innerHTML=`<span>${esc(text)}</span><button type="button">↩ Undo</button>`;
+  el.querySelector('button').addEventListener('click',e=>{ e.stopPropagation(); el.remove(); onUndo(); });
+  document.body.appendChild(el); setTimeout(()=>el.remove(), ms);
+}
 async function deleteTrade(id){
   const index = STATE.trades.findIndex(t => t.id === id);
   if (index < 0) return;
   const trade = STATE.trades[index];
-  const label = `${trade.symbol || 'this trade'}${trade.pnl !== undefined ? ` (${money(Number(trade.pnl)||0)})` : ''}`;
-  if (!confirm(`Delete ${label}?\n\nThis trade will be removed from your journal.`)) return;
-  STATE.trades.splice(index, 1);
+  const label = `${trade.symbol || 'Trade'}${!isOpenTrade(trade) && trade.pnl !== undefined ? ` · ${money(Number(trade.pnl)||0)}` : ''}`;
+  const inComp = trade.competitionId && compById(trade.competitionId), ch = chState().active, inChal = ch && chNorm(trade.strategy)===chNorm(ch.strategy) && Date.parse(trade.date||'')>=Date.parse(ch.startedAt);
+  const ok = await askConfirm({ title:'Yeh trade delete karein?', body:`<b>${esc(label)}</b> · ${esc(formatTradeTime(trade))}<br>Trade journal se hat jayega${inComp?', competition se bhi':''}${inChal?' aur 100 Trades Challenge ki ginti se bhi':''}.` });
+  if (!ok) return;
+  const at = STATE.trades.findIndex(t => t.id === id); if (at < 0) return;
+  STATE.trades.splice(at, 1);
   const saved = await saveUserData('Trade', ['trades']);
   if (!saved) {
-    STATE.trades.splice(index, 0, trade);
+    STATE.trades.splice(at, 0, trade);
     return;
   }
   if (STATE.editingTradeId === id) STATE.editingTradeId = null;
   render();
+  undoToast(`${trade.symbol || 'Trade'} delete ho gaya`, async () => {
+    if (STATE.trades.some(t => t.id === trade.id)) return;
+    STATE.trades.splice(Math.min(at, STATE.trades.length), 0, trade);
+    if (await saveUserData('Trade', ['trades'])) render(); else STATE.trades = STATE.trades.filter(t => t !== trade);
+  });
 }
 
 async function updateExistingTrade(id){
