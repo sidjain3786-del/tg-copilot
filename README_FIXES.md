@@ -386,3 +386,8 @@ Morning / evening / night notifications go to traders' phones automatically.
 - The result text is clearer: a trader with notifications off now shows "🔕 … app kholte hi message dikhega".
 - After sending, the form is cleared (title, message, search). The send button says "Pehle trader chuno" until a trader is picked.
 - Changed: `app.js`, `theme.css`, `sw.js`.
+
+## Update 40 — Reminder setup status turant taaza (App version 40)
+- The automation status used to load only once, when the app opened. So after setting up the Worker it still said "Ek baar ka setup". Now the status loads fresh every time Admin → 🔔 Notifications is opened, and there is a **↻ Status refresh** button.
+- Once the setup works, the setup steps fold up and show "✅ Setup ho chuka hai".
+- Changed: `app.js`, `theme.css`, `sw.js`.

@@ -1,4 +1,4 @@
-const APP_VERSION = '39';   // shown in Admin → System check; bump on every release
+const APP_VERSION = '40';   // shown in Admin → System check; bump on every release
 /* ============================================================
    Trader Co-Pilot — vanilla JS (no framework)
    Talks to /api/* (Cloudflare Pages Functions + D1) for
@@ -2463,7 +2463,7 @@ function exportAdminCsv(){
 function handleAdminClick(action, btn){
   const a=adminState();
   if(action==='admin-dm-selected'){ dmOpenFor([...a.selected]); return true; }
-  if(action==='admin-sec'){ STATE.adminSec=btn.dataset.sec; renderTabOnly(); window.scrollTo({top:0}); return true; }
+  if(action==='admin-sec'){ STATE.adminSec=btn.dataset.sec; renderTabOnly(); window.scrollTo({top:0}); if(btn.dataset.sec==='notify') loadReminders(); return true; }
   if(action==='admin-goto'){ STATE.adminSec=btn.dataset.sec; a.view='list'; STATE.activeTab='admin'; render(); window.scrollTo({top:0}); return true; }
   if(action==='admin-comp-edit'){ const c=compById(btn.dataset.id); if(c) openCompForm(c); return true; }
   if(action==='admin-comp-open'){ const s=compState(); s.currentId=btn.dataset.id; s.period=null; STATE.activeTab='competition'; render(); loadCompetition(btn.dataset.id,true).then(()=>{ if(STATE.activeTab==='competition') renderTabOnly(); }); window.scrollTo({top:0}); return true; }
@@ -3968,7 +3968,7 @@ function renderAdminReminders(){
   return `<section class="card adm-rem" id="admin-reminders">
     <div class="adm-quote-head"><div><h3 class="section-title">⏰ Auto reminders</h3><p class="card-sub">Subah, shaam, raat — traders ke phone par apne aap notification. ${a.devices} devices par notification on${a.tradersOff?` · ${a.tradersOff} traders ne reminders band kiye`:''}.</p></div>
       <label class="adm-switch big ${d.enabled?'on':''}"><input type="checkbox" data-rf="enabled" ${d.enabled?'checked':''}><span class="adm-switch-ui" aria-hidden="true"></span><span>${d.enabled?'On':'Off'}</span></label></div>
-    <p class="rem-status ${status[0]}">${status[1]}${a.lastRun?`<br><small>Pichhla reminder: <b>${esc(a.lastRun.title)}</b> · ${esc(timeAgo(a.lastRun.at))} · ${a.lastRun.sent} device${a.lastRun.sent===1?'':'s'}</small>`:''}</p>
+    <p class="rem-status ${status[0]}">${status[1]} <button type="button" class="qotd-link" data-action="rem-refresh">↻ Status refresh</button>${a.lastRun?`<br><small>Pichhla reminder: <b>${esc(a.lastRun.title)}</b> · ${esc(timeAgo(a.lastRun.at))} · ${a.lastRun.sent} device${a.lastRun.sent===1?'':'s'}</small>`:''}</p>
     <div class="rem-slots">${d.slots.map(slot).join('')}</div>
     <div class="rem-slot rem-nudge ${d.nudge?.on===false?'is-off':''}"><div class="rem-slot-top">
       <label class="adm-switch ${d.nudge?.on!==false?'on':''}"><input type="checkbox" data-rf="nudge-on" ${d.nudge?.on!==false?'checked':''}><span class="adm-switch-ui" aria-hidden="true"></span><span class="sr-only">Challenge nudge on</span></label>
@@ -3976,7 +3976,7 @@ function renderAdminReminders(){
       <b>💯 100 Trades Challenge nudge</b><span class="rem-sent">${a.lastNudge?.date===a.today?`✓ Aaj ${a.lastNudge.users} traders check kiye`:''}</span></div>
       <p class="card-sub">Roz is time par, sirf un traders ko personal notification jinka challenge review baaki hai, ya jinka 3 din se koi challenge trade nahi aaya. Naam ke saath — jaise “Asha, 25 trades ka review baaki hai”.</p></div>
     <div class="rem-foot">${d.slots.length<6?'<button type="button" class="btn-secondary btn-small" data-action="rem-add">＋ Reminder add karo</button>':'<span></span>'}<span class="rem-msg" role="status">${esc(s.msg||'')}</span><button type="button" class="btn-primary" data-action="rem-save" ${s.busy?'disabled':''}>${s.busy?'Save ho raha hai…':'💾 Save'}</button></div>
-    <details class="rem-setup" ${a.cronSecretSet&&fresh?'':'open'}><summary>🔧 Ek baar ka setup — reminders apne aap bhejne ke liye</summary>
+    <details class="rem-setup ${a.cronSecretSet&&fresh?'done':''}" ${a.cronSecretSet&&fresh?'':'open'}><summary>${a.cronSecretSet&&fresh?'✅ Setup ho chuka hai — steps dobara dekhne ho to yahan dabao':'🔧 Ek baar ka setup — reminders apne aap bhejne ke liye'}</summary>
       <ol>
         <li><b>Password banao:</b> Cloudflare → <b>Workers &amp; Pages → tg-copilot → Settings → Variables and Secrets → Add</b> → naam <code>CRON_SECRET</code>, type <b>Secret</b>, value yeh: <code class="rem-secret">${esc(remSecret())}</code> <button type="button" class="qotd-link" data-action="rem-copy" data-text="${esc(remSecret())}">Copy</button> → Save → <b>Deployments → Retry deployment</b>.</li>
         <li><b>Worker banao:</b> Workers &amp; Pages → <b>Create → Worker</b> → naam <code>tg-reminders</code> → Deploy → <b>Edit code</b> → saara code hata kar yeh paste karo → <b>Deploy</b>. <button type="button" class="qotd-link" data-action="rem-copy" data-text="${esc(REM_WORKER)}">Code copy karo</button><pre class="rem-code">${esc(REM_WORKER)}</pre></li>
@@ -4003,6 +4003,7 @@ function handleRemClick(action, btn){
   if(action==='rem-save'){ remSave(); return true; }
   if(action==='rem-test'){ const x=d.slots[i]; if(!x.messages.trim()){ alert('Pehle message likho.'); return true; } btn.disabled=true; btn.textContent='Bhej rahe hain…';
     api('/api/reminders','POST',{action:'test',slot:x.id,slots:d.slots}).then(r=>{ btn.textContent=`✓ ${r.sent} device par bheja`; }).catch(e=>{ alert(e.message); btn.textContent='📲 Mere phone par test'; }).finally(()=>{ btn.disabled=false; }); return true; }
+  if(action==='rem-refresh'){ btn.textContent='…'; loadReminders(); return true; }
   if(action==='rem-copy'){ const txt=btn.dataset.text; (navigator.clipboard?.writeText(txt)||Promise.reject()).then(()=>{ const o=btn.textContent; btn.textContent='✓ Copied'; setTimeout(()=>{ if(btn.isConnected) btn.textContent=o; },1500); }).catch(()=>prompt('Copy karo:',txt)); return true; }
   return false;
 }

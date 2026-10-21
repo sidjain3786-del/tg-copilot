@@ -1377,3 +1377,4 @@ button.journal-chip.chip-comp { border: 1px solid #F6D58A; background: var(--mar
 .rem-setup ol { min-width: 0; grid-template-columns: minmax(0,1fr); }
 #dm-search, .dm-compose select, .chal-cfg select { width: 100%; box-sizing: border-box; border: 1px solid var(--line); border-radius: var(--r-sm); padding: .65rem .8rem; font: inherit; font-size: .88rem; color: var(--text); background: #fff; }
 #dm-search:focus, .dm-compose select:focus { outline: none; border-color: var(--ink-3); box-shadow: 0 0 0 3px rgba(45,82,135,.14); }
+.rem-setup.done summary { color: #08734F; font-weight: 600; }
