@@ -1332,7 +1332,9 @@ button.journal-chip.chip-comp { border: 1px solid #F6D58A; background: var(--mar
 .msg-old { background: #fff; border: 1px solid var(--line); border-radius: var(--r-sm); padding: .5rem .8rem; font-size: .85rem; }
 .msg-old summary { cursor: pointer; color: var(--muted); font-weight: 600; }
 .dm-card .card-sub { margin: .2rem 0 0; }
-.dm-result { position: static; margin: .8rem 0; }
+.dm-result { display: flex; align-items: flex-start; gap: .6rem; margin: .9rem 0 0; padding: .7rem .9rem; background: #E6F6EF; color: #08734F; border: 1px solid #B7E4CF; border-radius: var(--r-sm); font-size: .84rem; font-weight: 600; line-height: 1.45; white-space: normal; overflow-wrap: anywhere; }
+.dm-result span { flex: 1; min-width: 0; }
+.dm-result-x { border: 0; background: transparent; color: #08734F; font-size: 1.1rem; line-height: 1; cursor: pointer; padding: 0 .1rem; }
 .dm-grid { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.1fr); gap: 1.2rem; margin-top: 1rem; }
 .dm-pick input[type=search] { width: 100%; box-sizing: border-box; }
 .dm-filters { margin: .6rem 0; }

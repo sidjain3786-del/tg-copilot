@@ -380,3 +380,9 @@ Morning / evening / night notifications go to traders' phones automatically.
 - Also fixed: the reminder setup steps overflowed on phone.
 - **New files:** `functions/api/admin/messages.js`, `functions/api/messages.js`
 - **Changed:** `app.js`, `theme.css`, `sw.js`, `schema.sql`, `functions/_lib/auth.js` (new table `trader_messages`, made automatically), `functions/_lib/admin-delete.js`, `functions/api/admin/users/index.js`, `functions/api/admin/health.js`
+
+## Update 39 — Message result box fix (App version 39)
+- After "📨 Bhejo", the "message bheja" result was spreading outside the card and running off the screen. It now stays inside the card as a green box, wraps on phone, and has a × to close it.
+- The result text is clearer: a trader with notifications off now shows "🔕 … app kholte hi message dikhega".
+- After sending, the form is cleared (title, message, search). The send button says "Pehle trader chuno" until a trader is picked.
+- Changed: `app.js`, `theme.css`, `sw.js`.

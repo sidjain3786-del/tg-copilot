@@ -1,4 +1,4 @@
-const APP_VERSION = '38';   // shown in Admin → System check; bump on every release
+const APP_VERSION = '39';   // shown in Admin → System check; bump on every release
 /* ============================================================
    Trader Co-Pilot — vanilla JS (no framework)
    Talks to /api/* (Cloudflare Pages Functions + D1) for
@@ -2346,7 +2346,7 @@ function renderAdminDirectMsg(){
   const vis=dmTraders(), allOn=vis.length && vis.every(u=>d.sel.has(u.id));
   return `<section class="card dm-card" id="admin-dm">
     <div class="adm-quote-head"><div><h3 class="section-title">💬 Trader ko message bhejo</h3><p class="card-sub">Ek ya kuch chune hue traders ko. Message unke dashboard par “💬 Sir ka message” mein aayega, aur notification on hai to phone par bhi.</p></div></div>
-    ${d.result?`<div class="adm-toast dm-result" role="status">${d.result}</div>`:''}
+    ${d.result?`<div class="dm-result" role="status"><span>${d.result}</span><button type="button" class="dm-result-x" data-action="dm-result-close" aria-label="Band karo">×</button></div>`:''}
     <div class="dm-grid">
       <div class="dm-pick">
         <input type="search" id="dm-search" value="${esc(d.search)}" placeholder="🔍 Trader ka naam ya email…" aria-label="Trader dhoondo">
@@ -2362,7 +2362,7 @@ function renderAdminDirectMsg(){
         <label class="adm-field"><span>Button</span><select id="dm-cta">${Object.entries(DM_CTA).map(([k,l])=>`<option value="${k}" ${d.cta===k?'selected':''}>${l}</option>`).join('')}</select></label>
         ${d.title?`<div class="dm-preview" aria-label="Preview"><span>Aise dikhega${sel.length?` (${esc(first)} ko)`:''}:</span><b>💬 ${esc(fill(d.title))}</b>${d.body?`<p>${esc(fill(d.body))}</p>`:''}</div>`:''}
         ${d.error?`<p class="sm-error">${esc(d.error)}</p>`:''}
-        <button type="button" class="btn-cta dm-send" data-action="dm-send" ${d.busy||!d.sel.size?'disabled':''}>${d.busy?'Bhej rahe hain…':`📨 ${d.sel.size||''} trader${d.sel.size===1?'':'s'} ko bhejo`}</button>
+        <button type="button" class="btn-cta dm-send" data-action="dm-send" ${d.busy||!d.sel.size?'disabled':''}>${d.busy?'Bhej rahe hain…':d.sel.size?`📨 ${d.sel.size} trader${d.sel.size===1?'':'s'} ko bhejo`:'📨 Pehle trader chuno'}</button>
       </div>
     </div>
     ${renderDmHistory()}
@@ -2375,7 +2375,7 @@ function renderDmHistory(){
 }
 /* keep typed text when re-rendering */
 function dmKeep(){ const d=dmState(); const t=$('#dm-title'), b=$('#dm-body'), c=$('#dm-cta'); if(t) d.title=t.value; if(b) d.body=b.value; if(c) d.cta=c.value; }
-function dmRefresh(){ const el=$('#admin-dm'); if(el){ dmKeep(); const y=window.scrollY; el.outerHTML=renderAdminDirectMsg(); window.scrollTo({top:y}); } }
+function dmRefresh(keep=true){ const el=$('#admin-dm'); if(el){ if(keep) dmKeep(); const y=window.scrollY; el.outerHTML=renderAdminDirectMsg(); window.scrollTo({top:y}); } }
 function dmOpenFor(ids){ const d=dmState(); d.sel=new Set(ids); d.search=''; d.filter=ids.length?'selected':'all'; d.result=null; d.error=''; const a=adminState(); a.view='list'; STATE.adminSec='notify'; STATE.activeTab='admin'; render(); setTimeout(()=>$('#admin-dm')?.scrollIntoView({block:'start'}),50); }
 document.addEventListener('input', e=>{
   if(e.target.id==='dm-search'){ const d=dmState(); d.search=e.target.value; clearTimeout(d.t); d.t=setTimeout(()=>{ const L=$('#dm-list'); if(L) L.innerHTML=dmListHtml(); },150); return; }
@@ -2385,6 +2385,7 @@ function handleDmClick(action, btn){
   if(!action || !action.startsWith('dm-')) return false;
   const d=dmState();
   if(action==='dm-pick'){ btn.checked?d.sel.add(btn.dataset.id):d.sel.delete(btn.dataset.id); d.result=null; dmRefresh(); return true; }
+  if(action==='dm-result-close'){ d.result=null; dmRefresh(); return true; }
   if(action==='dm-unpick'){ d.sel.delete(btn.dataset.id); dmRefresh(); return true; }
   if(action==='dm-filter'){ d.filter=btn.dataset.filter; dmRefresh(); return true; }
   if(action==='dm-all'){ const vis=dmTraders(), allOn=vis.length&&vis.every(u=>d.sel.has(u.id)); vis.forEach(u=>allOn?d.sel.delete(u.id):d.sel.add(u.id)); dmRefresh(); return true; }
@@ -2398,8 +2399,9 @@ function handleDmClick(action, btn){
     askConfirm({ title:`${d.sel.size} trader${d.sel.size>1?'s':''} ko message bhejein?`, body:`<b>${esc(names.slice(0,8).join(', '))}${names.length>8?` +${names.length-8}`:''}</b><br>Sirf inhe dikhega — baaki traders ko nahi.`, ok:'📨 Bhejo', danger:false }).then(y=>{ if(!y) return;
       d.busy=true; dmRefresh();
       api('/api/admin/messages','POST',{ userIds:[...d.sel], title:d.title, body:d.body, cta:d.cta }).then(r=>{
-        d.busy=false; d.result=`✓ ${r.sent} trader${r.sent>1?'s':''} ko message bheja · ${r.withPush} ke phone par notification gaya${r.noPush.length?` · ${r.noPush.length} ne notification on nahi kiya (app kholte hi dikhega): ${esc(r.noPush.slice(0,5).join(', '))}${r.noPush.length>5?'…':''}`:''}`;
-        d.title=''; d.body=''; d.cta=''; d.sel.clear(); d.filter='all'; d.history=null; dmRefresh();
+        d.busy=false; const np=r.noPush.length, who=esc(r.noPush.slice(0,5).join(', '))+(np>5?'…':'');
+        d.result=`✓ ${r.sent} trader${r.sent>1?'s':''} ko message bhej diya — dashboard par “💬 Sir ka message” mein dikhega.${r.withPush?`<br>📱 ${r.withPush} ke phone par notification gaya.`:''}${np?`<br>🔕 ${np===r.sent&&np===1?'Is trader ne':`${np} traders ne`} phone notification on nahi kiya${r.withPush||np>1?` (${who})`:''} — app kholte hi message dikhega.`:''}`;
+        d.title=''; d.body=''; d.cta=''; d.search=''; d.sel.clear(); d.filter='all'; d.history=null; dmRefresh(false);
       }).catch(err=>{ d.busy=false; d.error=err.message; dmRefresh(); }); });
     return true; }
   return true;
